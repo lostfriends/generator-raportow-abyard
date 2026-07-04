@@ -1086,10 +1086,10 @@ export default function GeneratorRaportowABYARD() {
     // zabezpieczenie, gdyby afterprint nie zadziałał
     setTimeout(przywroc, 1500);
   }
+  // Otwiera podgląd raportu — tam użytkownik wybiera: zapis do PDF lub link
+  // dla inwestora (druk nie odpala się już automatycznie).
   function generujPDF() {
     setWidok("preview");
-    const nazwa = nazwaPliku(form);
-    setTimeout(() => drukujZNazwa(nazwa), 350);
   }
 
   // ---- ARCHIWUM: wejście w zakładkę + wczytanie listy ------------------------
@@ -1223,7 +1223,8 @@ export default function GeneratorRaportowABYARD() {
   //  WIDOK PODGLĄDU / PDF (nowy raport z formularza)
   // ==========================================================================
   if (widok === "preview") {
-    return <PodgladPDF form={form} onBack={() => setWidok("form")} nazwaPliku={nazwaPliku(form)} />;
+    // raportId = zapisanyId: link dla inwestora dostępny, gdy raport jest już w bazie
+    return <PodgladPDF form={form} raportId={zapisanyId} onBack={() => setWidok("form")} nazwaPliku={nazwaPliku(form)} />;
   }
 
   // ==========================================================================
@@ -1674,7 +1675,7 @@ export default function GeneratorRaportowABYARD() {
             <button style={btnGhost} onClick={zapiszArchiwum} disabled={zapisywanie}>
               {zapisywanie ? "Zapisywanie…" : zapisanyId ? "Aktualizuj raport" : "Zapisz raport w bazie"}
             </button>
-            <button style={btnPrimary} onClick={generujPDF}>Generuj raport PDF →</button>
+            <button style={btnPrimary} onClick={generujPDF}>Generuj raport →</button>
           </div>
         </div>
       </footer>
@@ -2934,11 +2935,16 @@ function PodgladPDF({ form, onBack, nazwaPliku, raportId, publiczny }) {
             W oknie zapisu zaznacz <strong>„Grafika w tle"</strong>, by zachować kolory
           </span>
           {onBack && <button style={btnGhostDark} onClick={onBack}>← Wróć do edycji</button>}
-          {raportId && !publiczny && (
+          {!publiczny && (raportId ? (
             <button style={btnGhostDark} onClick={() => setPokazLinki((v) => !v)}>
               {pokazLinki ? "Zamknij linki" : "🔗 Udostępnij link"}
             </button>
-          )}
+          ) : (
+            <button style={{ ...btnGhostDark, opacity: 0.45, cursor: "not-allowed" }} disabled
+              title="Najpierw zapisz raport w bazie — link musi wskazywać zapisany raport">
+              🔗 Udostępnij link
+            </button>
+          ))}
           <button style={btnPrimary} onClick={() => {
             const poprzedni = document.title;
             document.title = nazwaPliku;
