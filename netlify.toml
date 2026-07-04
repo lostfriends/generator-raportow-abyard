@@ -1,0 +1,13 @@
+# Konfiguracja budowania na Netlify.
+# Netlify przy każdym pushu do podłączonej gałęzi:
+#  1) instaluje zależności z package.json (npm install),
+#  2) uruchamia `npm run build` (nasz build.js: esbuild + owinięcie w HTML),
+#  3) publikuje zawartość katalogu dist/ (czyli index.html).
+
+[build]
+  command = "npm run build"
+  publish = "dist"
+
+[build.environment]
+  # Pin wersji Node, żeby build był przewidywalny (esbuild 0.28 wymaga Node 18+).
+  NODE_VERSION = "20"

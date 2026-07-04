@@ -1,0 +1,17 @@
+{
+  "name": "generator-raportow-abyard",
+  "version": "1.0.0",
+  "description": "Generator raportów z budowy ABYARD — aplikacja React budowana esbuildem do pojedynczego index.html.",
+  "private": true,
+  "scripts": {
+    "build": "node build.js"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "2.110.0",
+    "react": "19.2.7",
+    "react-dom": "19.2.7"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.1"
+  }
+}
