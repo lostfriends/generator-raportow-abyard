@@ -76,7 +76,7 @@ export async function mojProfil() {
   if (!u?.user) return null;
   const { data, error } = await supabase
     .from("uzytkownicy")
-    .select("id, email, rola")
+    .select("id, email, rola, imie_nazwisko")
     .eq("id", u.user.id)
     .maybeSingle();
   if (error) throw error;

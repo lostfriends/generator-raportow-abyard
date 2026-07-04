@@ -758,6 +758,16 @@ export default function GeneratorRaportowABYARD() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sesja]);
 
+  // Nazwa zalogowanego (imię i nazwisko, a gdy brak — e-mail). Do pola „Opracował".
+  const nazwaZalogowanego = profil ? nazwaOsoby(profil) : "";
+  // Auto-uzupełnij „Opracował" nazwą zalogowanego, dopóki pole jest puste
+  // (nowy/pusty formularz). Edycji istniejącego raportu nie ruszamy — tam pole
+  // ma już autora i warunek f.opracowal je chroni.
+  useEffect(() => {
+    if (nazwaZalogowanego) setForm((f) => (f.opracowal ? f : { ...f, opracowal: nazwaZalogowanego }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [nazwaZalogowanego]);
+
   function upd(k, v) {
     setForm((f) => ({ ...f, [k]: v }));
   }
@@ -918,6 +928,7 @@ export default function GeneratorRaportowABYARD() {
           okresOd: ost.okres_do || "",
           okresDo: dzisISO(),
           dataOpracowania: dzisISO(),
+          opracowal: nazwaZalogowanego || bazowy.opracowal,
           zdjecia: [],
           harmonogramObrazy: [],
         });
@@ -930,6 +941,7 @@ export default function GeneratorRaportowABYARD() {
           projekt: nazwa,
           numer: "1",
           dataOpracowania: dzisISO(),
+          opracowal: nazwaZalogowanego || PUSTY_RAPORT.opracowal,
         });
         plikiRef.current = { grafika: null, harm: [], zdjecia: [] };
         pokazToast(`To pierwszy raport budowy „${nazwa}” — numer 1`);
