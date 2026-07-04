@@ -1224,14 +1224,14 @@ export default function GeneratorRaportowABYARD() {
   // ==========================================================================
   if (widok === "preview") {
     // raportId = zapisanyId: link dla inwestora dostępny, gdy raport jest już w bazie
-    return <PodgladPDF form={form} raportId={zapisanyId} onBack={() => setWidok("form")} nazwaPliku={nazwaPliku(form)} />;
+    return <PodgladPDF form={form} raportId={zapisanyId} onBack={() => setWidok("form")} nazwaPliku={nazwaPliku(form)} jestAdmin={profil?.rola === "admin"} />;
   }
 
   // ==========================================================================
   //  WIDOK PODGLĄDU / PDF (raport otwarty z archiwum) — read-only
   // ==========================================================================
   if (widok === "preview-arch" && podgladForm) {
-    return <PodgladPDF form={podgladForm} raportId={podgladForm.id} onBack={() => { setWidok("archiwum"); setPodgladForm(null); }} nazwaPliku={nazwaPliku(podgladForm)} />;
+    return <PodgladPDF form={podgladForm} raportId={podgladForm.id} onBack={() => { setWidok("archiwum"); setPodgladForm(null); }} nazwaPliku={nazwaPliku(podgladForm)} jestAdmin={profil?.rola === "admin"} />;
   }
 
   // ==========================================================================
@@ -2785,7 +2785,7 @@ function WidokArchiwum({ raporty, ladowanie, filtr, setFiltr, onOdswiez, onOtwor
    + publiczny widok raportu otwieranego z linku (#r/<token>).
    Link pokazuje ŻYWĄ wersję raportu — po edycji inwestor widzi stan aktualny. */
 
-function PanelLinkow({ raportId }) {
+function PanelLinkow({ raportId, jestAdmin }) {
   const [linki, setLinki] = useState(null); // null = wczytywanie
   const [robie, setRobie] = useState(false);
   const [info, setInfo] = useState("");
@@ -2827,10 +2827,10 @@ function PanelLinkow({ raportId }) {
     catch (e) { console.error(e); setInfo("Nie udało się unieważnić linku"); }
   }
 
-  const aktywny = (l) => !l.wylaczony && new Date(l.wygasa) > new Date();
+  const aktywny = (l) => !l.wylaczony;
   const statusLinku = (l) => l.wylaczony
     ? { txt: "unieważniony", kolor: "#B22" }
-    : (new Date(l.wygasa) <= new Date() ? { txt: "wygasł", kolor: "#B22" } : { txt: "aktywny", kolor: "#1B7A3D" });
+    : { txt: "aktywny", kolor: "#1B7A3D" };
 
   return (
     <div className="noprint" style={{ maxWidth: 794, margin: "16px auto 0", background: C.bialy, borderRadius: 8, padding: "16px 20px", boxShadow: "0 4px 30px rgba(0,0,0,0.3)", fontSize: 13, color: C.czarny }}>
@@ -2842,7 +2842,7 @@ function PanelLinkow({ raportId }) {
       </div>
       <p style={{ margin: "0 0 10px", color: C.szary, fontSize: 12, lineHeight: 1.4 }}>
         Osoba z linkiem widzi raport bez logowania (zawsze aktualną wersję) i może zapisać go jako PDF.
-        Link wygasa po 90 dniach; w każdej chwili możesz go unieważnić.
+        Link działa bezterminowo{jestAdmin ? " — możesz go unieważnić w każdej chwili." : "; unieważnić może go administrator."}
       </p>
       {info && <div style={{ background: C.zoltyJasny, borderLeft: `3px solid ${C.zolty}`, padding: "6px 10px", marginBottom: 10, fontSize: 12, wordBreak: "break-all" }}>{info}</div>}
       {linki === null && <div style={{ color: C.szary }}>Wczytywanie…</div>}
@@ -2851,8 +2851,8 @@ function PanelLinkow({ raportId }) {
         <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
           <thead>
             <tr>
-              {["Utworzony", "Wygasa", "Otwarcia", "Ostatnio otwarty", "Status", ""].map((h, i) => (
-                <th key={i} style={{ textAlign: i === 5 ? "right" : "left", padding: "4px 6px", borderBottom: `2px solid ${C.czarny}`, fontSize: 11, textTransform: "uppercase", letterSpacing: 0.5 }}>{h}</th>
+              {["Utworzony", "Otwarcia", "Ostatnio otwarty", "Status", ""].map((h, i, arr) => (
+                <th key={i} style={{ textAlign: i === arr.length - 1 ? "right" : "left", padding: "4px 6px", borderBottom: `2px solid ${C.czarny}`, fontSize: 11, textTransform: "uppercase", letterSpacing: 0.5 }}>{h}</th>
               ))}
             </tr>
           </thead>
@@ -2862,15 +2862,16 @@ function PanelLinkow({ raportId }) {
               return (
                 <tr key={l.id} style={{ borderBottom: `1px solid ${C.linia}` }}>
                   <td style={{ padding: "6px" }}>{fmtPL(l.utworzono?.slice(0, 10))}</td>
-                  <td style={{ padding: "6px" }}>{fmtPL(l.wygasa?.slice(0, 10))}</td>
                   <td style={{ padding: "6px" }}>{l.otwarcia}</td>
                   <td style={{ padding: "6px" }}>{l.ostatnie_otwarcie ? fmtPL(l.ostatnie_otwarcie.slice(0, 10)) : "—"}</td>
                   <td style={{ padding: "6px", color: st.kolor, fontWeight: 700 }}>{st.txt}</td>
                   <td style={{ padding: "6px", textAlign: "right", whiteSpace: "nowrap" }}>
                     {aktywny(l) && (
                       <>
-                        <button onClick={() => kopiuj(l.token)} style={{ ...miniBtn, background: C.bialy, border: `1px solid ${C.linia}`, fontWeight: 600, marginRight: 6 }}>Kopiuj</button>
-                        <button onClick={() => uniewaznij(l.id)} style={{ ...miniBtn, background: C.bialy, border: `1px solid ${C.czerwony}`, color: C.czerwony, fontWeight: 600 }}>Unieważnij</button>
+                        <button onClick={() => kopiuj(l.token)} style={{ ...miniBtn, background: C.bialy, border: `1px solid ${C.linia}`, fontWeight: 600, marginRight: jestAdmin ? 6 : 0 }}>Kopiuj</button>
+                        {jestAdmin && (
+                          <button onClick={() => uniewaznij(l.id)} style={{ ...miniBtn, background: C.bialy, border: `1px solid ${C.czerwony}`, color: C.czerwony, fontWeight: 600 }}>Unieważnij</button>
+                        )}
                       </>
                     )}
                   </td>
@@ -2913,7 +2914,7 @@ function WidokPubliczny({ token }) {
           <div style={{ fontWeight: 800, fontSize: 16, marginBottom: 8 }}>Ten link jest nieaktywny</div>
           <p style={{ color: C.szary, fontSize: 13, lineHeight: 1.5, margin: 0 }}>
             {stan === "brak"
-              ? "Link wygasł lub został unieważniony. Poproś nadawcę o nowy link do raportu."
+              ? "Link został unieważniony lub nie istnieje. Poproś nadawcę o nowy link do raportu."
               : "Nie udało się wczytać raportu. Spróbuj ponownie za chwilę lub poproś nadawcę o nowy link."}
           </p>
         </div>
@@ -2923,7 +2924,7 @@ function WidokPubliczny({ token }) {
 }
 
 /* ---------- Podgląd / PDF ------------------------------------------------- */
-function PodgladPDF({ form, onBack, nazwaPliku, raportId, publiczny }) {
+function PodgladPDF({ form, onBack, nazwaPliku, raportId, publiczny, jestAdmin }) {
   const [pokazLinki, setPokazLinki] = useState(false);
   return (
     <div style={{ background: "#888", minHeight: "100vh", fontFamily: "'Segoe UI', system-ui, sans-serif" }}>
@@ -2956,7 +2957,7 @@ function PodgladPDF({ form, onBack, nazwaPliku, raportId, publiczny }) {
         </div>
       </div>
 
-      {pokazLinki && raportId && !publiczny && <PanelLinkow raportId={raportId} />}
+      {pokazLinki && raportId && !publiczny && <PanelLinkow raportId={raportId} jestAdmin={jestAdmin} />}
 
       <div className="pdf-page" style={{ background: C.bialy, maxWidth: 794, margin: "20px auto", padding: 56, boxShadow: "0 4px 30px rgba(0,0,0,0.3)", color: C.czarny }}>
         {/* Logo + kontakt */}
