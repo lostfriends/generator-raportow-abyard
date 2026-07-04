@@ -1,5 +1,6 @@
 # Zależności instalowane przy buildzie — nie trzymamy w repo
 node_modules/
+package-lock.json
 
 # Wynik builda — generowany przez Netlify, nie commitujemy
 dist/

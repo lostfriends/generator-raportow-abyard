@@ -2807,7 +2807,7 @@ function PodgladPDF({ form, onBack, nazwaPliku }) {
         {form.tytulZadania && <p style={{ textAlign: "center", fontStyle: "italic", margin: "8px auto 0", fontSize: 13, color: C.szary, maxWidth: 600, lineHeight: 1.4 }}>„{form.tytulZadania}”</p>}
         {form.grafikaInwestycji && (
           <div style={{ textAlign: "center", margin: "16px 0 10px" }}>
-            <img className="grafika-okladka" src={form.grafikaInwestycji.dataUrl} alt="" style={{ width: "auto", maxWidth: "100%", maxHeight: "130mm", objectFit: "contain", borderRadius: 6, border: `1px solid ${C.linia}` }} />
+            <img className="grafika-okladka" src={form.grafikaInwestycji.dataUrl} alt="" style={{ width: "auto", maxWidth: "100%", maxHeight: "108mm", objectFit: "contain", borderRadius: 6, border: `1px solid ${C.linia}` }} />
           </div>
         )}
 
@@ -3239,6 +3239,8 @@ const printCSS = `
        zdjęcia skalują się równo wewnątrz, bez cięcia i bez pustek. */
     .foto-strona { height: 267mm !important; min-height: 267mm !important; max-height: 267mm !important; break-inside: avoid; page-break-inside: avoid; overflow: hidden; margin-bottom: 0 !important; }
     .foto-strona-break { break-before: page !important; page-break-before: always !important; }
+    /* Sekcja "Dokumentacja fotograficzna" ZAWSZE zaczyna się od nowej strony */
+    .foto-sekcja { break-before: page !important; page-break-before: always !important; margin-top: 0 !important; }
     .foto-strona img { object-fit: contain; }
     /* Nagłówek sekcji nie może zostać sam na końcu strony — zawsze idzie z treścią */
     .blokpdf-naglowek { break-after: avoid !important; page-break-after: avoid !important; break-inside: avoid !important; page-break-inside: avoid !important; }
@@ -3246,7 +3248,8 @@ const printCSS = `
     .lamanie-strony { break-before: page !important; page-break-before: always !important; display: block; height: 0; }
     /* Cashflow — cała macierz jako całość: mieści się albo w całości przechodzi na nową stronę */
     .strona-cashflow { break-inside: avoid; page-break-inside: avoid; }
-    /* Grafika okładki w druku — duża, wypełnia stronę tytułową, daty zostają na str. 1 */
-    .grafika-okladka { max-height: 130mm !important; width: auto !important; max-width: 100% !important; }
+    /* Grafika okładki w druku — duża, ale z zapasem, by grafika + kluczowe daty
+       zmieściły się razem na stronie tytułowej (obszar druku A4 ≈ 269 mm). */
+    .grafika-okladka { max-height: 108mm !important; width: auto !important; max-width: 100% !important; }
   }
 `;
