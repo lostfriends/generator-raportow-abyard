@@ -876,8 +876,10 @@ export default function GeneratorRaportowABYARD() {
   // Czy w bieżącym formularzu jest coś, co warto chronić przed nadpisaniem?
   // (pomijamy projekt/numer/daty domyślne — sprawdzamy realnie wprowadzoną treść)
   function formularzMaDane() {
+    // Uwaga: „opracowal" celowo pominięte — auto-uzupełnia się nazwą zalogowanego,
+    // więc nie jest oznaką realnie wprowadzonych danych (nie wywołuje ostrzeżenia).
     const polaTekstowe = [
-      "adres", "tytulZadania", "rozpoczecie", "zakonczenieRobot", "pnu", "opracowal",
+      "adres", "tytulZadania", "rozpoczecie", "zakonczenieRobot", "pnu",
       "infoOgolne", "opoznienia", "wykonawcy", "przetargi", "sprawyBudowy",
       "sprawyInwestora", "placBudowy",
     ];
