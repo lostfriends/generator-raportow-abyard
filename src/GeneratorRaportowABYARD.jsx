@@ -3041,11 +3041,11 @@ function PodgladPDF({ form, onBack, nazwaPliku }) {
           // Strona fotograficzna: kontener flex w pionie wypełniający wysokość druku.
           // pierwszaZNaglowkiem = trochę niższy, bo dzieli miejsce z nagłówkiem sekcji.
           const stronaFoto = (zdj, key, zNaglowkiem) => (
-            <div key={key} className={`foto-strona${zNaglowkiem ? "" : " foto-strona-break"}`}
+            <div key={key} className={`foto-strona foto-n${zdj.length}${zNaglowkiem ? "" : " foto-strona-break"}`}
               style={{ display: "flex", flexDirection: "column", gap: 12, justifyContent: "center", alignItems: "center", height: 900, marginBottom: 8 }}>
               {zNaglowkiem && naglowek}
               {zdj.map((z, k) => (
-                <figure key={k} style={{ margin: 0, flex: "1 1 0", minHeight: 0, width: "100%", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
+                <figure key={k} className="foto-fig" style={{ margin: 0, flex: "1 1 0", minHeight: 0, width: "100%", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
                   <img src={z.dataUrl} alt="" style={{ maxWidth: "100%", maxHeight: "100%", width: "auto", height: "auto", objectFit: "contain", borderRadius: 4, display: "block" }} />
                   {z.opis && <figcaption style={{ fontSize: 12.5, color: C.czarny, marginTop: 6, textAlign: "center", fontWeight: 600, flexShrink: 0 }}>{z.opis}</figcaption>}
                 </figure>
@@ -3235,13 +3235,22 @@ const printCSS = `
     .foto-pdf { break-inside: avoid; page-break-inside: avoid; }
     .foto-rzad { break-inside: avoid; page-break-inside: avoid; }
     .foto-pdf img, .harm-pdf img, .foto-rzad img { break-inside: avoid; page-break-inside: avoid; object-fit: contain; }
-    /* Strony fotograficzne: każda wypełnia wysokość obszaru druku A4 (297 - 2*14mm = 269mm),
-       zdjęcia skalują się równo wewnątrz, bez cięcia i bez pustek. */
-    .foto-strona { height: 267mm !important; min-height: 267mm !important; max-height: 267mm !important; break-inside: avoid; page-break-inside: avoid; overflow: hidden; margin-bottom: 0 !important; }
+    /* Strony fotograficzne — wersja odporna na Safari/WebKit.
+       Zamiast sztywnej wysokości 267mm (Safari zaokrągla inaczej niż Chrome,
+       blok wychodził poza stronę i overflow:hidden OBCINAŁ zdjęcia) każda
+       strona fotograficzna ma wysokość auto, twardy podział strony przed sobą
+       i JAWNE limity wysokości zdjęć w mm — z zapasem względem obszaru druku
+       (269mm). Nic nie jest przycinane, bo nic nie może przekroczyć strony. */
+    .foto-strona { height: auto !important; min-height: 0 !important; max-height: none !important; overflow: visible !important; break-inside: avoid; page-break-inside: avoid; margin-bottom: 0 !important; }
+    .foto-strona .foto-fig { flex: 0 0 auto !important; min-height: 0 !important; break-inside: avoid; page-break-inside: avoid; }
+    /* 1 zdjęcie (pionowe) na stronę: 225mm + podpis + nagłówek sekcji < 269mm */
+    .foto-n1 img { max-height: 225mm !important; }
+    /* 2 zdjęcia (poziome) na stronę: 2×110mm + podpisy + odstęp < 269mm */
+    .foto-n2 img { max-height: 110mm !important; }
     .foto-strona-break { break-before: page !important; page-break-before: always !important; }
     /* Sekcja "Dokumentacja fotograficzna" ZAWSZE zaczyna się od nowej strony */
     .foto-sekcja { break-before: page !important; page-break-before: always !important; margin-top: 0 !important; }
-    .foto-strona img { object-fit: contain; }
+    .foto-strona img { object-fit: contain; max-width: 100% !important; width: auto !important; height: auto !important; }
     /* Nagłówek sekcji nie może zostać sam na końcu strony — zawsze idzie z treścią */
     .blokpdf-naglowek { break-after: avoid !important; page-break-after: avoid !important; break-inside: avoid !important; page-break-inside: avoid !important; }
     .klucz-daty { break-inside: avoid; page-break-inside: avoid; }
