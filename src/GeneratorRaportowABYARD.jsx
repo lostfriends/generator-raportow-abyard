@@ -37,6 +37,11 @@ import {
   ustawDanePM,
   listaNieaktywnychProjektow,
   terminyZHarmonogramu,
+  // udostępnianie raportów linkiem:
+  utworzUdostepnienie,
+  listaUdostepnien,
+  wylaczUdostepnienie,
+  raportPoTokenie,
 } from "./supabase";
 
 /* ============================================================================
@@ -676,6 +681,19 @@ function kompresujObraz(file, maxWymiar = 1440, jakosc = 0.7) {
   });
 }
 
+function nazwaPliku(f) {
+  const num = String(f.numer).padStart(3, "0");
+  const proj = (f.projekt || "RAPORT").replace(/[^\p{L}\p{N}_-]+/gu, "_");
+  return `RAPORT_NR_${num}_-_${proj}_-_${f.dataOpracowania}`;
+}
+
+// Token z adresu (#r/<token>) — obecność przełącza aplikację w publiczny
+// podgląd raportu bez logowania. Czytany raz, przy załadowaniu strony.
+const TOKEN_PUBLICZNY = (() => {
+  const m = /^#r\/([A-Za-z0-9]{20,})/.exec(window.location.hash || "");
+  return m ? m[1] : null;
+})();
+
 export default function GeneratorRaportowABYARD() {
   const [form, setForm] = useState({ ...PUSTY_RAPORT, dataOpracowania: dzisISO() });
   const [widok, setWidok] = useState("form"); // form | preview | archiwum
@@ -1058,12 +1076,6 @@ export default function GeneratorRaportowABYARD() {
     }
   }
 
-  function nazwaPliku(f) {
-    const num = String(f.numer).padStart(3, "0");
-    const proj = (f.projekt || "RAPORT").replace(/[^\p{L}\p{N}_-]+/gu, "_");
-    return `RAPORT_NR_${num}_-_${proj}_-_${f.dataOpracowania}`;
-  }
-
   // ---- Generowanie PDF (przez okno druku przeglądarki) -----------------------
   function drukujZNazwa(nazwa) {
     const poprzedni = document.title;
@@ -1074,10 +1086,10 @@ export default function GeneratorRaportowABYARD() {
     // zabezpieczenie, gdyby afterprint nie zadziałał
     setTimeout(przywroc, 1500);
   }
+  // Otwiera podgląd raportu — tam użytkownik wybiera: zapis do PDF lub link
+  // dla inwestora (druk nie odpala się już automatycznie).
   function generujPDF() {
     setWidok("preview");
-    const nazwa = nazwaPliku(form);
-    setTimeout(() => drukujZNazwa(nazwa), 350);
   }
 
   // ---- ARCHIWUM: wejście w zakładkę + wczytanie listy ------------------------
@@ -1125,6 +1137,7 @@ export default function GeneratorRaportowABYARD() {
       const w = await pobierzRaportPoId(id);
       const f = mapWierszNaForm(w);
       f.projekt = w.projekty?.nazwa || "";
+      f.id = w.id; // potrzebne do generowania linków udostępniania
       setPodgladForm(f);
       setWidok("preview-arch");
     } catch (e) {
@@ -1186,6 +1199,13 @@ export default function GeneratorRaportowABYARD() {
   }
 
   // ==========================================================================
+  //  PUBLICZNY PODGLĄD Z LINKU (#r/<token>) — przed bramką logowania
+  // ==========================================================================
+  if (TOKEN_PUBLICZNY) {
+    return <WidokPubliczny token={TOKEN_PUBLICZNY} />;
+  }
+
+  // ==========================================================================
   //  BRAMKA LOGOWANIA — nic nie pokazujemy bez zalogowania
   // ==========================================================================
   if (sesja === undefined) {
@@ -1203,14 +1223,15 @@ export default function GeneratorRaportowABYARD() {
   //  WIDOK PODGLĄDU / PDF (nowy raport z formularza)
   // ==========================================================================
   if (widok === "preview") {
-    return <PodgladPDF form={form} onBack={() => setWidok("form")} nazwaPliku={nazwaPliku(form)} />;
+    // raportId = zapisanyId: link dla inwestora dostępny, gdy raport jest już w bazie
+    return <PodgladPDF form={form} raportId={zapisanyId} onBack={() => setWidok("form")} nazwaPliku={nazwaPliku(form)} />;
   }
 
   // ==========================================================================
   //  WIDOK PODGLĄDU / PDF (raport otwarty z archiwum) — read-only
   // ==========================================================================
   if (widok === "preview-arch" && podgladForm) {
-    return <PodgladPDF form={podgladForm} onBack={() => { setWidok("archiwum"); setPodgladForm(null); }} nazwaPliku={nazwaPliku(podgladForm)} />;
+    return <PodgladPDF form={podgladForm} raportId={podgladForm.id} onBack={() => { setWidok("archiwum"); setPodgladForm(null); }} nazwaPliku={nazwaPliku(podgladForm)} />;
   }
 
   // ==========================================================================
@@ -1654,7 +1675,7 @@ export default function GeneratorRaportowABYARD() {
             <button style={btnGhost} onClick={zapiszArchiwum} disabled={zapisywanie}>
               {zapisywanie ? "Zapisywanie…" : zapisanyId ? "Aktualizuj raport" : "Zapisz raport w bazie"}
             </button>
-            <button style={btnPrimary} onClick={generujPDF}>Generuj raport PDF →</button>
+            <button style={btnPrimary} onClick={generujPDF}>Generuj raport →</button>
           </div>
         </div>
       </footer>
@@ -2735,7 +2756,7 @@ function WidokArchiwum({ raporty, ladowanie, filtr, setFiltr, onOdswiez, onOtwor
                               </>
                             );
                           })()}
-                          <button onClick={() => onOtworz(r.id)} style={{ ...miniBtn, background: C.zolty, border: "none", fontWeight: 700 }}>Otwórz / PDF</button>
+                          <button onClick={() => onOtworz(r.id)} title="Podgląd raportu — stamtąd zapiszesz PDF lub wygenerujesz link dla inwestora" style={{ ...miniBtn, background: C.zolty, border: "none", fontWeight: 700 }}>Otwórz</button>
                           {jestAdmin && onUsun && (
                             <button onClick={() => onUsun(r)} title="Usuń raport wraz ze zdjęciami (nieodwracalne)"
                               style={{ ...miniBtn, background: C.bialy, border: `1px solid ${C.czerwony}`, color: C.czerwony, fontWeight: 600, marginLeft: 6 }}>
@@ -2759,8 +2780,151 @@ function WidokArchiwum({ raporty, ladowanie, filtr, setFiltr, onOdswiez, onOtwor
   );
 }
 
+/* ---------- Udostępnianie raportu linkiem ---------------------------------
+   Panel zarządzania linkami (dla zalogowanych, w podglądzie z archiwum)
+   + publiczny widok raportu otwieranego z linku (#r/<token>).
+   Link pokazuje ŻYWĄ wersję raportu — po edycji inwestor widzi stan aktualny. */
+
+function PanelLinkow({ raportId }) {
+  const [linki, setLinki] = useState(null); // null = wczytywanie
+  const [robie, setRobie] = useState(false);
+  const [info, setInfo] = useState("");
+
+  const odswiez = useCallback(() => {
+    listaUdostepnien(raportId)
+      .then(setLinki)
+      .catch((e) => { console.error(e); setInfo("Błąd wczytywania linków — czy tabela `udostepnienia` istnieje w Supabase?"); setLinki([]); });
+  }, [raportId]);
+  useEffect(() => { odswiez(); }, [odswiez]);
+
+  const urlZTokenu = (t) => `${window.location.origin}${window.location.pathname}#r/${t}`;
+
+  async function kopiuj(token) {
+    const url = urlZTokenu(token);
+    try {
+      await navigator.clipboard.writeText(url);
+      setInfo("Skopiowano link do schowka ✓");
+    } catch {
+      // clipboard bywa zablokowany (http / stare Safari) — pokaż link do ręcznego skopiowania
+      setInfo(url);
+    }
+  }
+  async function nowyLink() {
+    setRobie(true);
+    try {
+      const u = await utworzUdostepnienie(raportId);
+      await kopiuj(u.token);
+      odswiez();
+    } catch (e) {
+      console.error(e);
+      setInfo("Nie udało się utworzyć linku");
+    } finally {
+      setRobie(false);
+    }
+  }
+  async function uniewaznij(id) {
+    try { await wylaczUdostepnienie(id); setInfo("Link unieważniony"); odswiez(); }
+    catch (e) { console.error(e); setInfo("Nie udało się unieważnić linku"); }
+  }
+
+  const aktywny = (l) => !l.wylaczony && new Date(l.wygasa) > new Date();
+  const statusLinku = (l) => l.wylaczony
+    ? { txt: "unieważniony", kolor: "#B22" }
+    : (new Date(l.wygasa) <= new Date() ? { txt: "wygasł", kolor: "#B22" } : { txt: "aktywny", kolor: "#1B7A3D" });
+
+  return (
+    <div className="noprint" style={{ maxWidth: 794, margin: "16px auto 0", background: C.bialy, borderRadius: 8, padding: "16px 20px", boxShadow: "0 4px 30px rgba(0,0,0,0.3)", fontSize: 13, color: C.czarny }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10, flexWrap: "wrap", gap: 8 }}>
+        <div style={{ fontWeight: 800, textTransform: "uppercase", letterSpacing: 1, fontSize: 12 }}>Linki do raportu dla inwestora</div>
+        <button onClick={nowyLink} disabled={robie} style={{ background: C.zolty, color: C.czarny, border: "none", padding: "7px 16px", borderRadius: 6, fontWeight: 700, fontSize: 13, cursor: "pointer", fontFamily: "inherit" }}>
+          {robie ? "Tworzę…" : "+ Nowy link (kopiuje do schowka)"}
+        </button>
+      </div>
+      <p style={{ margin: "0 0 10px", color: C.szary, fontSize: 12, lineHeight: 1.4 }}>
+        Osoba z linkiem widzi raport bez logowania (zawsze aktualną wersję) i może zapisać go jako PDF.
+        Link wygasa po 90 dniach; w każdej chwili możesz go unieważnić.
+      </p>
+      {info && <div style={{ background: C.zoltyJasny, borderLeft: `3px solid ${C.zolty}`, padding: "6px 10px", marginBottom: 10, fontSize: 12, wordBreak: "break-all" }}>{info}</div>}
+      {linki === null && <div style={{ color: C.szary }}>Wczytywanie…</div>}
+      {linki !== null && linki.length === 0 && <div style={{ color: C.szary }}>Ten raport nie ma jeszcze żadnych linków.</div>}
+      {linki !== null && linki.length > 0 && (
+        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+          <thead>
+            <tr>
+              {["Utworzony", "Wygasa", "Otwarcia", "Ostatnio otwarty", "Status", ""].map((h, i) => (
+                <th key={i} style={{ textAlign: i === 5 ? "right" : "left", padding: "4px 6px", borderBottom: `2px solid ${C.czarny}`, fontSize: 11, textTransform: "uppercase", letterSpacing: 0.5 }}>{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {linki.map((l) => {
+              const st = statusLinku(l);
+              return (
+                <tr key={l.id} style={{ borderBottom: `1px solid ${C.linia}` }}>
+                  <td style={{ padding: "6px" }}>{fmtPL(l.utworzono?.slice(0, 10))}</td>
+                  <td style={{ padding: "6px" }}>{fmtPL(l.wygasa?.slice(0, 10))}</td>
+                  <td style={{ padding: "6px" }}>{l.otwarcia}</td>
+                  <td style={{ padding: "6px" }}>{l.ostatnie_otwarcie ? fmtPL(l.ostatnie_otwarcie.slice(0, 10)) : "—"}</td>
+                  <td style={{ padding: "6px", color: st.kolor, fontWeight: 700 }}>{st.txt}</td>
+                  <td style={{ padding: "6px", textAlign: "right", whiteSpace: "nowrap" }}>
+                    {aktywny(l) && (
+                      <>
+                        <button onClick={() => kopiuj(l.token)} style={{ ...miniBtn, background: C.bialy, border: `1px solid ${C.linia}`, fontWeight: 600, marginRight: 6 }}>Kopiuj</button>
+                        <button onClick={() => uniewaznij(l.id)} style={{ ...miniBtn, background: C.bialy, border: `1px solid ${C.czerwony}`, color: C.czerwony, fontWeight: 600 }}>Unieważnij</button>
+                      </>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      )}
+    </div>
+  );
+}
+
+function WidokPubliczny({ token }) {
+  const [stan, setStan] = useState("laduje"); // laduje | ok | brak | blad
+  const [formPub, setFormPub] = useState(null);
+
+  useEffect(() => {
+    raportPoTokenie(token)
+      .then((w) => {
+        if (!w) { setStan("brak"); return; }
+        const f = mapWierszNaForm(w);
+        f.projekt = w.projekt_nazwa || "";
+        setFormPub(f);
+        setStan("ok");
+      })
+      .catch((e) => { console.error(e); setStan("blad"); });
+  }, [token]);
+
+  if (stan === "ok" && formPub) {
+    return <PodgladPDF form={formPub} onBack={null} nazwaPliku={nazwaPliku(formPub)} publiczny />;
+  }
+  return (
+    <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: C.czarny, fontFamily: "'Segoe UI', system-ui, sans-serif", padding: 20 }}>
+      {stan === "laduje" ? (
+        <div style={{ color: C.szary }}>Wczytywanie raportu…</div>
+      ) : (
+        <div style={{ background: C.bialy, borderRadius: 10, padding: "32px 36px", maxWidth: 440, textAlign: "center" }}>
+          <div style={{ marginBottom: 10 }}><span style={{ color: C.zolty, fontWeight: 800, fontSize: 26 }}>/</span><span style={{ fontWeight: 800, fontSize: 24 }}>Abyard</span></div>
+          <div style={{ fontWeight: 800, fontSize: 16, marginBottom: 8 }}>Ten link jest nieaktywny</div>
+          <p style={{ color: C.szary, fontSize: 13, lineHeight: 1.5, margin: 0 }}>
+            {stan === "brak"
+              ? "Link wygasł lub został unieważniony. Poproś nadawcę o nowy link do raportu."
+              : "Nie udało się wczytać raportu. Spróbuj ponownie za chwilę lub poproś nadawcę o nowy link."}
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* ---------- Podgląd / PDF ------------------------------------------------- */
-function PodgladPDF({ form, onBack, nazwaPliku }) {
+function PodgladPDF({ form, onBack, nazwaPliku, raportId, publiczny }) {
+  const [pokazLinki, setPokazLinki] = useState(false);
   return (
     <div style={{ background: "#888", minHeight: "100vh", fontFamily: "'Segoe UI', system-ui, sans-serif" }}>
       <style>{printCSS}</style>
@@ -2770,7 +2934,17 @@ function PodgladPDF({ form, onBack, nazwaPliku }) {
           <span style={{ color: C.zolty, fontSize: 12, maxWidth: 260, lineHeight: 1.3 }}>
             W oknie zapisu zaznacz <strong>„Grafika w tle"</strong>, by zachować kolory
           </span>
-          <button style={btnGhostDark} onClick={onBack}>← Wróć do edycji</button>
+          {onBack && <button style={btnGhostDark} onClick={onBack}>← Wróć do edycji</button>}
+          {!publiczny && (raportId ? (
+            <button style={btnGhostDark} onClick={() => setPokazLinki((v) => !v)}>
+              {pokazLinki ? "Zamknij linki" : "🔗 Udostępnij link"}
+            </button>
+          ) : (
+            <button style={{ ...btnGhostDark, opacity: 0.45, cursor: "not-allowed" }} disabled
+              title="Najpierw zapisz raport w bazie — link musi wskazywać zapisany raport">
+              🔗 Udostępnij link
+            </button>
+          ))}
           <button style={btnPrimary} onClick={() => {
             const poprzedni = document.title;
             document.title = nazwaPliku;
@@ -2781,6 +2955,8 @@ function PodgladPDF({ form, onBack, nazwaPliku }) {
           }}>Zapisz / Drukuj PDF</button>
         </div>
       </div>
+
+      {pokazLinki && raportId && !publiczny && <PanelLinkow raportId={raportId} />}
 
       <div className="pdf-page" style={{ background: C.bialy, maxWidth: 794, margin: "20px auto", padding: 56, boxShadow: "0 4px 30px rgba(0,0,0,0.3)", color: C.czarny }}>
         {/* Logo + kontakt */}

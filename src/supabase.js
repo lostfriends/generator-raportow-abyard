@@ -595,3 +595,59 @@ function bezpiecznaNazwa(nazwa) {
   // Storage nie lubi spacji i polskich znaków w ścieżce — normalizujemy.
   return bezpiecznyKlucz(nazwa) || "plik";
 }
+
+/* ===========================================================================
+   UDOSTĘPNIANIE RAPORTÓW LINKIEM (dla inwestora, bez logowania)
+   ---------------------------------------------------------------------------
+   Tabela `udostepnienia` + funkcja RPC `raport_po_tokenie` (SECURITY DEFINER)
+   — SQL do jednorazowego uruchomienia w Supabase: supabase/udostepnienia.sql.
+   Link pokazuje ŻYWĄ wersję raportu (po edycji inwestor widzi stan aktualny).
+   =========================================================================== */
+
+// Losowy token linku: 32 znaki [A-Za-z0-9] z crypto — praktycznie nieodgadywalny.
+function nowyToken() {
+  const abc = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+  const buf = new Uint8Array(32);
+  crypto.getRandomValues(buf);
+  return Array.from(buf, (b) => abc[b % abc.length]).join("");
+}
+
+// Tworzy nowy link do raportu. Zwraca wiersz udostępnienia (z tokenem).
+export async function utworzUdostepnienie(raportId) {
+  const { data: u } = await supabase.auth.getUser();
+  const { data, error } = await supabase
+    .from("udostepnienia")
+    .insert({ raport_id: raportId, token: nowyToken(), utworzyl: u?.user?.id || null })
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+// Lista linków danego raportu (najnowsze pierwsze).
+export async function listaUdostepnien(raportId) {
+  const { data, error } = await supabase
+    .from("udostepnienia")
+    .select("*")
+    .eq("raport_id", raportId)
+    .order("utworzono", { ascending: false });
+  if (error) throw error;
+  return data || [];
+}
+
+// Unieważnia link (zostaje w historii, ale przestaje działać).
+export async function wylaczUdostepnienie(id) {
+  const { error } = await supabase
+    .from("udostepnienia")
+    .update({ wylaczony: true })
+    .eq("id", id);
+  if (error) throw error;
+}
+
+// Publiczne pobranie raportu po tokenie (działa bez logowania — przez RPC).
+// Zwraca wiersz raportu + pole projekt_nazwa, albo null gdy link nieaktywny.
+export async function raportPoTokenie(token) {
+  const { data, error } = await supabase.rpc("raport_po_tokenie", { tok: token });
+  if (error) throw error;
+  return data;
+}
