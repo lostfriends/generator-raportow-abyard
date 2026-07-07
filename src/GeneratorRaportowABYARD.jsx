@@ -3411,6 +3411,23 @@ const printCSS = `
   @media screen {
     .foto-strona-break { border-top: 2px dashed #ccc; padding-top: 18px; margin-top: 10px; }
   }
+  /* Podgląd raportu na telefonie — bez tego szeroki harmonogram (i cashflow)
+     rozpychał stronę i był obcinany przy prawej krawędzi ekranu.
+     1) Zmniejszamy ogromny (56px) padding kartki, żeby treść miała więcej miejsca.
+     2) Szerokie tabele dostają WŁASNE poziome przewijanie zamiast obcięcia —
+        display:block + width:max-content zachowuje naturalne szerokości kolumn
+        (daty się nie łamią), a max-width:100% + overflow-x:auto daje pasek.
+     Dotyczy tylko ekranu telefonu — druk PDF (@media print) nietknięty. */
+  @media screen and (max-width: 640px) {
+    .pdf-page { padding: 18px !important; }
+    .pdf-page table {
+      display: block;
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+      width: max-content;
+      max-width: 100%;
+    }
+  }
   /* Wymuszenie druku kolorów tła i grafik — kluczowe dla czarnych pasków i żółtych akcentów */
   * {
     -webkit-print-color-adjust: exact !important;
