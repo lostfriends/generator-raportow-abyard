@@ -2814,41 +2814,43 @@ function WidokArchiwum({ raporty, ladowanie, filtr, setFiltr, onOdswiez, onOtwor
                         <td style={{ ...tdArch, textAlign: "center" }}>
                           <span style={{ display: "inline-block", width: 11, height: 11, borderRadius: "50%", background: st.kolor }} title={st.txt} />
                         </td>
-                        <td style={{ ...tdArch, textAlign: "right", whiteSpace: "nowrap" }}>
-                          {mozeEdytowac && mozeEdytowac(r) && (() => {
-                            const h = godzinyDoEdycji && godzinyDoEdycji(r);
-                            return (
-                              <>
-                                <button onClick={() => onEdytuj(r.id)} style={{ ...miniBtn, background: C.bialy, border: `1px solid ${C.linia}`, fontWeight: 600, marginRight: h ? 4 : 6 }}>Edytuj</button>
-                                {h != null && (
-                                  <span style={{ fontSize: 11, color: C.szary, marginRight: 6, whiteSpace: "nowrap" }} title="Czas, przez jaki możesz jeszcze edytować ten raport">zostało ~{h}h</span>
-                                )}
-                              </>
-                            );
-                          })()}
-                          <button onClick={() => onOtworz(r.id)} title="Podgląd raportu — stamtąd zapiszesz PDF lub wygenerujesz link dla inwestora" style={{ ...miniBtn, background: C.zolty, border: "none", fontWeight: 700 }}>Otwórz</button>
-                          {jestAdmin && onPozwolEdycje && (() => {
-                            const aktywne = r.edycja_do && new Date(r.edycja_do).getTime() > Date.now();
-                            if (aktywne) {
-                              const h = Math.max(1, Math.ceil((new Date(r.edycja_do).getTime() - Date.now()) / (3600 * 1000)));
+                        <td style={{ ...tdArch }}>
+                          <div style={{ display: "flex", flexWrap: "wrap", gap: 6, justifyContent: "flex-end", alignItems: "center" }}>
+                            {mozeEdytowac && mozeEdytowac(r) && (() => {
+                              const h = godzinyDoEdycji && godzinyDoEdycji(r);
                               return (
                                 <>
-                                  <span style={{ fontSize: 11, color: "#1B7A3D", marginLeft: 6, whiteSpace: "nowrap" }} title="Edycja odblokowana — autor i przypisani PM mogą edytować">edycja otwarta ~{h}h</span>
-                                  <button onClick={() => onPozwolEdycje(r)} title="Przedłuż okno edycji o kolejne 24h" style={{ ...miniBtn, background: C.bialy, border: `1px solid ${C.linia}`, fontWeight: 600, marginLeft: 6 }}>Przedłuż</button>
-                                  <button onClick={() => onCofnijEdycje(r)} title="Zamknij okno edycji od razu" style={{ ...miniBtn, background: C.bialy, border: `1px solid ${C.linia}`, fontWeight: 600, marginLeft: 6 }}>Cofnij</button>
+                                  <button onClick={() => onEdytuj(r.id)} style={{ ...miniBtn, background: C.bialy, border: `1px solid ${C.linia}`, fontWeight: 600 }}>Edytuj</button>
+                                  {h != null && (
+                                    <span style={{ fontSize: 11, color: C.szary, whiteSpace: "nowrap" }} title="Czas, przez jaki możesz jeszcze edytować ten raport">zostało ~{h}h</span>
+                                  )}
                                 </>
                               );
-                            }
-                            return (
-                              <button onClick={() => onPozwolEdycje(r)} title="Odblokuj edycję tego raportu na 24h — dla autora i PM przypisanych do budowy" style={{ ...miniBtn, background: C.bialy, border: `1px solid ${C.linia}`, fontWeight: 600, marginLeft: 6 }}>Pozwól na edycję</button>
-                            );
-                          })()}
-                          {jestAdmin && onUsun && (
-                            <button onClick={() => onUsun(r)} title="Usuń raport wraz ze zdjęciami (nieodwracalne)"
-                              style={{ ...miniBtn, background: C.bialy, border: `1px solid ${C.czerwony}`, color: C.czerwony, fontWeight: 600, marginLeft: 6 }}>
-                              Usuń
-                            </button>
-                          )}
+                            })()}
+                            <button onClick={() => onOtworz(r.id)} title="Podgląd raportu — stamtąd zapiszesz PDF lub wygenerujesz link dla inwestora" style={{ ...miniBtn, background: C.zolty, border: "none", fontWeight: 700 }}>Otwórz</button>
+                            {jestAdmin && onPozwolEdycje && (() => {
+                              const aktywne = r.edycja_do && new Date(r.edycja_do).getTime() > Date.now();
+                              if (aktywne) {
+                                const h = Math.max(1, Math.ceil((new Date(r.edycja_do).getTime() - Date.now()) / (3600 * 1000)));
+                                return (
+                                  <>
+                                    <span style={{ fontSize: 11, color: "#1B7A3D", whiteSpace: "nowrap" }} title="Edycja odblokowana — autor i przypisani PM mogą edytować">edycja otwarta ~{h}h</span>
+                                    <button onClick={() => onPozwolEdycje(r)} title="Przedłuż okno edycji o kolejne 24h" style={{ ...miniBtn, background: C.bialy, border: `1px solid ${C.linia}`, fontWeight: 600 }}>Przedłuż</button>
+                                    <button onClick={() => onCofnijEdycje(r)} title="Zamknij okno edycji od razu" style={{ ...miniBtn, background: C.bialy, border: `1px solid ${C.linia}`, fontWeight: 600 }}>Cofnij</button>
+                                  </>
+                                );
+                              }
+                              return (
+                                <button onClick={() => onPozwolEdycje(r)} title="Odblokuj edycję tego raportu na 24h — dla autora i PM przypisanych do budowy" style={{ ...miniBtn, background: C.bialy, border: `1px solid ${C.linia}`, fontWeight: 600 }}>Pozwól na edycję</button>
+                              );
+                            })()}
+                            {jestAdmin && onUsun && (
+                              <button onClick={() => onUsun(r)} title="Usuń raport wraz ze zdjęciami (nieodwracalne)"
+                                style={{ ...miniBtn, background: C.bialy, border: `1px solid ${C.czerwony}`, color: C.czerwony, fontWeight: 600 }}>
+                                Usuń
+                              </button>
+                            )}
+                          </div>
                         </td>
                       </tr>
                     );
