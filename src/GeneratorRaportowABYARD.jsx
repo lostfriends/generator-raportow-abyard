@@ -701,6 +701,10 @@ export default function GeneratorRaportowABYARD() {
   const [projekty, setProjekty] = useState([]); // [{id, nazwa}] — z bazy
   const [zapisywanie, setZapisywanie] = useState(false);
   const [zapisanyId, setZapisanyId] = useState(null); // ID raportu zapisanego w tej sesji (do aktualizacji)
+  // Czy formularz ma zmiany niezapisane w bazie? Blokuje „Generuj raport", dopóki
+  // PM nie zapisze (częsty błąd: dodają zdjęcia i generują raport bez zapisu).
+  const [niezapisaneZmiany, setNiezapisaneZmiany] = useState(false);
+  const pomijajDirtyRef = useRef(false); // pomiń najbliższe oznaczenie „dirty" (po programowym załadowaniu)
   const [selectKey, setSelectKey] = useState(0); // wymusza odświeżenie selecta po anulowaniu zmiany budowy
   const [toast, setToast] = useState("");
   // Archiwum:
@@ -794,6 +798,20 @@ export default function GeneratorRaportowABYARD() {
     if (!cashflowWlaczony && harmonogramMaKwoty(form.harmonogram)) setCashflowWlaczony(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [form.harmonogram]);
+
+  // Śledzenie niezapisanych zmian: każda zmiana formularza (pola, harmonogram,
+  // zdjęcia, grafika) idzie przez setForm, więc wystarczy obserwować `form`.
+  // Programowe załadowanie (wczytanie raportu do edycji) ustawia pomijajDirtyRef,
+  // by nie liczyć się jako zmiana użytkownika. Zapis czyści flagę bezpośrednio.
+  useEffect(() => {
+    if (pomijajDirtyRef.current) {
+      pomijajDirtyRef.current = false;
+      setNiezapisaneZmiany(false);
+      return;
+    }
+    setNiezapisaneZmiany(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form]);
 
   // Wyczyść wszystkie kwoty "wartość umowy" (przy wyłączaniu cashflow)
   function wyczyscKwoty() {
@@ -1083,6 +1101,7 @@ export default function GeneratorRaportowABYARD() {
       // po zapisie nowe pliki są już w bazie jako URL — czyścimy bufor surowych plików,
       // by przy aktualizacji nie wgrać ich drugi raz
       plikiRef.current = { grafika: null, harm: [], zdjecia: [] };
+      setNiezapisaneZmiany(false); // stan formularza = stan w bazie → „Generuj raport" odblokowany
     } catch (e) {
       console.error(e);
       // Najczęstszy błąd na starcie: duplikat numeru (unique projekt_id+numer)
@@ -1107,9 +1126,19 @@ export default function GeneratorRaportowABYARD() {
     // zabezpieczenie, gdyby afterprint nie zadziałał
     setTimeout(przywroc, 1500);
   }
+  // Czy można generować raport? Tylko gdy jest zapisany w bazie i nie ma zmian
+  // niezapisanych — inaczej PM wygenerowałby raport bez świeżo dodanych zdjęć.
+  const mozeGenerowac = !!zapisanyId && !niezapisaneZmiany;
+
   // Otwiera podgląd raportu — tam użytkownik wybiera: zapis do PDF lub link
   // dla inwestora (druk nie odpala się już automatycznie).
   function generujPDF() {
+    if (!mozeGenerowac) {
+      pokazToast(zapisanyId
+        ? "Masz niezapisane zmiany — najpierw zapisz raport"
+        : "Najpierw zapisz raport w bazie, potem go wygenerujesz");
+      return;
+    }
     setWidok("preview");
   }
 
@@ -1263,6 +1292,7 @@ export default function GeneratorRaportowABYARD() {
       const w = await pobierzRaportPoId(id);
       const f = mapWierszNaForm(w);
       f.projekt = w.projekty?.nazwa || "";
+      pomijajDirtyRef.current = true;    // to wczytanie to nie zmiana użytkownika
       setForm(f);
       setZapisanyId(id);                 // kolejny zapis nadpisze ten raport
       wczytanaBudowaRef.current = f.projekt; // nie wymuszaj przeładowania budowy
@@ -1749,15 +1779,22 @@ export default function GeneratorRaportowABYARD() {
       <footer style={{ position: "fixed", bottom: 0, left: 0, right: 0, background: C.bialy, borderTop: `1px solid ${C.linia}`, boxShadow: "0 -2px 10px rgba(0,0,0,0.05)", zIndex: 20 }}>
         <div style={{ maxWidth: 1080, margin: "0 auto", padding: "14px 24px", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
           <span style={{ fontSize: 12, color: C.szary, maxWidth: 460, lineHeight: 1.45 }}>
-            {zapisanyId
-              ? "Raport zapisany — kolejny zapis nadpisze (aktualizacja)"
-              : <>Po zapisaniu możesz <strong>edytować raport przez 24h</strong> — z poziomu archiwum raportów (przycisk „Edytuj”).</>}
+            {niezapisaneZmiany
+              ? <><strong>Masz niezapisane zmiany.</strong> Zapisz raport, aby móc go wygenerować (inaczej pominiesz np. dodane zdjęcia).</>
+              : zapisanyId
+                ? "Raport zapisany — możesz go wygenerować. Kolejny zapis nadpisze (aktualizacja)."
+                : <>Najpierw <strong>zapisz raport w bazie</strong> — dopiero wtedy odblokuje się „Generuj raport".</>}
           </span>
           <div style={{ display: "flex", gap: 10 }}>
             <button style={btnGhost} onClick={zapiszArchiwum} disabled={zapisywanie}>
               {zapisywanie ? "Zapisywanie…" : zapisanyId ? "Aktualizuj raport" : "Zapisz raport w bazie"}
             </button>
-            <button style={btnPrimary} onClick={generujPDF}>Generuj raport →</button>
+            <button
+              style={mozeGenerowac ? btnPrimary : { ...btnPrimary, opacity: 0.45, cursor: "not-allowed" }}
+              onClick={generujPDF}
+              disabled={!mozeGenerowac}
+              title={mozeGenerowac ? "" : (zapisanyId ? "Masz niezapisane zmiany — najpierw zapisz raport" : "Najpierw zapisz raport w bazie")}
+            >Generuj raport →</button>
           </div>
         </div>
       </footer>
