@@ -1123,19 +1123,31 @@ export default function GeneratorRaportowABYARD() {
       await wczytajArchiwum();
     }
   }
-  async function wczytajArchiwum() {
-    setArchLadowanie(true);
+  async function wczytajArchiwum({ ciche = false } = {}) {
+    if (!ciche) setArchLadowanie(true);
     try {
       const dane = await listaWszystkichRaportow();
       setArchRaporty(dane);
     } catch (e) {
       console.error(e);
-      pokazToast("Nie udało się wczytać archiwum z bazy");
-      setArchRaporty([]);
+      if (!ciche) {
+        pokazToast("Nie udało się wczytać archiwum z bazy");
+        setArchRaporty([]);
+      }
     } finally {
-      setArchLadowanie(false);
+      if (!ciche) setArchLadowanie(false);
     }
   }
+
+  // Gdy Archiwum jest otwarte — odświeżaj listę w tle (co 45s), by admini widzieli
+  // na bieżąco odblokowania edycji ustawione przez innych i by odliczanie „zostało
+  // ~Xh" nie zastygało. Ciche odświeżenie nie miga overlayem „Wczytywanie…".
+  useEffect(() => {
+    if (widok !== "archiwum") return;
+    const t = setInterval(() => { wczytajArchiwum({ ciche: true }); }, 45000);
+    return () => clearInterval(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [widok]);
   // Usuwa raport wraz z plikami ze Storage (tylko admin; RLS pilnuje po stronie bazy)
   async function usunRaportZArchiwum(r) {
     const nazwa = `raport nr ${r.numer}${r.projekty?.nazwa ? ` — ${r.projekty.nazwa}` : ""}`;
