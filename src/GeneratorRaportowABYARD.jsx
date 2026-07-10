@@ -2386,7 +2386,7 @@ function ZakladkaKoordynacja({ uzytkownicy, projektyAll, przypisania, zakresy, t
                         <div key={i} style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5, padding: "3px 0", opacity: (t.schodzi || t.wstrzymana) ? .45 : 1 }}>
                           <span style={{ textDecoration: t.schodzi ? "line-through" : "none" }}>
                             {t.nazwa} <span style={{ fontSize: 10.5, color: C.szary, background: C.jasny, padding: "1px 6px", borderRadius: 4 }}>{zakresMap[t.zakres]?.nazwa || "—"}</span>
-                            {t.wstrzymana && <span style={{ fontSize: 10.5, fontWeight: 700, color: "#B35A00", background: "#FBF0DC", padding: "1px 6px", borderRadius: 4, marginLeft: 4 }}>WSTRZYMANA</span>}
+                            {t.wstrzymana && <span style={odznakaWstrzymana}>WSTRZYMANA</span>}
                           </span>
                           <span style={{ color: C.szary }}>{t.termin ? `do ${fmtPL(t.termin)}` : "bez terminu"} · <b style={{ color: C.czarny }}>{t.punkty} pkt</b>{t.schodzi ? " — zejdzie" : t.wstrzymana ? " — nie liczone" : ""}</span>
                         </div>
@@ -2593,7 +2593,7 @@ function WidokKtoCoProwadzi({ jestAdmin, email, onForm, onArchiwum, onAdmin, onW
           const p = projMap[x.projekt_id];
           if (!p) continue; // nieaktywna/zakończona
           const termin = (p.termin_zakonczenia) || (terminy?.[p.id]) || null;
-          (wg[x.uzytkownik] ||= []).push({ nazwa: p.nazwa, termin });
+          (wg[x.uzytkownik] ||= []).push({ nazwa: p.nazwa, termin, wstrzymana: !!p.wstrzymana });
         }
         const listaPM = Object.entries(wg)
           .map(([uid, tematy]) => ({
@@ -2616,6 +2616,7 @@ function WidokKtoCoProwadzi({ jestAdmin, email, onForm, onArchiwum, onAdmin, onW
           .map((p) => ({
             nazwa: p.nazwa,
             termin: (p.termin_zakonczenia) || (terminy?.[p.id]) || null,
+            wstrzymana: !!p.wstrzymana,
             pmowie: (pmWgProjektu[p.id] || []).sort((a, b) => a.localeCompare(b, "pl")),
           }))
           .sort((a, b) => a.nazwa.localeCompare(b.nazwa, "pl"));
@@ -2688,8 +2689,11 @@ function WidokKtoCoProwadzi({ jestAdmin, email, onForm, onArchiwum, onAdmin, onW
                     </thead>
                     <tbody>
                       {g.tematy.map((t, j) => (
-                        <tr key={j}>
-                          <td style={td}>{t.nazwa}</td>
+                        <tr key={j} style={{ opacity: t.wstrzymana ? 0.6 : 1 }}>
+                          <td style={td}>
+                            {t.nazwa}
+                            {t.wstrzymana && <span style={odznakaWstrzymana} title="Inwestycja wstrzymana — nie liczy się do obciążenia">WSTRZYMANA</span>}
+                          </td>
                           <td style={{ ...td, color: t.termin ? C.czarny : C.szary }}>{t.termin ? fmtPL(t.termin) : "—"}</td>
                         </tr>
                       ))}
@@ -2707,7 +2711,10 @@ function WidokKtoCoProwadzi({ jestAdmin, email, onForm, onArchiwum, onAdmin, onW
               {wgInwestycji.map((inw, i) => (
                 <section key={i} style={{ ...card, padding: 0, overflow: "hidden" }}>
                   <div style={{ background: C.grafit, color: C.bialy, padding: "10px 16px", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-                    <span style={{ fontWeight: 700, fontSize: 14 }}>{inw.nazwa}</span>
+                    <span style={{ fontWeight: 700, fontSize: 14 }}>
+                      {inw.nazwa}
+                      {inw.wstrzymana && <span style={odznakaWstrzymana} title="Inwestycja wstrzymana — nie liczy się do obciążenia">WSTRZYMANA</span>}
+                    </span>
                     <span style={{ fontSize: 12.5, color: inw.termin ? C.zolty : "#C89B3C", fontWeight: 600 }}>
                       {inw.termin ? `zakończenie: ${fmtPL(inw.termin)}` : "brak terminu"}
                     </span>
@@ -3528,6 +3535,8 @@ const btnPrimary = { background: C.zolty, color: C.czarny, border: "none", paddi
 const btnGhost = { background: "transparent", color: C.czarny, border: `1.5px solid ${C.czarny}`, padding: "10px 18px", borderRadius: 6, fontWeight: 600, fontSize: 13, cursor: "pointer", fontFamily: "inherit" };
 const btnGhostDark = { background: "transparent", color: C.bialy, border: `1.5px solid ${C.bialy}`, padding: "8px 16px", borderRadius: 6, fontWeight: 600, fontSize: 13, cursor: "pointer", fontFamily: "inherit" };
 const miniBtn = { background: C.bialy, border: `1px solid ${C.linia}`, borderRadius: 4, padding: "5px 12px", fontSize: 12, cursor: "pointer", fontFamily: "inherit" };
+// Plakietka wstrzymanej inwestycji — spójna w koordynacji i „Kto co prowadzi".
+const odznakaWstrzymana = { fontSize: 10.5, fontWeight: 700, color: "#B35A00", background: "#FBF0DC", padding: "1px 6px", borderRadius: 4, marginLeft: 6, verticalAlign: "middle" };
 const pPDF = { margin: "2px 0", fontSize: 12.5 };
 const thHarm = { background: C.czarny, color: C.zolty, fontSize: 11, fontWeight: 700, padding: "8px 6px", textAlign: "center", border: `1px solid ${C.grafit}` };
 const tdHarm = { padding: "3px 6px", border: `1px solid ${C.linia}`, textAlign: "center" };
