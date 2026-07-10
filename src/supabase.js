@@ -312,7 +312,7 @@ export async function listaWszystkichRaportow() {
   const { data, error } = await supabase
     .from("raporty")
     .select(
-      "id, numer, okres_od, okres_do, data_opracowania, opracowal, podsumowanie, adres, pnu, pnu_nie_dotyczy, zakonczenie_robot, harmonogram, utworzono, utworzony_przez, projekt_id, projekty(nazwa)"
+      "id, numer, okres_od, okres_do, data_opracowania, opracowal, podsumowanie, adres, pnu, pnu_nie_dotyczy, zakonczenie_robot, harmonogram, utworzono, utworzony_przez, edycja_do, projekt_id, projekty(nazwa)"
     )
     .order("data_opracowania", { ascending: false, nullsFirst: false });
   if (error) throw error;
@@ -481,6 +481,21 @@ export async function aktualizujRaport(id, form, projektId) {
     .single();
   if (error) throw error;
   return data;
+}
+
+/* ---------------------------------------------------------------------------
+   ODBLOKOWANIE EDYCJI RAPORTU PRZEZ ADMINA
+   Ustawia (lub czyści) termin `edycja_do`. Dopóki jest w przyszłości, raport
+   może edytować autor oraz PM przypisani do budowy (pilnuje tego polityka RLS
+   rap_update_okno_edycji — patrz supabase/edycja_raportu.sql).
+   doKiedy: ISO string (np. now()+24h) albo null (cofnięcie okna).
+--------------------------------------------------------------------------- */
+export async function ustawOknoEdycji(raportId, doKiedy) {
+  const { error } = await supabase
+    .from("raporty")
+    .update({ edycja_do: doKiedy })
+    .eq("id", raportId);
+  if (error) throw error;
 }
 
 /* ---------------------------------------------------------------------------

@@ -12,6 +12,7 @@ import {
   listaWszystkichRaportow,
   pobierzRaportPoId,
   usunRaport,
+  ustawOknoEdycji,
   przegladBudow,
   // auth + role:
   zaloguj,
@@ -760,6 +761,12 @@ export default function GeneratorRaportowABYARD() {
 
   // Nazwa zalogowanego (imię i nazwisko, a gdy brak — e-mail). Do pola „Opracował".
   const nazwaZalogowanego = profil ? nazwaOsoby(profil) : "";
+  // Zbiór id budów, do których bieżący użytkownik jest przypisany — do sprawdzania,
+  // czy PM może edytować raport w oknie odblokowanym przez admina.
+  const mojeProjektyIds = React.useMemo(
+    () => new Set((mojePrzypisania || []).map((x) => x.projekt_id)),
+    [mojePrzypisania]
+  );
   // Auto-uzupełnij „Opracował" nazwą zalogowanego, dopóki pole jest puste
   // (nowy/pusty formularz). Edycji istniejącego raportu nie ruszamy — tam pole
   // ma już autora i warunek f.opracowal je chroni.
@@ -1162,26 +1169,73 @@ export default function GeneratorRaportowABYARD() {
     }
   }
 
-  // Edycja raportu z archiwum — tylko admin. Wczytuje raport do formularza
+  // Edycja raportu z archiwum. Wczytuje raport do formularza.
   // Czy bieżący użytkownik może edytować dany raport (obiekt z listy archiwum).
-  // Admin: zawsze. PM: tylko własny raport w ciągu 24h od utworzenia.
+  //  - admin: zawsze,
+  //  - autor: przez 24h od utworzenia,
+  //  - okno przyznane przez admina (edycja_do w przyszłości): autor ORAZ PM
+  //    przypisani do tej budowy.
+  // Zwraca timestamp (ms) końca aktywnego okna edycji dla bieżącego użytkownika,
+  // albo 0 gdy nie może edytować. Admin nie ma odliczania (zwraca 0).
+  function koniecOknaEdycji(r) {
+    if (!r || profil?.rola === "admin") return 0;
+    const teraz = Date.now();
+    const jestAutorem = !!profil?.id && r.utworzony_przez === profil.id;
+    let koniec = 0;
+    // Okno 24h od utworzenia — tylko autor.
+    if (jestAutorem && r.utworzono) {
+      const kon24 = new Date(r.utworzono).getTime() + 24 * 3600 * 1000;
+      if (kon24 > teraz) koniec = Math.max(koniec, kon24);
+    }
+    // Okno przyznane przez admina — autor lub PM przypisany do budowy.
+    if (r.edycja_do) {
+      const konAdmin = new Date(r.edycja_do).getTime();
+      const przypisany = mojeProjektyIds.has(r.projekt_id);
+      if (konAdmin > teraz && (jestAutorem || przypisany)) koniec = Math.max(koniec, konAdmin);
+    }
+    return koniec;
+  }
+
   function mozeEdytowac(r) {
     if (!r) return false;
     if (profil?.rola === "admin") return true;
-    if (!profil?.id || r.utworzony_przez !== profil.id) return false;
-    if (!r.utworzono) return false;
-    const minelo = Date.now() - new Date(r.utworzono).getTime();
-    return minelo >= 0 && minelo < 24 * 3600 * 1000;
+    return koniecOknaEdycji(r) > Date.now();
   }
 
   // Pozostały czas edycji dla PM w pełnych godzinach (zaokrąglony w górę).
-  // Zwraca null gdy nie dotyczy (admin / brak limitu / już po czasie).
+  // Zwraca null gdy nie dotyczy (admin / brak okna / już po czasie).
   function godzinyDoEdycji(r) {
-    if (!r || profil?.rola === "admin" || !r.utworzono) return null;
-    const minelo = Date.now() - new Date(r.utworzono).getTime();
-    const zostalo = 24 * 3600 * 1000 - minelo;
+    if (!r || profil?.rola === "admin") return null;
+    const zostalo = koniecOknaEdycji(r) - Date.now();
     if (zostalo <= 0) return null;
     return Math.ceil(zostalo / (3600 * 1000));
+  }
+
+  // Odblokowanie edycji raportu przez admina na 24h (autor + przypisani PM).
+  async function pozwolNaEdycje(r) {
+    if (!r?.id) return;
+    const doKiedy = new Date(Date.now() + 24 * 3600 * 1000).toISOString();
+    try {
+      await ustawOknoEdycji(r.id, doKiedy);
+      pokazToast(`Edycja raportu nr ${r.numer} odblokowana na 24h`);
+      await wczytajArchiwum();
+    } catch (e) {
+      console.error(e);
+      pokazToast("Nie udało się odblokować edycji");
+    }
+  }
+
+  // Cofnięcie odblokowania (admin) — zamyka okno edycji od razu.
+  async function cofnijPozwolenieEdycji(r) {
+    if (!r?.id) return;
+    try {
+      await ustawOknoEdycji(r.id, null);
+      pokazToast(`Edycja raportu nr ${r.numer} zamknięta`);
+      await wczytajArchiwum();
+    } catch (e) {
+      console.error(e);
+      pokazToast("Nie udało się zamknąć edycji");
+    }
   }
 
   // i ustawia zapisanyId, by kolejny zapis nadpisał ten sam raport.
@@ -1264,6 +1318,8 @@ export default function GeneratorRaportowABYARD() {
         onUsun={usunRaportZArchiwum}
         mozeEdytowac={mozeEdytowac}
         godzinyDoEdycji={godzinyDoEdycji}
+        onPozwolEdycje={pozwolNaEdycje}
+        onCofnijEdycje={cofnijPozwolenieEdycji}
         onNowyRaport={() => setWidok("form")}
         jestAdmin={profil?.rola === "admin"}
         email={profil?.email}
@@ -2608,7 +2664,7 @@ function WidokKtoCoProwadzi({ jestAdmin, email, onForm, onArchiwum, onAdmin, onW
 }
 
 /* ---------- ARCHIWUM ----------------------------------------------------- */
-function WidokArchiwum({ raporty, ladowanie, filtr, setFiltr, onOdswiez, onOtworz, onEdytuj, onUsun, mozeEdytowac, godzinyDoEdycji, onNowyRaport, jestAdmin, email, onForm, onKoordynacja, onAdmin, onWyloguj }) {
+function WidokArchiwum({ raporty, ladowanie, filtr, setFiltr, onOdswiez, onOtworz, onEdytuj, onUsun, mozeEdytowac, godzinyDoEdycji, onPozwolEdycje, onCofnijEdycje, onNowyRaport, jestAdmin, email, onForm, onKoordynacja, onAdmin, onWyloguj }) {
   // Status z podsumowania. Uwaga: obie standardowe formuły zawierają rdzeń "zagroż"
   // ("powoduje zagrożenie" vs "nie powoduje zagrożenia"), więc najpierw wykrywamy
   // przeczenie (brak zagrożenia), a dopiero potem samo zagrożenie.
@@ -2771,6 +2827,22 @@ function WidokArchiwum({ raporty, ladowanie, filtr, setFiltr, onOdswiez, onOtwor
                             );
                           })()}
                           <button onClick={() => onOtworz(r.id)} title="Podgląd raportu — stamtąd zapiszesz PDF lub wygenerujesz link dla inwestora" style={{ ...miniBtn, background: C.zolty, border: "none", fontWeight: 700 }}>Otwórz</button>
+                          {jestAdmin && onPozwolEdycje && (() => {
+                            const aktywne = r.edycja_do && new Date(r.edycja_do).getTime() > Date.now();
+                            if (aktywne) {
+                              const h = Math.max(1, Math.ceil((new Date(r.edycja_do).getTime() - Date.now()) / (3600 * 1000)));
+                              return (
+                                <>
+                                  <span style={{ fontSize: 11, color: "#1B7A3D", marginLeft: 6, whiteSpace: "nowrap" }} title="Edycja odblokowana — autor i przypisani PM mogą edytować">edycja otwarta ~{h}h</span>
+                                  <button onClick={() => onPozwolEdycje(r)} title="Przedłuż okno edycji o kolejne 24h" style={{ ...miniBtn, background: C.bialy, border: `1px solid ${C.linia}`, fontWeight: 600, marginLeft: 6 }}>Przedłuż</button>
+                                  <button onClick={() => onCofnijEdycje(r)} title="Zamknij okno edycji od razu" style={{ ...miniBtn, background: C.bialy, border: `1px solid ${C.linia}`, fontWeight: 600, marginLeft: 6 }}>Cofnij</button>
+                                </>
+                              );
+                            }
+                            return (
+                              <button onClick={() => onPozwolEdycje(r)} title="Odblokuj edycję tego raportu na 24h — dla autora i PM przypisanych do budowy" style={{ ...miniBtn, background: C.bialy, border: `1px solid ${C.linia}`, fontWeight: 600, marginLeft: 6 }}>Pozwól na edycję</button>
+                            );
+                          })()}
                           {jestAdmin && onUsun && (
                             <button onClick={() => onUsun(r)} title="Usuń raport wraz ze zdjęciami (nieodwracalne)"
                               style={{ ...miniBtn, background: C.bialy, border: `1px solid ${C.czerwony}`, color: C.czerwony, fontWeight: 600, marginLeft: 6 }}>
