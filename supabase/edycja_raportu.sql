@@ -24,12 +24,13 @@ alter table public.raporty
 -- Admin może aktualizować dowolny raport — m.in. ustawiać/cofać `edycja_do`.
 -- Bez tej polityki UPDATE admina niebędącego autorem trafiałby w 0 wierszy
 -- (RLS), Supabase nie zwracałby błędu, a inni admini nie widzieliby zmiany.
--- Używa pomocnika jest_adminem() z supabase/udostepnienia.sql.
+-- Używa `jest_admin()` — tej samej funkcji, na której opierają się pozostałe
+-- polityki raportów (rap_admin_delete, rap_insert, rap_update).
 drop policy if exists rap_update_admin on public.raporty;
 create policy rap_update_admin on public.raporty
   for update to authenticated
-  using (public.jest_adminem())
-  with check (public.jest_adminem());
+  using (public.jest_admin())
+  with check (public.jest_admin());
 
 -- Edycja w oknie przyznanym przez admina: autor LUB przypisany PM.
 drop policy if exists rap_update_okno_edycji on public.raporty;
