@@ -207,7 +207,7 @@ export async function projektyDoWyboru(profil, przypisania) {
 export async function listaAktywnychProjektow() {
   const { data, error } = await supabase
     .from("projekty")
-    .select("id, nazwa, zakres, termin_zakonczenia")
+    .select("id, nazwa, zakres, termin_zakonczenia, wstrzymana")
     .eq("aktywny", true)
     .order("nazwa", { ascending: true });
   if (error) throw error;
@@ -218,7 +218,7 @@ export async function listaAktywnychProjektow() {
 export async function listaNieaktywnychProjektow() {
   const { data, error } = await supabase
     .from("projekty")
-    .select("id, nazwa, zakres, termin_zakonczenia")
+    .select("id, nazwa, zakres, termin_zakonczenia, wstrzymana")
     .eq("aktywny", false)
     .order("nazwa", { ascending: true });
   if (error) throw error;

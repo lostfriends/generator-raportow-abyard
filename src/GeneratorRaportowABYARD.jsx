@@ -2124,7 +2124,7 @@ function PanelAdmina({ pokazToast, email, onForm, onArchiwum, onKoordynacja, onW
 }
 
 /* ---------- KOMPAKTOWA LISTA INWESTYCJI (koordynacja) -------------------- */
-function KompaktowaListaInwestycji({ projekty, przypisania, zakresy, zakresMap, uzytMap, terminyDomyslne, punktyLok, setPunktyLok, zapiszPunkty, zapiszZakres, zapiszTermin, zakonczInwestycje }) {
+function KompaktowaListaInwestycji({ projekty, przypisania, zakresy, zakresMap, uzytMap, terminyDomyslne, punktyLok, setPunktyLok, zapiszPunkty, zapiszZakres, zapiszTermin, zakonczInwestycje, przelaczWstrzymanie }) {
   const [otwarty, setOtwarty] = React.useState(null);
   const th = { textAlign: "left", padding: "7px 10px", color: C.szary, fontSize: 11, textTransform: "uppercase", letterSpacing: .5, borderBottom: `2px solid ${C.linia}` };
   const td = { padding: "6px 10px", borderBottom: `1px solid ${C.jasny}`, fontSize: 13 };
@@ -2138,6 +2138,7 @@ function KompaktowaListaInwestycji({ projekty, przypisania, zakresy, zakresMap, 
           <th style={{ ...th, width: 150 }}>Zakres</th>
           <th style={{ ...th, width: 150 }}>Termin</th>
           <th style={{ ...th, width: 70, textAlign: "center" }}>PM</th>
+          <th style={{ ...th, width: 110, textAlign: "center" }}>Status</th>
           <th style={{ ...th, width: 90 }}></th>
         </tr>
       </thead>
@@ -2153,7 +2154,7 @@ function KompaktowaListaInwestycji({ projekty, przypisania, zakresy, zakresMap, 
           return (
             <React.Fragment key={p.id}>
               <tr style={{ background: otw ? C.jasny : "transparent" }}>
-                <td style={{ ...td, fontWeight: 700, cursor: "pointer" }} onClick={() => setOtwarty(otw ? null : p.id)}>
+                <td style={{ ...td, fontWeight: 700, cursor: "pointer", opacity: p.wstrzymana ? 0.55 : 1 }} onClick={() => setOtwarty(otw ? null : p.id)}>
                   <span style={{ color: C.szary, marginRight: 6, fontSize: 11 }}>{otw ? "▼" : "▶"}</span>{p.nazwa}
                 </td>
                 <td style={td}>
@@ -2172,6 +2173,18 @@ function KompaktowaListaInwestycji({ projekty, przypisania, zakresy, zakresMap, 
                   </span>
                 </td>
                 <td style={{ ...td, textAlign: "center", color: przypP.length ? C.czarny : C.szary }}>{przypP.length || "—"}</td>
+                <td style={{ ...td, textAlign: "center" }}>
+                  <button onClick={() => przelaczWstrzymanie(p)}
+                    title={p.wstrzymana
+                      ? "Inwestycja wstrzymana — punkty nie liczą się do obciążenia. Kliknij, aby wznowić."
+                      : "Inwestycja aktywna — punkty liczą się do obciążenia. Kliknij, aby wstrzymać."}
+                    style={{ border: "none", cursor: "pointer", fontFamily: "inherit", fontSize: 11, fontWeight: 700,
+                      padding: "3px 10px", borderRadius: 20,
+                      color: p.wstrzymana ? "#B35A00" : "#1B7A3D",
+                      background: p.wstrzymana ? "#FBF0DC" : "#E4F4E9" }}>
+                    {p.wstrzymana ? "Wstrzymana" : "Aktywna"}
+                  </button>
+                </td>
                 <td style={{ ...td, textAlign: "right" }}>
                   <button onClick={() => zakonczInwestycje(p.id, p.nazwa)} title="Oznacz jako zakończoną"
                     style={{ border: `1px solid ${C.linia}`, background: C.bialy, borderRadius: 5, padding: "4px 8px", fontSize: 11, fontWeight: 600, cursor: "pointer", color: C.szary }}>
@@ -2181,7 +2194,7 @@ function KompaktowaListaInwestycji({ projekty, przypisania, zakresy, zakresMap, 
               </tr>
               {otw && (
                 <tr>
-                  <td colSpan={5} style={{ padding: "0 10px 12px 30px", background: C.jasny }}>
+                  <td colSpan={6} style={{ padding: "0 10px 12px 30px", background: C.jasny }}>
                     {przypP.length === 0 ? (
                       <div style={{ fontSize: 12, color: C.szary, fontStyle: "italic", padding: "8px 0" }}>
                         brak przypisanych kierowników — dodaj ich w zakładce „Zarządzanie"
@@ -2253,15 +2266,16 @@ function ZakladkaKoordynacja({ uzytkownicy, projektyAll, przypisania, zakresy, t
         if (!p) continue; // inwestycja nieaktywna/zakończona — pomijamy
         const termin = terminProjektu(p);
         const schodzi = termin ? new Date(termin + "T00:00:00") < granica : false;
+        const wstrzymana = !!p.wstrzymana; // wstrzymana zostaje na liście, ale bez punktów
         const punkty = x.punkty != null ? Number(x.punkty) : (zakresMap[p.zakres]?.punkty || 0);
-        if (!schodzi) pkt += punkty;
-        tematy.push({ nazwa: p.nazwa, zakres: p.zakres, punkty, termin, schodzi });
+        if (!schodzi && !wstrzymana) pkt += punkty;
+        tematy.push({ nazwa: p.nazwa, zakres: p.zakres, punkty, termin, schodzi, wstrzymana });
       }
       const inne = Number(u.inne_obowiazki || 0);
       const razem = pkt + inne;
       const poj = Number(u.pojemnosc || 20);
       const proc = poj > 0 ? Math.round(razem / poj * 100) : 0;
-      tematy.sort((a, b) => (a.schodzi - b.schodzi) || (b.punkty - a.punkty));
+      tematy.sort((a, b) => (a.schodzi - b.schodzi) || (a.wstrzymana - b.wstrzymana) || (b.punkty - a.punkty));
       return { u, tematy, pkt, inne, razem, poj, proc };
     });
     wynik.sort((a, b) => b.proc - a.proc);
@@ -2299,6 +2313,16 @@ function ZakladkaKoordynacja({ uzytkownicy, projektyAll, przypisania, zakresy, t
     if (!window.confirm(`Oznaczyć „${nazwa}" jako zakończoną?\n\nZniknie z listy przypisań i z koordynacji. Możesz ją przywrócić w sekcji „Zakończone".`)) return;
     try { await ustawAktywnoscProjektu(projektId, false); odswiez(); pokazToast(`„${nazwa}" przeniesiona do zakończonych`); }
     catch (e) { console.error(e); pokazToast("Błąd archiwizacji inwestycji"); }
+  }
+  // Wstrzymanie/wznowienie inwestycji: zostaje na liście, ale punkty nie liczą
+  // się do obciążenia. Po wznowieniu punkty naliczają się z powrotem.
+  async function przelaczWstrzymanie(p) {
+    const wstrzymac = !p.wstrzymana;
+    try {
+      await ustawKoordynacjeProjektu(p.id, { wstrzymana: wstrzymac });
+      odswiez();
+      pokazToast(wstrzymac ? `„${p.nazwa}" wstrzymana — punkty nie liczą się do obciążenia` : `„${p.nazwa}" aktywna — punkty znów się naliczają`);
+    } catch (e) { console.error(e); pokazToast("Błąd zmiany statusu inwestycji"); }
   }
   async function przywrocInwestycje(projektId, nazwa) {
     try { await ustawAktywnoscProjektu(projektId, true); odswiez(); pokazToast(`„${nazwa}" przywrócona`); }
@@ -2344,7 +2368,7 @@ function ZakladkaKoordynacja({ uzytkownicy, projektyAll, przypisania, zakresy, t
                   <div style={{ display: "grid", gridTemplateColumns: "180px 1fr 110px", gap: 14, alignItems: "center" }}>
                     <div>
                       <div style={{ fontWeight: 700, fontSize: 14 }}>{nazwaOsoby(a.u)}</div>
-                      <div style={{ fontSize: 11.5, color: C.szary, marginTop: 1 }}>{a.tematy.filter((t) => !t.schodzi).length} akt. · {a.razem} pkt{a.inne > 0 ? ` (w tym ${a.inne} inne)` : ""}</div>
+                      <div style={{ fontSize: 11.5, color: C.szary, marginTop: 1 }}>{a.tematy.filter((t) => !t.schodzi && !t.wstrzymana).length} akt. · {a.razem} pkt{a.inne > 0 ? ` (w tym ${a.inne} inne)` : ""}</div>
                       <span style={{ display: "inline-block", fontSize: 10.5, fontWeight: 700, padding: "1px 7px", borderRadius: 20, marginTop: 3, color: stCol, background: stBg }}>{st}</span>
                     </div>
                     <div style={{ position: "relative", height: 24, background: C.jasny, borderRadius: 6, overflow: "hidden", border: `1px solid ${C.linia}` }}>
@@ -2359,11 +2383,12 @@ function ZakladkaKoordynacja({ uzytkownicy, projektyAll, przypisania, zakresy, t
                       {a.tematy.length === 0 ? (
                         <div style={{ fontSize: 12.5, color: C.szary }}>Brak inwestycji.</div>
                       ) : a.tematy.map((t, i) => (
-                        <div key={i} style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5, padding: "3px 0", opacity: t.schodzi ? .45 : 1 }}>
+                        <div key={i} style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5, padding: "3px 0", opacity: (t.schodzi || t.wstrzymana) ? .45 : 1 }}>
                           <span style={{ textDecoration: t.schodzi ? "line-through" : "none" }}>
                             {t.nazwa} <span style={{ fontSize: 10.5, color: C.szary, background: C.jasny, padding: "1px 6px", borderRadius: 4 }}>{zakresMap[t.zakres]?.nazwa || "—"}</span>
+                            {t.wstrzymana && <span style={{ fontSize: 10.5, fontWeight: 700, color: "#B35A00", background: "#FBF0DC", padding: "1px 6px", borderRadius: 4, marginLeft: 4 }}>WSTRZYMANA</span>}
                           </span>
-                          <span style={{ color: C.szary }}>{t.termin ? `do ${fmtPL(t.termin)}` : "bez terminu"} · <b style={{ color: C.czarny }}>{t.punkty} pkt</b>{t.schodzi ? " — zejdzie" : ""}</span>
+                          <span style={{ color: C.szary }}>{t.termin ? `do ${fmtPL(t.termin)}` : "bez terminu"} · <b style={{ color: C.czarny }}>{t.punkty} pkt</b>{t.schodzi ? " — zejdzie" : t.wstrzymana ? " — nie liczone" : ""}</span>
                         </div>
                       ))}
                       {a.inne > 0 && <div style={{ fontSize: 12.5, padding: "3px 0", color: C.szary }}>Inne obowiązki · <b style={{ color: C.czarny }}>{a.inne} pkt</b></div>}
@@ -2390,6 +2415,7 @@ function ZakladkaKoordynacja({ uzytkownicy, projektyAll, przypisania, zakresy, t
           projekty={projektyWidoczne} przypisania={przypisania} zakresy={zakresy} zakresMap={zakresMap}
           uzytMap={uzytMap} terminyDomyslne={terminyDomyslne} punktyLok={punktyLok} setPunktyLok={setPunktyLok}
           zapiszPunkty={zapiszPunkty} zapiszZakres={zapiszZakres} zapiszTermin={zapiszTermin} zakonczInwestycje={zakonczInwestycje}
+          przelaczWstrzymanie={przelaczWstrzymanie}
         />
       </section>
 
