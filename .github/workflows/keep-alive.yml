@@ -1,0 +1,30 @@
+name: Supabase Keep-Alive
+
+# Zapobiega auto-pauzie darmowego projektu Supabase (pauza po 7 dniach bez
+# requestów do API). Odpytuje tabelę `keep_alive` 2x w tygodniu.
+on:
+  schedule:
+    # Poniedziałek i czwartek o 05:00 UTC (odstęp < 7 dni gwarantuje aktywność).
+    - cron: '0 5 * * 1,4'
+  # Ręczne uruchomienie do testów: Actions -> Supabase Keep-Alive -> Run workflow.
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping Supabase REST API
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+        run: |
+          status=$(curl -s -o /dev/null -w '%{http_code}' \
+            "${SUPABASE_URL}/rest/v1/keep_alive?select=id&limit=1" \
+            -H "apikey: ${SUPABASE_ANON_KEY}" \
+            -H "Authorization: Bearer ${SUPABASE_ANON_KEY}")
+          echo "HTTP status: ${status}"
+          if [ "${status}" != "200" ]; then
+            echo "::error::Keep-alive ping nie powiódł się (HTTP ${status}). Sprawdź projekt Supabase i sekrety."
+            exit 1
+          fi
+          echo "Keep-alive OK — projekt Supabase pozostaje aktywny."
