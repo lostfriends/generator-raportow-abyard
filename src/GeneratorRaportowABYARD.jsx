@@ -206,6 +206,14 @@ function opoznienieInwestycji(harmonogram, dataOdniesienia) {
   return { dni: dni(ref, najpPlan), wToku: true };
 }
 
+// Czy opóźnienie w harmonogramie realnie opóźnia zakończenie CAŁEGO projektu.
+// Reużywa opoznienieInwestycji (opóźnienie całej inwestycji): dni > 0 => zagrożenie.
+// Gdy true — w raporcie wymuszany jest status „zagrożenie" (bez możliwości zmiany).
+function harmonogramWymuszaZagrozenie(harmonogram, dataOdniesienia) {
+  const opoz = opoznienieInwestycji(harmonogram, dataOdniesienia);
+  return !!(opoz && opoz.dni > 0);
+}
+
 // Średni postęp % z pozycji, które mają wpisany procent; null gdy żadna nie ma
 function sredniPostep(harmonogram) {
   if (!Array.isArray(harmonogram)) return null;
@@ -798,6 +806,16 @@ export default function GeneratorRaportowABYARD() {
     if (!cashflowWlaczony && harmonogramMaKwoty(form.harmonogram)) setCashflowWlaczony(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [form.harmonogram]);
+
+  // Gdy opóźnienie w harmonogramie opóźnia zakończenie CAŁEGO projektu — wymuś status
+  // „zagrożenie" (w formularzu opcja „nie powoduje zagrożenia" jest wtedy zablokowana).
+  useEffect(() => {
+    if (harmonogramWymuszaZagrozenie(form.harmonogram, form.dataOpracowania)
+        && form.podsumowanie !== PODSUMOWANIE_OPCJE[1]) {
+      setForm((f) => ({ ...f, podsumowanie: PODSUMOWANIE_OPCJE[1] }));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form.harmonogram, form.dataOpracowania]);
 
   // Śledzenie niezapisanych zmian: każda zmiana formularza (pola, harmonogram,
   // zdjęcia, grafika) idzie przez setForm, więc wystarczy obserwować `form`.
@@ -1765,12 +1783,39 @@ export default function GeneratorRaportowABYARD() {
 
         {/* Podsumowanie */}
         <Sekcja tytul="Podsumowanie (wymagany wybór)">
-          {PODSUMOWANIE_OPCJE.map((opt) => (
-            <label key={opt} style={{ display: "flex", gap: 12, marginBottom: 12, fontSize: 14, cursor: "pointer", alignItems: "flex-start" }}>
-              <input type="radio" name="podsum" checked={form.podsumowanie === opt} onChange={() => upd("podsumowanie", opt)} style={{ marginTop: 3, accentColor: C.czarny }} />
-              <span>{opt}</span>
-            </label>
-          ))}
+          {(() => {
+            const wymuszone = harmonogramWymuszaZagrozenie(form.harmonogram, form.dataOpracowania);
+            return (
+              <>
+                {PODSUMOWANIE_OPCJE.map((opt, idx) => {
+                  const zablokowana = wymuszone && idx === 0; // „nie powoduje zagrożenia" — niedostępne
+                  return (
+                    <label key={opt} style={{ display: "flex", gap: 12, marginBottom: 12, fontSize: 14, cursor: zablokowana ? "not-allowed" : "pointer", alignItems: "flex-start", opacity: zablokowana ? 0.5 : 1 }}>
+                      <input
+                        type="radio"
+                        name="podsum"
+                        checked={form.podsumowanie === opt}
+                        onChange={() => {
+                          if (zablokowana) {
+                            window.alert("Występujące opóźnienie w harmonogramie powoduje zagrożenie terminu zakończenia całości projektu. Nie można wybrać opcji „nie powoduje zagrożenia”.");
+                            return;
+                          }
+                          upd("podsumowanie", opt);
+                        }}
+                        style={{ marginTop: 3, accentColor: C.czarny }}
+                      />
+                      <span>{opt}</span>
+                    </label>
+                  );
+                })}
+                {wymuszone && (
+                  <div style={{ marginTop: 2, fontSize: 12.5, color: "#B22", background: "#FBE6E6", borderLeft: "3px solid #B22", padding: "8px 12px", borderRadius: 4 }}>
+                    Opóźnienie w harmonogramie opóźnia zakończenie całości projektu — status „zagrożenie” jest ustawiony automatycznie i zablokowany.
+                  </div>
+                )}
+              </>
+            );
+          })()}
         </Sekcja>
 
       </main>
@@ -2747,17 +2792,19 @@ function WidokKtoCoProwadzi({ jestAdmin, email, onForm, onArchiwum, onAdmin, onW
 
 /* ---------- ARCHIWUM ----------------------------------------------------- */
 function WidokArchiwum({ raporty, ladowanie, filtr, setFiltr, onOdswiez, onOtworz, onEdytuj, onUsun, mozeEdytowac, godzinyDoEdycji, onPozwolEdycje, onCofnijEdycje, onNowyRaport, jestAdmin, email, onForm, onKoordynacja, onAdmin, onWyloguj }) {
-  // Status z podsumowania. Uwaga: obie standardowe formuły zawierają rdzeń "zagroż"
-  // ("powoduje zagrożenie" vs "nie powoduje zagrożenia"), więc najpierw wykrywamy
-  // przeczenie (brak zagrożenia), a dopiero potem samo zagrożenie.
-  function statusZPodsumowania(p) {
-    if (!p) return { txt: "—", kolor: C.szary, tlo: "transparent" };
-    const t = p.toLowerCase();
+  // Status na plakietce czyta z pola „Podsumowanie" raportu. Dodatkowo, gdy opóźnienie
+  // w harmonogramie realnie opóźnia zakończenie całości projektu, wymuszamy „zagrożenie"
+  // (zabezpiecza też starsze raporty zapisane z domyślną opcją „nie powoduje zagrożenia").
+  const ZAGROZENIE = { txt: "Zagrożenie terminu", kolor: "#B22", tlo: "#FBE6E6" };
+  const NIEZAGROZONY = { txt: "Termin niezagrożony", kolor: "#1B7A3D", tlo: "#E4F4E9" };
+  function statusInwestycji(raport) {
+    if (!raport) return { txt: "—", kolor: C.szary, tlo: "transparent" };
+    if (harmonogramWymuszaZagrozenie(raport.harmonogram, raport.data_opracowania)) return ZAGROZENIE;
+    const t = (raport.podsumowanie || "").toLowerCase();
     const brakZagrozenia = t.includes("nie powoduje") || t.includes("niezagroż") || t.includes("nie ma zagroż") || t.includes("bez zagroż");
-    if (brakZagrozenia) return { txt: "Termin niezagrożony", kolor: "#1B7A3D", tlo: "#E4F4E9" };
-    const zagrozenie = t.includes("zagroż") || t.includes("zagroz");
-    if (zagrozenie) return { txt: "Zagrożenie terminu", kolor: "#B22", tlo: "#FBE6E6" };
-    return { txt: "Termin niezagrożony", kolor: "#1B7A3D", tlo: "#E4F4E9" };
+    if (brakZagrozenia) return NIEZAGROZONY;
+    if (t.includes("zagroż") || t.includes("zagroz")) return ZAGROZENIE;
+    return NIEZAGROZONY;
   }
 
   const lista = raporty || [];
@@ -2802,7 +2849,7 @@ function WidokArchiwum({ raporty, ladowanie, filtr, setFiltr, onOdswiez, onOtwor
             {/* 1) Przegląd zbiorczy budów */}
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", gap: 14, marginBottom: 28 }}>
               {budowy.map((b) => {
-                const st = statusZPodsumowania(b.ostatni?.podsumowanie);
+                const st = statusInwestycji(b.ostatni);
                 const aktywny = filtr === b.nazwa;
                 return (
                   <div
@@ -2883,7 +2930,7 @@ function WidokArchiwum({ raporty, ladowanie, filtr, setFiltr, onOdswiez, onOtwor
                 </thead>
                 <tbody>
                   {widoczne.map((r) => {
-                    const st = statusZPodsumowania(r.podsumowanie);
+                    const st = statusInwestycji(r);
                     return (
                       <tr key={r.id} style={{ borderTop: `1px solid ${C.linia}` }}>
                         <td style={{ ...tdArch, fontWeight: 800, textAlign: "center" }}>{r.numer}</td>
