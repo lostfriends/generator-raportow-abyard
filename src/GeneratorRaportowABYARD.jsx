@@ -2747,16 +2747,15 @@ function WidokKtoCoProwadzi({ jestAdmin, email, onForm, onArchiwum, onAdmin, onW
 
 /* ---------- ARCHIWUM ----------------------------------------------------- */
 function WidokArchiwum({ raporty, ladowanie, filtr, setFiltr, onOdswiez, onOtworz, onEdytuj, onUsun, mozeEdytowac, godzinyDoEdycji, onPozwolEdycje, onCofnijEdycje, onNowyRaport, jestAdmin, email, onForm, onKoordynacja, onAdmin, onWyloguj }) {
-  // Status z podsumowania. Uwaga: obie standardowe formuły zawierają rdzeń "zagroż"
-  // ("powoduje zagrożenie" vs "nie powoduje zagrożenia"), więc najpierw wykrywamy
-  // przeczenie (brak zagrożenia), a dopiero potem samo zagrożenie.
-  function statusZPodsumowania(p) {
-    if (!p) return { txt: "—", kolor: C.szary, tlo: "transparent" };
-    const t = p.toLowerCase();
-    const brakZagrozenia = t.includes("nie powoduje") || t.includes("niezagroż") || t.includes("nie ma zagroż") || t.includes("bez zagroż");
-    if (brakZagrozenia) return { txt: "Termin niezagrożony", kolor: "#1B7A3D", tlo: "#E4F4E9" };
-    const zagrozenie = t.includes("zagroż") || t.includes("zagroz");
-    if (zagrozenie) return { txt: "Zagrożenie terminu", kolor: "#B22", tlo: "#FBE6E6" };
+  // Status inwestycji liczony z harmonogramu (a nie z ręcznego pola „Podsumowanie").
+  // Wcześniej plakietka czytała tekst podsumowania, który domyślnie zawsze wskazywał
+  // „nie powoduje zagrożenia" — przez co przy policzonym opóźnieniu kafelek i tak
+  // świecił na zielono. Teraz: jest opóźnienie (dni > 0) => „Zagrożenie terminu”,
+  // brak opóźnienia => „Termin niezagrożony”, brak danych harmonogramu => „—”.
+  function statusInwestycji(raport) {
+    const opoz = raport ? opoznienieInwestycji(raport.harmonogram, raport.data_opracowania) : null;
+    if (!opoz) return { txt: "—", kolor: C.szary, tlo: "transparent" };
+    if (opoz.dni > 0) return { txt: "Zagrożenie terminu", kolor: "#B22", tlo: "#FBE6E6" };
     return { txt: "Termin niezagrożony", kolor: "#1B7A3D", tlo: "#E4F4E9" };
   }
 
@@ -2802,7 +2801,7 @@ function WidokArchiwum({ raporty, ladowanie, filtr, setFiltr, onOdswiez, onOtwor
             {/* 1) Przegląd zbiorczy budów */}
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", gap: 14, marginBottom: 28 }}>
               {budowy.map((b) => {
-                const st = statusZPodsumowania(b.ostatni?.podsumowanie);
+                const st = statusInwestycji(b.ostatni);
                 const aktywny = filtr === b.nazwa;
                 return (
                   <div
@@ -2883,7 +2882,7 @@ function WidokArchiwum({ raporty, ladowanie, filtr, setFiltr, onOdswiez, onOtwor
                 </thead>
                 <tbody>
                   {widoczne.map((r) => {
-                    const st = statusZPodsumowania(r.podsumowanie);
+                    const st = statusInwestycji(r);
                     return (
                       <tr key={r.id} style={{ borderTop: `1px solid ${C.linia}` }}>
                         <td style={{ ...tdArch, fontWeight: 800, textAlign: "center" }}>{r.numer}</td>
