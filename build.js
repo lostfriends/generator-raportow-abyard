@@ -27,6 +27,21 @@ async function main() {
     logLevel: "info",
   });
 
+  // Krok 1b — OSOBNY, samodzielny bundel biblioteki pdfmake (+ fonty Roboto).
+  // Zostaje jako osobny plik dist/pdfmake-lib.js (NIE jest wklejany do index.html)
+  // i jest ładowany leniwie dopiero przy pierwszym eksporcie PDF. Dzięki temu
+  // główny bundel aplikacji jest lekki (~0,5 MB), a ciężka biblioteka schodzi
+  // z sieci tylko wtedy, gdy użytkownik faktycznie generuje PDF.
+  await esbuild.build({
+    entryPoints: ["src/pdfmake-lib.js"],
+    bundle: true,
+    minify: true,
+    format: "iife",
+    define: { "process.env.NODE_ENV": '"production"' },
+    outfile: path.join(OUT_DIR, "pdfmake-lib.js"),
+    logLevel: "info",
+  });
+
   // Krok 2 — owinięcie bundla w kompletny dokument HTML
   const bundle = fs.readFileSync(BUNDLE_TMP, "utf8");
   const html = `<!DOCTYPE html>

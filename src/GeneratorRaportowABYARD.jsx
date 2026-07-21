@@ -214,6 +214,41 @@ function harmonogramWymuszaZagrozenie(harmonogram, dataOdniesienia) {
   return !!(opoz && opoz.dni > 0);
 }
 
+// Liczba dni między dwoma datami ISO (a - b). Dodatnia gdy a jest później niż b.
+function dniMiedzy(aISO, bISO) {
+  if (!aISO || !bISO) return null;
+  return Math.round((new Date(aISO + "T00:00:00") - new Date(bISO + "T00:00:00")) / 86400000);
+}
+
+// Ocena statusu inwestycji na podstawie NAJNOWSZEGO raportu (do kokpitu koordynacji
+// inwestycji). Reużywa tej samej logiki, co plakietka w archiwum: harmonogram
+// wymuszający zagrożenie ma pierwszeństwo, dalej treść pola „Podsumowanie".
+// Zwraca { kod, txt, kolor, tlo }. kod: "zagrozenie" | "ok" | "brak".
+function statusZRaportu(raport) {
+  if (!raport) return { kod: "brak", txt: "brak raportu", kolor: "#8A8A8A", tlo: "#EFEFEF" };
+  if (harmonogramWymuszaZagrozenie(raport.harmonogram, raport.data_opracowania))
+    return { kod: "zagrozenie", txt: "Zagrożenie terminu", kolor: "#B22", tlo: "#FBE6E6" };
+  const t = (raport.podsumowanie || "").toLowerCase();
+  const brakZagrozenia = t.includes("nie powoduje") || t.includes("niezagroż") || t.includes("nie ma zagroż") || t.includes("bez zagroż");
+  if (brakZagrozenia) return { kod: "ok", txt: "Termin niezagrożony", kolor: "#1B7A3D", tlo: "#E4F4E9" };
+  if (t.includes("zagroż") || t.includes("zagroz")) return { kod: "zagrozenie", txt: "Zagrożenie terminu", kolor: "#B22", tlo: "#FBE6E6" };
+  return { kod: "ok", txt: "Termin niezagrożony", kolor: "#1B7A3D", tlo: "#E4F4E9" };
+}
+
+// Najnowszy raport z listy (po dacie opracowania, przy remisie po numerze).
+function najnowszyRaport(raporty) {
+  let best = null;
+  for (const r of (raporty || [])) {
+    if (!best) { best = r; continue; }
+    const da = r.data_opracowania || "", db = best.data_opracowania || "";
+    if (da && db && da !== db) { if (da > db) best = r; }
+    else if (da && !db) best = r;
+    else if (!da && !db && (r.numer || 0) > (best.numer || 0)) best = r;
+    else if (da && db && da === db && (r.numer || 0) > (best.numer || 0)) best = r;
+  }
+  return best;
+}
+
 // Średni postęp % z pozycji, które mają wpisany procent; null gdy żadna nie ma
 function sredniPostep(harmonogram) {
   if (!Array.isArray(harmonogram)) return null;
@@ -1961,6 +1996,7 @@ function PanelAdmina({ pokazToast, email, onForm, onArchiwum, onKoordynacja, onW
   const [zakresy, setZakresy] = useState([]);
   const [terminyDomyslne, setTerminyDomyslne] = useState({});
   const [nieaktywne, setNieaktywne] = useState([]);
+  const [raporty, setRaporty] = useState([]); // wszystkie raporty (lekkie) — do Koordynacji Inwestycji
   const [ladowanie, setLadowanie] = useState(true);
   const [nowaBudowa, setNowaBudowa] = useState("");
   const [wybranyPM, setWybranyPM] = useState("");
@@ -1969,13 +2005,14 @@ function PanelAdmina({ pokazToast, email, onForm, onArchiwum, onKoordynacja, onW
   async function wczytaj() {
     setLadowanie(true);
     try {
-      const [u, p, prz, zak, term, nieakt] = await Promise.all([
+      const [u, p, prz, zak, term, nieakt, rap] = await Promise.all([
         listaUzytkownikow(),
         listaAktywnychProjektow(),
         listaPrzypisan(),
         listaZakresow(),
         terminyZHarmonogramu(),
         listaNieaktywnychProjektow(),
+        listaWszystkichRaportow(),
       ]);
       setUzytkownicy(u);
       setProjektyAll(p);
@@ -1983,6 +2020,7 @@ function PanelAdmina({ pokazToast, email, onForm, onArchiwum, onKoordynacja, onW
       setZakresy(zak);
       setTerminyDomyslne(term);
       setNieaktywne(nieakt);
+      setRaporty(rap);
       if (!wybranyPM && u.length) setWybranyPM(u[0].id);
     } catch (e) {
       console.error(e);
@@ -2067,7 +2105,7 @@ function PanelAdmina({ pokazToast, email, onForm, onArchiwum, onKoordynacja, onW
         {/* Zakładki panelu + odśwież */}
         <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", marginBottom: 22, borderBottom: `2px solid ${C.linia}` }}>
           <div style={{ display: "flex", gap: 4 }}>
-            {[["zarzadzanie", "Zarządzanie"], ["koordynacja", "Koordynacja PM"]].map(([kod, et]) => (
+            {[["zarzadzanie", "Zarządzanie"], ["koordynacja", "Koordynacja PM"], ["inwestycje", "Koordynacja Inwestycji"]].map(([kod, et]) => (
               <button key={kod} onClick={() => setZakladka(kod)}
                 style={{ border: "none", background: "transparent", padding: "10px 18px", fontSize: 14, fontWeight: 700, cursor: "pointer",
                   color: zakladka === kod ? C.czarny : C.szary,
@@ -2088,6 +2126,11 @@ function PanelAdmina({ pokazToast, email, onForm, onArchiwum, onKoordynacja, onW
             uzytkownicy={uzytkownicy} projektyAll={projektyAll} przypisania={przypisania} zakresy={zakresy}
             terminyDomyslne={terminyDomyslne} nieaktywne={nieaktywne}
             pokazToast={pokazToast} odswiez={wczytaj}
+          />
+        ) : zakladka === "inwestycje" ? (
+          <ZakladkaKoordynacjaInwestycji
+            projektyAll={projektyAll} przypisania={przypisania} uzytkownicy={uzytkownicy} zakresy={zakresy}
+            terminyDomyslne={terminyDomyslne} raporty={raporty}
           />
         ) : (
           <></>
@@ -2607,6 +2650,215 @@ function ZakladkaKoordynacja({ uzytkownicy, projektyAll, przypisania, zakresy, t
           </div>
         </section>
       )}
+    </>
+  );
+}
+
+/* ---------- ZAKŁADKA KOORDYNACJA INWESTYCJI (panel admina) --------------- */
+/* Kokpit przekrojowy: wszystkie aktywne inwestycje w jednym miejscu — status
+   z najnowszego raportu, opóźnienie, data ostatniego raportu, najbliższy termin
+   i PnU, przypisani PM. Plus monitor kompletności: kto nie złożył raportu. */
+function ZakladkaKoordynacjaInwestycji({ projektyAll, przypisania, uzytkownicy, zakresy, terminyDomyslne, raporty }) {
+  const uzytMap = React.useMemo(() => Object.fromEntries(uzytkownicy.map((u) => [u.id, u])), [uzytkownicy]);
+  const zakresMap = React.useMemo(() => Object.fromEntries(zakresy.map((z) => [z.kod, z])), [zakresy]);
+  const [filtrStatus, setFiltrStatus] = React.useState("wszystkie"); // wszystkie | zagrozone | bez-raportu
+  const [prog, setProg] = React.useState(30);                        // próg dni „bez aktualnego raportu"
+  const [szukaj, setSzukaj] = React.useState("");
+  const dzis = dzisISO();
+
+  // Najnowszy raport per projekt (klucz: projekt_id)
+  const raportyProjektu = React.useMemo(() => {
+    const mapa = {};
+    for (const r of (raporty || [])) {
+      (mapa[r.projekt_id] = mapa[r.projekt_id] || []).push(r);
+    }
+    return mapa;
+  }, [raporty]);
+
+  // Wiersz kokpitu dla każdej aktywnej inwestycji
+  const dane = React.useMemo(() => {
+    return projektyAll.map((p) => {
+      const ost = najnowszyRaport(raportyProjektu[p.id]);
+      const status = statusZRaportu(ost);
+      const dniOd = ost ? dniMiedzy(dzis, ost.data_opracowania) : null;
+      const opoz = ost ? opoznienieInwestycji(ost.harmonogram, ost.data_opracowania) : null;
+      const opozDni = opoz && opoz.dni > 0 ? opoz.dni : 0;
+      const postep = ost ? sredniPostep(ost.harmonogram) : null;
+      const terminReczny = p.termin_zakonczenia || "";
+      const terminAuto = terminyDomyslne?.[p.id] || "";
+      const termin = terminReczny || terminAuto || "";
+      const dniDoTerminu = termin ? dniMiedzy(termin, dzis) : null;
+      const pnu = ost ? (ost.pnu_nie_dotyczy ? "—" : (ost.pnu || "")) : "";
+      const pmy = przypisania.filter((x) => x.projekt_id === p.id).map((x) => nazwaOsoby(uzytMap[x.uzytkownik])).filter(Boolean);
+      // sygnał kompletności: brak raportu w ogóle albo starszy niż próg
+      const zalega = dniOd === null || dniOd > prog;
+      return {
+        projekt: p, status, ost, dniOd, opozDni, postep, termin, terminAuto: !terminReczny && !!terminAuto,
+        dniDoTerminu, pnu, pnuNieDotyczy: !!ost?.pnu_nie_dotyczy, pmy, wstrzymana: !!p.wstrzymana, zalega,
+      };
+    });
+  }, [projektyAll, raportyProjektu, terminyDomyslne, przypisania, uzytMap, prog, dzis]);
+
+  const liczby = React.useMemo(() => ({
+    razem: dane.length,
+    zagrozone: dane.filter((d) => d.status.kod === "zagrozenie" && !d.wstrzymana).length,
+    zalegle: dane.filter((d) => d.zalega && !d.wstrzymana).length,
+    wstrzymane: dane.filter((d) => d.wstrzymana).length,
+  }), [dane]);
+
+  // Monitor kompletności: aktywne, niewstrzymane, zalegające; najgorsze na górze (nigdy → góra)
+  const zalegle = React.useMemo(() => dane
+    .filter((d) => d.zalega && !d.wstrzymana)
+    .sort((a, b) => (a.dniOd === null ? Infinity : a.dniOd) < (b.dniOd === null ? Infinity : b.dniOd) ? 1 : -1),
+    [dane]);
+
+  // Kokpit: filtr + szukajka + sortowanie ryzykiem
+  const widoczne = React.useMemo(() => {
+    const q = szukaj.trim().toLowerCase();
+    let lista = dane;
+    if (filtrStatus === "zagrozone") lista = lista.filter((d) => d.status.kod === "zagrozenie");
+    else if (filtrStatus === "bez-raportu") lista = lista.filter((d) => d.zalega);
+    if (q) lista = lista.filter((d) => d.projekt.nazwa.toLowerCase().includes(q));
+    const rank = (d) => (d.wstrzymana ? -1 : d.status.kod === "zagrozenie" ? 3 : d.zalega ? 2 : 1);
+    return [...lista].sort((a, b) => (rank(b) - rank(a)) || (b.opozDni - a.opozDni) || ((b.dniOd || 0) - (a.dniOd || 0)) || a.projekt.nazwa.localeCompare(b.projekt.nazwa, "pl"));
+  }, [dane, filtrStatus, szukaj]);
+
+  const th = { textAlign: "left", padding: "8px 10px", color: C.szary, fontSize: 11, textTransform: "uppercase", letterSpacing: .5, borderBottom: `2px solid ${C.linia}` };
+  const td = { padding: "8px 10px", borderBottom: `1px solid ${C.jasny}`, fontSize: 13, verticalAlign: "top" };
+  const chip = (txt, kolor, tlo) => (
+    <span style={{ display: "inline-block", fontSize: 10.5, fontWeight: 700, padding: "2px 8px", borderRadius: 20, color: kolor, background: tlo, whiteSpace: "nowrap" }}>{txt}</span>
+  );
+  // Etykieta „ostatni raport": ile dni temu + numer, z kolorem wg zalegania
+  function ostatniRaportKom(d) {
+    if (d.dniOd === null) return <span style={{ color: "#B22", fontWeight: 700 }}>brak raportu</span>;
+    const kol = d.zalega ? "#B35A00" : C.szary;
+    return (
+      <span style={{ color: kol }}>
+        {d.dniOd === 0 ? "dziś" : `${d.dniOd} dni temu`}
+        <span style={{ color: C.szary }}> · nr {d.ost.numer}</span>
+      </span>
+    );
+  }
+
+  return (
+    <>
+      {/* PASEK PODSUMOWUJĄCY */}
+      <section style={{ ...card, display: "flex", flexWrap: "wrap", gap: 10, alignItems: "stretch" }}>
+        {[
+          ["Inwestycje aktywne", liczby.razem, C.czarny, C.jasny],
+          ["Zagrożony termin", liczby.zagrozone, "#B22", "#FBE6E6"],
+          [`Bez raportu > ${prog} dni`, liczby.zalegle, "#B35A00", "#FBF0DC"],
+          ["Wstrzymane", liczby.wstrzymane, C.szary, C.jasny],
+        ].map(([et, n, kol, tlo]) => (
+          <div key={et} style={{ flex: "1 1 160px", border: `1px solid ${C.linia}`, borderRadius: 8, padding: "12px 16px", background: tlo }}>
+            <div style={{ fontSize: 28, fontWeight: 800, color: kol, lineHeight: 1 }}>{n}</div>
+            <div style={{ fontSize: 11.5, color: C.szary, marginTop: 4, textTransform: "uppercase", letterSpacing: .4 }}>{et}</div>
+          </div>
+        ))}
+      </section>
+
+      {/* MONITOR KOMPLETNOŚCI — KTO NIE ZŁOŻYŁ RAPORTU */}
+      <section style={card}>
+        <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 8 }}>
+          <div style={secTitle}>Do uzupełnienia — brak aktualnego raportu</div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <span style={{ fontSize: 12, color: C.szary }}>Próg</span>
+            <div style={{ display: "flex", border: `1px solid ${C.linia}`, borderRadius: 8, overflow: "hidden" }}>
+              {[30, 45, 60].map((d) => (
+                <button key={d} onClick={() => setProg(d)}
+                  style={{ border: "none", background: prog === d ? C.czarny : C.bialy, color: prog === d ? C.bialy : C.czarny, padding: "6px 12px", fontSize: 12.5, fontWeight: 600, cursor: "pointer", borderRight: `1px solid ${C.linia}` }}>
+                  {d} dni
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+        <p style={{ fontSize: 12.5, color: C.szary, marginTop: -2, marginBottom: 14, lineHeight: 1.5 }}>
+          Aktywne inwestycje bez żadnego raportu lub z raportem starszym niż {prog} dni. Wstrzymane pomijane.
+        </p>
+        {zalegle.length === 0 ? (
+          <div style={{ fontSize: 13, color: "#1B7A3D", fontWeight: 600 }}>✓ Wszystkie aktywne inwestycje mają aktualny raport.</div>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            {zalegle.map((d) => (
+              <div key={d.projekt.id} style={{ display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", gap: 10, padding: "9px 12px", border: `1px solid ${d.dniOd === null ? "#F0C0C0" : C.linia}`, borderRadius: 6, background: d.dniOd === null ? "#FCF3F3" : C.bialy }}>
+                <div style={{ minWidth: 200, flex: "1 1 240px" }}>
+                  <div style={{ fontWeight: 700, fontSize: 13.5 }}>{d.projekt.nazwa}</div>
+                  <div style={{ fontSize: 11.5, color: C.szary, marginTop: 1 }}>{d.pmy.length ? d.pmy.join(", ") : "brak przypisanego PM"}</div>
+                </div>
+                <div style={{ textAlign: "right" }}>
+                  {d.dniOd === null
+                    ? chip("BRAK RAPORTU", "#B22", "#FBE6E6")
+                    : chip(`${d.dniOd} dni od raportu (nr ${d.ost.numer})`, "#B35A00", "#FBF0DC")}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
+
+      {/* KOKPIT — WSZYSTKIE INWESTYCJE */}
+      <section style={card}>
+        <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 12 }}>
+          <div style={secTitle}>Kokpit inwestycji</div>
+          <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8 }}>
+            <div style={{ display: "flex", border: `1px solid ${C.linia}`, borderRadius: 8, overflow: "hidden" }}>
+              {[["wszystkie", "Wszystkie"], ["zagrozone", "Zagrożone"], ["bez-raportu", "Bez raportu"]].map(([kod, et]) => (
+                <button key={kod} onClick={() => setFiltrStatus(kod)}
+                  style={{ border: "none", background: filtrStatus === kod ? C.czarny : C.bialy, color: filtrStatus === kod ? C.bialy : C.czarny, padding: "6px 12px", fontSize: 12.5, fontWeight: 600, cursor: "pointer", borderRight: `1px solid ${C.linia}` }}>
+                  {et}
+                </button>
+              ))}
+            </div>
+            <input type="text" value={szukaj} onChange={(e) => setSzukaj(e.target.value)} placeholder="Szukaj inwestycji…"
+              style={{ padding: "7px 11px", border: `1px solid ${C.linia}`, borderRadius: 6, fontSize: 13, width: 200 }} />
+          </div>
+        </div>
+        {widoczne.length === 0 ? (
+          <div style={{ fontSize: 13, color: C.szary, fontStyle: "italic" }}>Brak inwestycji spełniających kryteria.</div>
+        ) : (
+          <div className="tabela-scroll-own">
+            <table style={{ width: "100%", borderCollapse: "collapse" }}>
+              <thead>
+                <tr>
+                  <th style={th}>Inwestycja</th>
+                  <th style={{ ...th, width: 140 }}>PM</th>
+                  <th style={{ ...th, width: 130 }}>Status</th>
+                  <th style={{ ...th, width: 90, textAlign: "center" }}>Opóźnienie</th>
+                  <th style={{ ...th, width: 70, textAlign: "center" }}>Postęp</th>
+                  <th style={{ ...th, width: 150 }}>Ostatni raport</th>
+                  <th style={{ ...th, width: 130 }}>Termin / PnU</th>
+                </tr>
+              </thead>
+              <tbody>
+                {widoczne.map((d) => (
+                  <tr key={d.projekt.id} style={{ opacity: d.wstrzymana ? 0.6 : 1 }}>
+                    <td style={{ ...td, fontWeight: 700 }}>
+                      {d.projekt.nazwa}
+                      {d.wstrzymana && <span style={odznakaWstrzymana}>WSTRZYMANA</span>}
+                    </td>
+                    <td style={{ ...td, color: d.pmy.length ? C.czarny : C.szary, fontSize: 12.5 }}>{d.pmy.length ? d.pmy.join(", ") : "—"}</td>
+                    <td style={td}>{chip(d.status.txt, d.status.kolor, d.status.tlo)}</td>
+                    <td style={{ ...td, textAlign: "center", color: d.opozDni > 0 ? "#B22" : C.szary, fontWeight: d.opozDni > 0 ? 800 : 400 }}>{d.opozDni > 0 ? `${d.opozDni} dni` : "—"}</td>
+                    <td style={{ ...td, textAlign: "center", fontWeight: 700 }}>{d.postep != null ? `${d.postep}%` : "—"}</td>
+                    <td style={td}>{ostatniRaportKom(d)}</td>
+                    <td style={{ ...td, fontSize: 12.5 }}>
+                      {d.termin ? (
+                        <span style={{ color: d.dniDoTerminu != null && d.dniDoTerminu < 0 ? "#B22" : (d.dniDoTerminu != null && d.dniDoTerminu <= 60 ? "#B35A00" : C.czarny), fontWeight: 600 }}>
+                          {fmtPL(d.termin)}{d.terminAuto ? " ·auto" : ""}
+                        </span>
+                      ) : <span style={{ color: C.szary }}>—</span>}
+                      <div style={{ fontSize: 11, color: C.szary, marginTop: 2 }}>
+                        PnU: {d.pnuNieDotyczy ? "nie dotyczy" : (d.pnu ? fmtPL(d.pnu) : "—")}
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
     </>
   );
 }
@@ -3141,8 +3393,319 @@ function WidokPubliczny({ token }) {
 }
 
 /* ---------- Podgląd / PDF ------------------------------------------------- */
+/* ============================================================================
+   EKSPORT PDF (pdfmake) — wektorowy plik budowany z danych raportu.
+   Niezależny od okna druku przeglądarki i opcji „Grafika w tle": jeden klik,
+   ten sam plik za każdym razem, tekst zaznaczalny. Układ odwzorowuje podgląd
+   (PodgladPDF); przycisk „Zapisz/Drukuj" zostaje jako alternatywa 1:1 z HTML.
+   ========================================================================== */
+
+// URL/dataURL -> dataURL (base64). Zwraca null przy błędzie (pomijamy obraz).
+async function urlNaDataUrl(url) {
+  if (!url) return null;
+  if (url.startsWith("data:")) return url;
+  try {
+    const resp = await fetch(url);
+    if (!resp.ok) return null;
+    const blob = await resp.blob();
+    return await new Promise((res, rej) => {
+      const fr = new FileReader();
+      fr.onload = () => res(fr.result);
+      fr.onerror = () => rej(new Error("read"));
+      fr.readAsDataURL(blob);
+    });
+  } catch { return null; }
+}
+function wczytajObrazek(dataUrl) {
+  return new Promise((res) => {
+    const img = new Image();
+    img.onload = () => res(img);
+    img.onerror = () => res(null);
+    img.src = dataUrl;
+  });
+}
+// Zwraca { dataUrl (PNG/JPEG — pdfmake nie przyjmuje innych), w, h } albo null.
+async function przygotujObraz(url) {
+  const dataUrl = await urlNaDataUrl(url);
+  if (!dataUrl) return null;
+  const img = await wczytajObrazek(dataUrl);
+  if (!img) return null;
+  const mime = (dataUrl.slice(5, dataUrl.indexOf(";")) || "").toLowerCase();
+  if (mime === "image/png" || mime === "image/jpeg") {
+    return { dataUrl, w: img.naturalWidth, h: img.naturalHeight };
+  }
+  // inny format (np. webp) — przekoduj na JPEG przez canvas (data: URI nie „truje" canvasu)
+  try {
+    const cv = document.createElement("canvas");
+    cv.width = img.naturalWidth; cv.height = img.naturalHeight;
+    cv.getContext("2d").drawImage(img, 0, 0);
+    return { dataUrl: cv.toDataURL("image/jpeg", 0.85), w: img.naturalWidth, h: img.naturalHeight };
+  } catch { return null; }
+}
+
+// HTML z edytora (b/i/u/br/div/p) -> tablica „runs" dla pdfmake.
+function htmlNaPdfmake(html) {
+  const runs = [];
+  if (html && typeof DOMParser !== "undefined") {
+    const doc = new DOMParser().parseFromString(`<div>${html}</div>`, "text/html");
+    const walk = (node, st) => {
+      node.childNodes.forEach((ch) => {
+        if (ch.nodeType === 3) {
+          if (ch.textContent) runs.push({ text: ch.textContent, ...st });
+        } else if (ch.nodeType === 1) {
+          const tag = ch.tagName.toLowerCase();
+          if (tag === "br") { runs.push({ text: "\n" }); return; }
+          const s = { ...st };
+          if (tag === "b" || tag === "strong") s.bold = true;
+          if (tag === "i" || tag === "em") s.italics = true;
+          if (tag === "u") s.decoration = "underline";
+          walk(ch, s);
+          if (tag === "div" || tag === "p") runs.push({ text: "\n" });
+        }
+      });
+    };
+    if (doc.body.firstChild) walk(doc.body.firstChild, {});
+  } else if (html) {
+    runs.push({ text: String(html).replace(/<[^>]+>/g, "") });
+  }
+  return { text: runs.length ? runs : [{ text: "—" }] };
+}
+function htmlBlok(html) {
+  return { ...htmlNaPdfmake(html), fontSize: 10.5, lineHeight: 1.4, margin: [2, 0, 2, 0] };
+}
+
+const PDF_KOL = { czarny: "#1A1A1A", zolty: "#FBC707", szary: "#6B6B6B", linia: "#E0DDD4", zoltyJasny: "#FFF6D6", czerwony: "#B22222" };
+const PDF_SZER = 515; // szerokość treści A4 przy marginesach 40
+
+function pdfNaglowekSekcji(tytul) {
+  return {
+    table: { widths: [6, "*"], body: [[
+      { text: "", fillColor: PDF_KOL.zolty, border: [false, false, false, false] },
+      { text: tytul.toUpperCase(), fillColor: PDF_KOL.czarny, color: "#FFFFFF", bold: true, fontSize: 11, characterSpacing: 1, margin: [8, 5, 8, 5], border: [false, false, false, false] },
+    ]] },
+    layout: "noBorders",
+    margin: [0, 16, 0, 6],
+  };
+}
+
+async function pdfHarmonogram(content, form) {
+  const { czarny, zolty, linia } = PDF_KOL;
+  if (form.harmonogramObrazy && form.harmonogramObrazy.length > 0) {
+    content.push(pdfNaglowekSekcji("Harmonogram budowy"));
+    for (const o of form.harmonogramObrazy) {
+      const im = await przygotujObraz(o.dataUrl || o.url);
+      if (im) content.push({ image: im.dataUrl, fit: [PDF_SZER, 700], alignment: "center", margin: [0, 0, 0, 10] });
+    }
+    return;
+  }
+  const wiersze = (form.harmonogram || []).map((r, idx) => ({ ...r, nr: idx + 1 }))
+    .filter((r) => { const ef = efektywnyWiersz(r); return ef.start || ef.koniec || ef.rzecz || ef.proc !== ""; });
+  if (wiersze.length === 0) return;
+  content.push(pdfNaglowekSekcji("Harmonogram budowy"));
+  const th = (t, al) => ({ text: t, fillColor: czarny, color: zolty, bold: true, fontSize: 8, alignment: al || "center", margin: [2, 3, 2, 3] });
+  const c = (t, o = {}) => ({ text: t, fontSize: 8, alignment: o.al || "center", bold: o.bold, color: o.color, fillColor: o.fill, margin: [2, 2, 2, 2] });
+  const body = [[th("#"), th("Zadanie", "left"), th("Start"), th("Koniec"), th("Progn./rzecz."), th("%"), th("Opóźn.")]];
+  for (const r of wiersze) {
+    const ef = efektywnyWiersz(r);
+    const op = obliczOpoznienie(ef, form.dataOpracowania);
+    const pod = maPodpozycje(r) ? r.pod.filter((p) => p && (p.zadanie || p.start || p.koniec || p.rzecz || p.proc)) : [];
+    const fill = pod.length ? "#F3F0E8" : undefined;
+    body.push([
+      c(String(r.nr), { bold: true, fill }), c(r.zadanie || "—", { al: "left", bold: true, fill }),
+      c(fmtPL(ef.start) || "—", { fill }), c(fmtPL(ef.koniec) || "—", { fill }),
+      c(fmtPL(ef.rzecz) || "—", { bold: !!ef.rzecz, fill }), c(ef.proc !== "" ? `${ef.proc}%` : "—", { bold: true, fill }),
+      c(op || "—", { bold: !!op, color: op ? "#B22" : undefined, fill }),
+    ]);
+    for (let j = 0; j < pod.length; j++) {
+      const p = pod[j]; const opP = obliczOpoznienie(p, form.dataOpracowania);
+      body.push([
+        c(`${r.nr}.${j + 1}`, { color: "#999" }), c(p.zadanie || "—", { al: "left", color: "#444" }),
+        c(fmtPL(p.start) || "—", { color: "#444" }), c(fmtPL(p.koniec) || "—", { color: "#444" }),
+        c(fmtPL(p.rzecz) || "—", { color: "#444" }), c((p.proc !== "" && p.proc != null) ? `${p.proc}%` : "—", { color: "#444" }),
+        c(opP || "—", { color: opP ? "#B22" : "#444" }),
+      ]);
+    }
+  }
+  const konce = [], starty = [];
+  for (const w of (form.harmonogram || [])) { const ef = efektywnyWiersz(w); if (ef.start) starty.push(ef.start); const kon = ef.rzecz || ef.koniec; if (kon) konce.push(kon); }
+  const dataMin = starty.sort()[0] || ""; const dataMax = konce.sort()[konce.length - 1] || "";
+  const opoz = opoznienieInwestycji(form.harmonogram, form.dataOpracowania);
+  const maKwoty = harmonogramMaKwoty(form.harmonogram); const sumaKwot = sumaWartosciUmowy(form.harmonogram);
+  const sc = (t, o = {}) => ({ text: t, fontSize: 8, bold: o.bold !== false, fillColor: "#F3F0E8", alignment: o.al || "center", color: o.color, margin: [2, 3, 2, 3] });
+  body.push([
+    sc("Σ"), sc(`PODSUMOWANIE${maKwoty ? ` · wartość umowy: ${Math.round(sumaKwot).toLocaleString("pl-PL")} zł` : ""}`, { al: "left" }),
+    sc(fmtPL(dataMin) || "—", { bold: false }), { ...sc(fmtPL(dataMax) || "—", { bold: false }), colSpan: 2 }, {},
+    sc(""), sc(opoz ? (opoz.dni > 0 ? `${opoz.dni} dni` : "brak") : "—", { color: opoz && opoz.dni > 0 ? "#B22" : undefined }),
+  ]);
+  content.push({ table: { headerRows: 1, widths: [16, "*", 44, 44, 50, 24, 40], body }, layout: { hLineColor: () => linia, vLineColor: () => linia, hLineWidth: () => 0.5, vLineWidth: () => 0.5 } });
+}
+
+function pdfCashflow(content, form) {
+  const { czarny, zolty, szary } = PDF_KOL;
+  if (!harmonogramMaKwoty(form.harmonogram)) return;
+  const m = macierzCashflow(form.harmonogram);
+  if (!m.zadania.length || !m.miesiace.length) return;
+  const { miesiace, zadania, sumaMies, sumaNaras, sumaCalosc } = m;
+  const nM = miesiace.length;
+  const wTys = nM > 10;
+  const fs = nM > 18 ? 5.5 : nM > 12 ? 6.5 : nM > 8 ? 7.5 : 8.5;
+  const fmtZ = (n) => !n ? "" : (wTys ? Math.round(n / 1000).toLocaleString("pl-PL") : Math.round(n).toLocaleString("pl-PL"));
+  content.push(pdfNaglowekSekcji(`Harmonogram przepływów finansowych — sprzedaż${wTys ? " (kwoty w tys. zł)" : ""}`));
+  const th = (t, al) => ({ text: t, fillColor: czarny, color: zolty, bold: true, fontSize: fs, alignment: al || "right", margin: [1, 2, 1, 2] });
+  const thm = (t) => ({ text: t, fillColor: "#3A3A3A", color: "#FFFFFF", bold: true, fontSize: fs, alignment: "right", margin: [1, 2, 1, 2] });
+  const c = (t, o = {}) => ({ text: t, fontSize: fs, alignment: o.al || "right", fillColor: o.fill, color: o.color, bold: o.bold, margin: [1, 1, 1, 1] });
+  const body = [[th("Zadanie", "left"), th("Netto"), th("Start", "center"), th("Koniec", "center"), ...miesiace.map((mi) => thm(mi.etykieta))]];
+  for (const z of zadania) {
+    body.push([
+      c(z.nazwa, { al: "left" }), c(fmtZ(z.kwota)),
+      c(z.start ? fmtPL(z.start) : "—", { al: "center", color: szary }), c(z.koniec ? fmtPL(z.koniec) : "—", { al: "center", color: szary }),
+      ...miesiace.map((mi) => { const v = z.komorki[mi.klucz]; return c(v ? fmtZ(v) : "–", { fill: v ? "#FFF9E6" : undefined }); }),
+    ]);
+  }
+  body.push([c("RAZEM mies.", { al: "left", bold: true, fill: "#F3F0E8" }), c(fmtZ(sumaCalosc), { bold: true, fill: "#F3F0E8" }), c("", { fill: "#F3F0E8" }), c("", { fill: "#F3F0E8" }), ...miesiace.map((mi) => c(fmtZ(sumaMies[mi.klucz]), { bold: true, fill: "#F3F0E8" }))]);
+  body.push([c("Narastająco", { al: "left", bold: true, fill: zolty }), c("", { fill: zolty }), c("", { fill: zolty }), c("", { fill: zolty }), ...miesiace.map((mi) => c(fmtZ(sumaNaras[mi.klucz]), { bold: true, fill: zolty }))]);
+  const monthW = Math.max(13, Math.floor((PDF_SZER - 130) / nM));
+  const widths = ["*", 30, 30, 30, ...miesiace.map(() => monthW)];
+  content.push({ table: { headerRows: 1, widths, body }, layout: { hLineColor: () => "#D9D6CE", vLineColor: () => "#D9D6CE", hLineWidth: () => 0.4, vLineWidth: () => 0.4 } });
+}
+
+async function pdfZdjecia(content, form) {
+  if (!form.zdjecia || form.zdjecia.length === 0) return;
+  // Grupowanie jak w podglądzie: pionowe (lub bez orientacji) 1/str., poziome 2/str.
+  const strony = []; let bufor = [];
+  for (const z of form.zdjecia) {
+    const poziome = z.pion === false;
+    if (!poziome) { if (bufor.length) { strony.push(bufor); bufor = []; } strony.push([z]); }
+    else { bufor.push(z); if (bufor.length === 2) { strony.push(bufor); bufor = []; } }
+  }
+  if (bufor.length) strony.push(bufor);
+
+  let pierwszaGrupa = true;
+  for (const grupa of strony) {
+    const maxH = grupa.length === 1 ? 620 : 300;
+    const elems = [];
+    for (const z of grupa) {
+      const im = await przygotujObraz(z.dataUrl || z.url);
+      if (!im) continue;
+      elems.push({ image: im.dataUrl, fit: [PDF_SZER, maxH], alignment: "center", margin: [0, 6, 0, 2] });
+      if (z.opis) elems.push({ text: z.opis, alignment: "center", bold: true, fontSize: 10, margin: [0, 0, 0, 6] });
+    }
+    if (elems.length === 0) continue;
+    if (pierwszaGrupa) {
+      const nag = pdfNaglowekSekcji("Dokumentacja fotograficzna");
+      nag.pageBreak = "before";
+      content.push(nag);
+      pierwszaGrupa = false;
+    } else {
+      elems[0].pageBreak = "before";
+    }
+    content.push(...elems);
+  }
+}
+
+// Buduje definicję dokumentu pdfmake z formularza raportu (bez pobierania).
+async function budujDocDefinition(form) {
+  const { czarny, zolty, szary } = PDF_KOL;
+  const content = [];
+
+  // Nagłówek: logo + kontakt + linia
+  content.push({ columns: [
+    { text: [{ text: "/", color: zolty, bold: true }, { text: "Abyard", bold: true }], fontSize: 18 },
+    { text: "www.abyard.com · biuro@abyard.pl · tel. (12) 431 30 87", alignment: "right", fontSize: 8, color: szary, margin: [0, 6, 0, 0] },
+  ] });
+  content.push({ canvas: [{ type: "line", x1: 0, y1: 2, x2: PDF_SZER, y2: 2, lineWidth: 2, lineColor: czarny }], margin: [0, 4, 0, 8] });
+
+  content.push({ text: `Kraków, dn. ${fmtPL(form.dataOpracowania) || "—"}`, alignment: "right", italics: true, fontSize: 9, color: szary });
+  content.push({ text: "RAPORT NUMER", alignment: "center", fontSize: 11, bold: true, color: szary, characterSpacing: 3, margin: [0, 8, 0, 0] });
+  content.push({ text: [{ text: "/", color: zolty }, { text: String(form.numer).padStart(3, "0") }], alignment: "center", fontSize: 40, bold: true, margin: [0, 0, 0, 8] });
+  content.push({ table: { widths: ["*"], body: [[{ text: `RAPORT ZA OKRES  ${fmtPL(form.okresOd) || "…"} – ${fmtPL(form.okresDo) || "…"}`, alignment: "center", color: zolty, bold: true, fillColor: czarny, margin: [0, 5, 0, 5], border: [false, false, false, false] }]] }, layout: "noBorders" });
+  content.push({ text: form.projekt || "", alignment: "center", fontSize: 22, bold: true, margin: [0, 14, 0, 2] });
+  if (form.adres) content.push({ text: form.adres, alignment: "center", fontSize: 12, bold: true });
+  if (form.tytulZadania) content.push({ text: `„${form.tytulZadania}”`, alignment: "center", italics: true, fontSize: 10, color: szary, margin: [0, 6, 0, 0] });
+
+  if (form.grafikaInwestycji && (form.grafikaInwestycji.dataUrl || form.grafikaInwestycji.url)) {
+    const g = await przygotujObraz(form.grafikaInwestycji.dataUrl || form.grafikaInwestycji.url);
+    if (g) content.push({ image: g.dataUrl, fit: [PDF_SZER, 300], alignment: "center", margin: [0, 14, 0, 6] });
+  }
+
+  content.push(pdfNaglowekSekcji("Kluczowe daty"));
+  const linijka = (etk, val) => ({ text: [{ text: etk + " ", bold: true }, { text: val }], fontSize: 11, margin: [0, 1, 0, 1] });
+  content.push(linijka("Rozpoczęcie budowy:", fmtPL(form.rozpoczecie) || "—"));
+  content.push(linijka("Zakończenie robót:", fmtPL(form.zakonczenieRobot) || "—"));
+  content.push(linijka("Pozwolenie na użytkowanie:", form.pnuNieDotyczy ? "Nie dotyczy" : (fmtPL(form.pnu) || "—")));
+  content.push(linijka("Opracował:", form.opracowal || "—"));
+
+  // Strona tytułowa kończy się na kluczowych datach — reszta od nowej strony
+  const nagInfo = pdfNaglowekSekcji("Informacje ogólne");
+  nagInfo.pageBreak = "before";
+  content.push(nagInfo);
+  content.push(htmlBlok(form.infoOgolne));
+  if (form.opoznienia) {
+    content.push({ text: "OPÓŹNIENIA I DZIAŁANIA NAPRAWCZE", bold: true, fontSize: 9, characterSpacing: 0.8, margin: [0, 8, 0, 4] });
+    content.push({ table: { widths: ["*"], body: [[{ ...htmlBlok(form.opoznienia), fillColor: PDF_KOL.zoltyJasny, margin: [10, 6, 10, 6], border: [false, false, false, false] }]] }, layout: "noBorders" });
+  }
+  const sekcjaTekst = (tytul, val) => { if (!val) return; content.push(pdfNaglowekSekcji(tytul)); content.push(htmlBlok(val)); };
+  sekcjaTekst("Wykonawcy prac", form.wykonawcy);
+  sekcjaTekst("Przetargi", form.przetargi);
+  sekcjaTekst("Sprawy ogólne budowy", form.sprawyBudowy);
+  sekcjaTekst("Sprawy dotyczące Inwestora", form.sprawyInwestora);
+  sekcjaTekst("Teren placu budowy", form.placBudowy);
+
+  content.push(pdfNaglowekSekcji("Podsumowanie"));
+  content.push({ table: { widths: [4, "*"], body: [[{ text: "", fillColor: zolty, border: [false, false, false, false] }, { text: form.podsumowanie || "—", bold: true, fontSize: 11, margin: [10, 2, 0, 2], border: [false, false, false, false] }]] }, layout: "noBorders" });
+
+  await pdfHarmonogram(content, form);
+  pdfCashflow(content, form);
+  await pdfZdjecia(content, form);
+
+  return {
+    pageSize: "A4",
+    pageMargins: [40, 40, 40, 45],
+    defaultStyle: { font: "Roboto", fontSize: 10, color: czarny, lineHeight: 1.25 },
+    content,
+    footer: (cur, total) => ({ text: `${cur} / ${total}`, alignment: "center", fontSize: 8, color: szary, margin: [0, 6, 0, 0] }),
+  };
+}
+
+// Leniwe wczytanie biblioteki pdfmake z osobnego pliku dist/pdfmake-lib.js.
+// Ładowane dopiero przy pierwszym eksporcie — nie obciąża startu aplikacji.
+// Zwraca instancję pdfMake (z podpiętym vfs fontów) spod window.__pdfmakeLib.
+let _pdfmakePromise = null;
+function zaladujPdfmake() {
+  if (typeof window !== "undefined" && window.__pdfmakeLib) return Promise.resolve(window.__pdfmakeLib);
+  if (_pdfmakePromise) return _pdfmakePromise;
+  _pdfmakePromise = new Promise((res, rej) => {
+    const s = document.createElement("script");
+    s.src = "pdfmake-lib.js"; // serwowany z katalogu dist/ obok index.html
+    s.async = true;
+    s.onload = () => window.__pdfmakeLib ? res(window.__pdfmakeLib) : rej(new Error("pdfmake-lib.js wczytany, ale biblioteka niedostępna"));
+    s.onerror = () => { _pdfmakePromise = null; rej(new Error("Nie udało się wczytać modułu PDF (pdfmake-lib.js)")); };
+    document.head.appendChild(s);
+  });
+  return _pdfmakePromise;
+}
+
+// Buduje i pobiera plik PDF raportu. form: stan formularza (jak w PodgladPDF).
+async function pobierzPDF(form, nazwaPliku) {
+  const [dd, pdfMake] = await Promise.all([budujDocDefinition(form), zaladujPdfmake()]);
+  pdfMake.createPdf(dd).download(`${nazwaPliku}.pdf`);
+}
+
 function PodgladPDF({ form, onBack, nazwaPliku, raportId, publiczny, jestAdmin }) {
   const [pokazLinki, setPokazLinki] = useState(false);
+  const [pobieranie, setPobieranie] = useState(false);
+  async function pobierzPlikPDF() {
+    if (pobieranie) return;
+    setPobieranie(true);
+    try {
+      await pobierzPDF(form, nazwaPliku);
+    } catch (e) {
+      console.error(e);
+      alert("Nie udało się wygenerować pliku PDF: " + (e?.message || e) + "\n\nMożesz użyć „Zapisz / Drukuj PDF”.");
+    } finally {
+      setPobieranie(false);
+    }
+  }
   return (
     <div style={{ background: "#888", minHeight: "100vh", fontFamily: "'Segoe UI', system-ui, sans-serif" }}>
       <style>{printCSS}</style>
@@ -3163,6 +3726,10 @@ function PodgladPDF({ form, onBack, nazwaPliku, raportId, publiczny, jestAdmin }
               🔗 Udostępnij link
             </button>
           ))}
+          <button style={{ ...btnGhostDark, opacity: pobieranie ? 0.6 : 1, cursor: pobieranie ? "wait" : "pointer" }} disabled={pobieranie}
+            onClick={pobierzPlikPDF} title="Pobierz gotowy plik PDF (niezależny od okna druku i opcji „Grafika w tle”)">
+            {pobieranie ? "Generowanie…" : "⬇ Pobierz PDF"}
+          </button>
           <button style={btnPrimary} onClick={() => {
             const poprzedni = document.title;
             document.title = nazwaPliku;
