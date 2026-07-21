@@ -21,7 +21,11 @@ po każdym pushu do gałęzi Netlify sam kompiluje kod i publikuje wynik.
 └── README.md
 ```
 
-Wynik builda (`dist/index.html`) **nie jest** w repozytorium — powstaje przy każdym buildzie.
+Wynik builda **nie jest** w repozytorium — powstaje przy każdym buildzie. Build tworzy w `dist/`
+**dwa** pliki: `index.html` (lekki, ~0,5 MB — cała aplikacja) oraz `pdfmake-lib.js` (~2,2 MB —
+biblioteka pdfmake do eksportu PDF, ładowana **leniwie** dopiero przy pierwszym „Pobierz PDF").
+Przy publikacji ręcznej trzeba wgrać **oba** pliki (Netlify publikuje cały katalog `dist/`, więc
+tam dzieje się to automatycznie).
 
 ---
 

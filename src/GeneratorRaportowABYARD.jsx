@@ -44,11 +44,6 @@ import {
   wylaczUdostepnienie,
   raportPoTokenie,
 } from "./supabase";
-import pdfMake from "pdfmake/build/pdfmake";
-import vfsFonts from "pdfmake/build/vfs_fonts";
-// vfs_fonts przypisuje tablicę fontów do module.exports.pdfMake.vfs (Roboto — obejmuje
-// polskie znaki). Podpinamy ją pod instancję pdfMake używaną do generowania.
-pdfMake.vfs = (vfsFonts && vfsFonts.pdfMake && vfsFonts.pdfMake.vfs) || (vfsFonts && vfsFonts.vfs) || pdfMake.vfs;
 
 /* ============================================================================
    GENERATOR RAPORTÓW Z BUDOWY — ABYARD
@@ -3672,9 +3667,27 @@ async function budujDocDefinition(form) {
   };
 }
 
+// Leniwe wczytanie biblioteki pdfmake z osobnego pliku dist/pdfmake-lib.js.
+// Ładowane dopiero przy pierwszym eksporcie — nie obciąża startu aplikacji.
+// Zwraca instancję pdfMake (z podpiętym vfs fontów) spod window.__pdfmakeLib.
+let _pdfmakePromise = null;
+function zaladujPdfmake() {
+  if (typeof window !== "undefined" && window.__pdfmakeLib) return Promise.resolve(window.__pdfmakeLib);
+  if (_pdfmakePromise) return _pdfmakePromise;
+  _pdfmakePromise = new Promise((res, rej) => {
+    const s = document.createElement("script");
+    s.src = "pdfmake-lib.js"; // serwowany z katalogu dist/ obok index.html
+    s.async = true;
+    s.onload = () => window.__pdfmakeLib ? res(window.__pdfmakeLib) : rej(new Error("pdfmake-lib.js wczytany, ale biblioteka niedostępna"));
+    s.onerror = () => { _pdfmakePromise = null; rej(new Error("Nie udało się wczytać modułu PDF (pdfmake-lib.js)")); };
+    document.head.appendChild(s);
+  });
+  return _pdfmakePromise;
+}
+
 // Buduje i pobiera plik PDF raportu. form: stan formularza (jak w PodgladPDF).
 async function pobierzPDF(form, nazwaPliku) {
-  const dd = await budujDocDefinition(form);
+  const [dd, pdfMake] = await Promise.all([budujDocDefinition(form), zaladujPdfmake()]);
   pdfMake.createPdf(dd).download(`${nazwaPliku}.pdf`);
 }
 
