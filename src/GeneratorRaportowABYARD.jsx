@@ -1169,16 +1169,6 @@ export default function GeneratorRaportowABYARD() {
     }
   }
 
-  // ---- Generowanie PDF (przez okno druku przeglądarki) -----------------------
-  function drukujZNazwa(nazwa) {
-    const poprzedni = document.title;
-    document.title = nazwa; // przeglądarka użyje tego jako domyślnej nazwy pliku PDF
-    const przywroc = () => { document.title = poprzedni; window.removeEventListener("afterprint", przywroc); };
-    window.addEventListener("afterprint", przywroc);
-    window.print();
-    // zabezpieczenie, gdyby afterprint nie zadziałał
-    setTimeout(przywroc, 1500);
-  }
   // Czy można generować raport? Tylko gdy jest zapisany w bazie i nie ma zmian
   // niezapisanych — inaczej PM wygenerowałby raport bez świeżo dodanych zdjęć.
   const mozeGenerowac = !!zapisanyId && !niezapisaneZmiany;
@@ -1386,7 +1376,7 @@ export default function GeneratorRaportowABYARD() {
   //  WIDOK PODGLĄDU / PDF (nowy raport z formularza)
   // ==========================================================================
   if (widok === "preview") {
-    // raportId = zapisanyId: link dla inwestora dostępny, gdy raport jest już w bazie
+    // raportId = zapisanyId: linki do raportu dostępne, gdy raport jest już w bazie
     return <PodgladPDF form={form} raportId={zapisanyId} onBack={() => setWidok("form")} nazwaPliku={nazwaPliku(form)} jestAdmin={profil?.rola === "admin"} />;
   }
 
@@ -3208,7 +3198,7 @@ function WidokArchiwum({ raporty, ladowanie, filtr, setFiltr, onOdswiez, onOtwor
                                 </>
                               );
                             })()}
-                            <button onClick={() => onOtworz(r.id)} title="Podgląd raportu — stamtąd zapiszesz PDF lub wygenerujesz link dla inwestora" style={{ ...miniBtn, background: C.zolty, border: "none", fontWeight: 700 }}>Otwórz</button>
+                            <button onClick={() => onOtworz(r.id)} title="Podgląd raportu — stamtąd zapiszesz PDF lub wygenerujesz link do raportu" style={{ ...miniBtn, background: C.zolty, border: "none", fontWeight: 700 }}>Otwórz</button>
                             {jestAdmin && onPozwolEdycje && (() => {
                               const aktywne = r.edycja_do && new Date(r.edycja_do).getTime() > Date.now();
                               if (aktywne) {
@@ -3304,7 +3294,7 @@ function PanelLinkow({ raportId, jestAdmin }) {
   return (
     <div className="noprint" style={{ maxWidth: 794, margin: "16px auto 0", background: C.bialy, borderRadius: 8, padding: "16px 20px", boxShadow: "0 4px 30px rgba(0,0,0,0.3)", fontSize: 13, color: C.czarny }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10, flexWrap: "wrap", gap: 8 }}>
-        <div style={{ fontWeight: 800, textTransform: "uppercase", letterSpacing: 1, fontSize: 12 }}>Linki do raportu dla inwestora</div>
+        <div style={{ fontWeight: 800, textTransform: "uppercase", letterSpacing: 1, fontSize: 12 }}>Linki do raportu</div>
         <button onClick={nowyLink} disabled={robie} style={{ background: C.zolty, color: C.czarny, border: "none", padding: "7px 16px", borderRadius: 6, fontWeight: 700, fontSize: 13, cursor: "pointer", fontFamily: "inherit" }}>
           {robie ? "Tworzę…" : "+ Nowy link (kopiuje do schowka)"}
         </button>
@@ -3395,9 +3385,8 @@ function WidokPubliczny({ token }) {
 /* ---------- Podgląd / PDF ------------------------------------------------- */
 /* ============================================================================
    EKSPORT PDF (pdfmake) — wektorowy plik budowany z danych raportu.
-   Niezależny od okna druku przeglądarki i opcji „Grafika w tle": jeden klik,
-   ten sam plik za każdym razem, tekst zaznaczalny. Układ odwzorowuje podgląd
-   (PodgladPDF); przycisk „Zapisz/Drukuj" zostaje jako alternatywa 1:1 z HTML.
+   Jeden klik „Pobierz PDF", ten sam plik za każdym razem, tekst zaznaczalny.
+   Jedyna droga do PDF — układ i typografia odwzorowują podgląd (PodgladPDF).
    ========================================================================== */
 
 // URL/dataURL -> dataURL (base64). Zwraca null przy błędzie (pomijamy obraz).
@@ -3443,24 +3432,56 @@ async function przygotujObraz(url) {
   } catch { return null; }
 }
 
-// HTML z edytora (b/i/u/br/div/p) -> tablica „runs" dla pdfmake.
+// HTML z edytora (b/i/u/span/listy/br/div/p) -> tablica „runs" dla pdfmake.
+// Pogrubienia, kursywę i podkreślenia wykrywamy zarówno ze znaczników
+// (b/strong, i/em, u/s), jak i ze STYLI INLINE (font-weight/style/text-decoration) —
+// przeglądarki (i execCommand ze styleWithCSS, oraz wklejenia) często zapisują
+// formatowanie właśnie jako style, a wcześniej takie pogrubienia „ginęły" w PDF.
 function htmlNaPdfmake(html) {
   const runs = [];
+  const dopisz = (t, st) => { if (t) runs.push({ text: t, ...st }); };
+  // Zwraca stan formatowania rozszerzony o cechy danego elementu (znaczniki + style).
+  const cechy = (el, st) => {
+    const s = { ...st };
+    const tag = el.tagName.toLowerCase();
+    if (tag === "b" || tag === "strong") s.bold = true;
+    if (tag === "i" || tag === "em") s.italics = true;
+    if (tag === "u" || tag === "ins") s.decoration = "underline";
+    if (tag === "s" || tag === "strike" || tag === "del") s.decoration = "lineThrough";
+    const stl = el.style || {};
+    const fw = String(stl.fontWeight || "").toLowerCase();
+    if (fw === "bold" || fw === "bolder" || parseInt(fw, 10) >= 600) s.bold = true;
+    if (String(stl.fontStyle || "").toLowerCase() === "italic") s.italics = true;
+    const dec = (String(stl.textDecoration || "") + " " + String(stl.textDecorationLine || "")).toLowerCase();
+    if (dec.includes("underline")) s.decoration = "underline";
+    else if (dec.includes("line-through")) s.decoration = "lineThrough";
+    return s;
+  };
   if (html && typeof DOMParser !== "undefined") {
     const doc = new DOMParser().parseFromString(`<div>${html}</div>`, "text/html");
     const walk = (node, st) => {
       node.childNodes.forEach((ch) => {
         if (ch.nodeType === 3) {
-          if (ch.textContent) runs.push({ text: ch.textContent, ...st });
+          dopisz(ch.textContent, st);
         } else if (ch.nodeType === 1) {
           const tag = ch.tagName.toLowerCase();
           if (tag === "br") { runs.push({ text: "\n" }); return; }
-          const s = { ...st };
-          if (tag === "b" || tag === "strong") s.bold = true;
-          if (tag === "i" || tag === "em") s.italics = true;
-          if (tag === "u") s.decoration = "underline";
+          const s = cechy(ch, st);
+          // Listy — każde <li> w osobnym wierszu, z wypunktowaniem/numeracją.
+          if (tag === "ul" || tag === "ol") {
+            let i = 0;
+            ch.childNodes.forEach((li) => {
+              if (li.nodeType === 1 && li.tagName.toLowerCase() === "li") {
+                i += 1;
+                dopisz(tag === "ol" ? `${i}.  ` : "•  ", s);
+                walk(li, s);
+                runs.push({ text: "\n" });
+              }
+            });
+            return;
+          }
           walk(ch, s);
-          if (tag === "div" || tag === "p") runs.push({ text: "\n" });
+          if (tag === "div" || tag === "p" || tag === "li") runs.push({ text: "\n" });
         }
       });
     };
@@ -3481,7 +3502,7 @@ function pdfNaglowekSekcji(tytul) {
   return {
     table: { widths: [6, "*"], body: [[
       { text: "", fillColor: PDF_KOL.zolty, border: [false, false, false, false] },
-      { text: tytul.toUpperCase(), fillColor: PDF_KOL.czarny, color: "#FFFFFF", bold: true, fontSize: 11, characterSpacing: 1, margin: [8, 5, 8, 5], border: [false, false, false, false] },
+      { text: tytul.toUpperCase(), fillColor: PDF_KOL.czarny, color: "#FFFFFF", font: "RobotoBlack", fontSize: 11, characterSpacing: 1.2, margin: [8, 5, 8, 5], border: [false, false, false, false] },
     ]] },
     layout: "noBorders",
     margin: [0, 16, 0, 6],
@@ -3504,7 +3525,7 @@ async function pdfHarmonogram(content, form) {
   content.push(pdfNaglowekSekcji("Harmonogram budowy"));
   const th = (t, al) => ({ text: t, fillColor: czarny, color: zolty, bold: true, fontSize: 8, alignment: al || "center", margin: [2, 3, 2, 3] });
   const c = (t, o = {}) => ({ text: t, fontSize: 8, alignment: o.al || "center", bold: o.bold, color: o.color, fillColor: o.fill, margin: [2, 2, 2, 2] });
-  const body = [[th("#"), th("Zadanie", "left"), th("Start"), th("Koniec"), th("Progn./rzecz."), th("%"), th("Opóźn.")]];
+  const body = [[th("#"), th("Zadanie", "left"), th("Start (umowa)"), th("Koniec (umowa)"), th("Koniec (progn./rzecz.)"), th("% wyk."), th("Opóźnienie")]];
   for (const r of wiersze) {
     const ef = efektywnyWiersz(r);
     const op = obliczOpoznienie(ef, form.dataOpracowania);
@@ -3547,7 +3568,7 @@ function pdfCashflow(content, form) {
   if (!m.zadania.length || !m.miesiace.length) return;
   const { miesiace, zadania, sumaMies, sumaNaras, sumaCalosc } = m;
   const nM = miesiace.length;
-  const wTys = nM > 10;
+  const wTys = nM > 10;                       // ten sam próg co w podglądzie HTML (sekcja cashflow)
   const fs = nM > 18 ? 5.5 : nM > 12 ? 6.5 : nM > 8 ? 7.5 : 8.5;
   const fmtZ = (n) => !n ? "" : (wTys ? Math.round(n / 1000).toLocaleString("pl-PL") : Math.round(n).toLocaleString("pl-PL"));
   content.push(pdfNaglowekSekcji(`Harmonogram przepływów finansowych — sprzedaż${wTys ? " (kwoty w tys. zł)" : ""}`));
@@ -3610,16 +3631,16 @@ async function budujDocDefinition(form) {
 
   // Nagłówek: logo + kontakt + linia
   content.push({ columns: [
-    { text: [{ text: "/", color: zolty, bold: true }, { text: "Abyard", bold: true }], fontSize: 18 },
+    { text: [{ text: "/", color: zolty }, { text: "Abyard" }], font: "RobotoBlack", fontSize: 18 },
     { text: "www.abyard.com · biuro@abyard.pl · tel. (12) 431 30 87", alignment: "right", fontSize: 8, color: szary, margin: [0, 6, 0, 0] },
   ] });
   content.push({ canvas: [{ type: "line", x1: 0, y1: 2, x2: PDF_SZER, y2: 2, lineWidth: 2, lineColor: czarny }], margin: [0, 4, 0, 8] });
 
   content.push({ text: `Kraków, dn. ${fmtPL(form.dataOpracowania) || "—"}`, alignment: "right", italics: true, fontSize: 9, color: szary });
   content.push({ text: "RAPORT NUMER", alignment: "center", fontSize: 11, bold: true, color: szary, characterSpacing: 3, margin: [0, 8, 0, 0] });
-  content.push({ text: [{ text: "/", color: zolty }, { text: String(form.numer).padStart(3, "0") }], alignment: "center", fontSize: 40, bold: true, margin: [0, 0, 0, 8] });
+  content.push({ text: [{ text: "/", color: zolty }, { text: String(form.numer).padStart(3, "0") }], alignment: "center", fontSize: 40, font: "RobotoBlack", margin: [0, 0, 0, 8] });
   content.push({ table: { widths: ["*"], body: [[{ text: `RAPORT ZA OKRES  ${fmtPL(form.okresOd) || "…"} – ${fmtPL(form.okresDo) || "…"}`, alignment: "center", color: zolty, bold: true, fillColor: czarny, margin: [0, 5, 0, 5], border: [false, false, false, false] }]] }, layout: "noBorders" });
-  content.push({ text: form.projekt || "", alignment: "center", fontSize: 22, bold: true, margin: [0, 14, 0, 2] });
+  content.push({ text: form.projekt || "", alignment: "center", fontSize: 22, font: "RobotoBlack", margin: [0, 14, 0, 2] });
   if (form.adres) content.push({ text: form.adres, alignment: "center", fontSize: 12, bold: true });
   if (form.tytulZadania) content.push({ text: `„${form.tytulZadania}”`, alignment: "center", italics: true, fontSize: 10, color: szary, margin: [0, 6, 0, 0] });
 
@@ -3641,8 +3662,11 @@ async function budujDocDefinition(form) {
   content.push(nagInfo);
   content.push(htmlBlok(form.infoOgolne));
   if (form.opoznienia) {
-    content.push({ text: "OPÓŹNIENIA I DZIAŁANIA NAPRAWCZE", bold: true, fontSize: 9, characterSpacing: 0.8, margin: [0, 8, 0, 4] });
-    content.push({ table: { widths: ["*"], body: [[{ ...htmlBlok(form.opoznienia), fillColor: PDF_KOL.zoltyJasny, margin: [10, 6, 10, 6], border: [false, false, false, false] }]] }, layout: "noBorders" });
+    content.push({ text: "OPÓŹNIENIA I DZIAŁANIA NAPRAWCZE", font: "RobotoBlack", fontSize: 9, characterSpacing: 0.8, margin: [0, 8, 0, 4] });
+    content.push({ table: { widths: [3, "*"], body: [[
+      { text: "", fillColor: PDF_KOL.zolty, border: [false, false, false, false] },
+      { ...htmlBlok(form.opoznienia), fillColor: PDF_KOL.zoltyJasny, margin: [10, 6, 10, 6], border: [false, false, false, false] },
+    ]] }, layout: "noBorders" });
   }
   const sekcjaTekst = (tytul, val) => { if (!val) return; content.push(pdfNaglowekSekcji(tytul)); content.push(htmlBlok(val)); };
   sekcjaTekst("Wykonawcy prac", form.wykonawcy);
@@ -3701,7 +3725,7 @@ function PodgladPDF({ form, onBack, nazwaPliku, raportId, publiczny, jestAdmin }
       await pobierzPDF(form, nazwaPliku);
     } catch (e) {
       console.error(e);
-      alert("Nie udało się wygenerować pliku PDF: " + (e?.message || e) + "\n\nMożesz użyć „Zapisz / Drukuj PDF”.");
+      alert("Nie udało się wygenerować pliku PDF: " + (e?.message || e) + "\n\nSprawdź połączenie i spróbuj ponownie.");
     } finally {
       setPobieranie(false);
     }
@@ -3712,32 +3736,21 @@ function PodgladPDF({ form, onBack, nazwaPliku, raportId, publiczny, jestAdmin }
       <div className="noprint" style={{ position: "sticky", top: 0, background: C.czarny, padding: "12px 24px", display: "flex", justifyContent: "space-between", alignItems: "center", zIndex: 10, flexWrap: "wrap", gap: 10 }}>
         <span style={{ color: C.bialy, fontSize: 14 }}>Podgląd raportu — <strong>{nazwaPliku}.pdf</strong></span>
         <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-          <span style={{ color: C.zolty, fontSize: 12, maxWidth: 260, lineHeight: 1.3 }}>
-            W oknie zapisu zaznacz <strong>„Grafika w tle"</strong>, by zachować kolory
-          </span>
           {onBack && <button style={btnGhostDark} onClick={onBack}>← Wróć do edycji</button>}
           {!publiczny && (raportId ? (
             <button style={btnGhostDark} onClick={() => setPokazLinki((v) => !v)}>
-              {pokazLinki ? "Zamknij linki" : "🔗 Udostępnij link"}
+              {pokazLinki ? "Zamknij linki" : "🔗 Linki do raportu"}
             </button>
           ) : (
             <button style={{ ...btnGhostDark, opacity: 0.45, cursor: "not-allowed" }} disabled
               title="Najpierw zapisz raport w bazie — link musi wskazywać zapisany raport">
-              🔗 Udostępnij link
+              🔗 Linki do raportu
             </button>
           ))}
-          <button style={{ ...btnGhostDark, opacity: pobieranie ? 0.6 : 1, cursor: pobieranie ? "wait" : "pointer" }} disabled={pobieranie}
-            onClick={pobierzPlikPDF} title="Pobierz gotowy plik PDF (niezależny od okna druku i opcji „Grafika w tle”)">
+          <button style={{ ...btnPrimary, opacity: pobieranie ? 0.6 : 1, cursor: pobieranie ? "wait" : "pointer" }} disabled={pobieranie}
+            onClick={pobierzPlikPDF} title="Pobierz gotowy plik PDF raportu">
             {pobieranie ? "Generowanie…" : "⬇ Pobierz PDF"}
           </button>
-          <button style={btnPrimary} onClick={() => {
-            const poprzedni = document.title;
-            document.title = nazwaPliku;
-            const przywroc = () => { document.title = poprzedni; window.removeEventListener("afterprint", przywroc); };
-            window.addEventListener("afterprint", przywroc);
-            window.print();
-            setTimeout(przywroc, 1500);
-          }}>Zapisz / Drukuj PDF</button>
         </div>
       </div>
 
@@ -3916,7 +3929,7 @@ function PodgladPDF({ form, onBack, nazwaPliku, raportId, publiczny, jestAdmin }
           const nM = miesiace.length;
           // Skalowanie do szerokości pionowej A4 (~182mm po marginesach).
           // Im więcej miesięcy, tym mniejsza czcionka/padding; przy bardzo wielu — kwoty w tysiącach.
-          const wTys = nM > 16;                       // kwoty w tys. zł, gdy dużo kolumn
+          const wTys = nM > 10;                       // próg ujednolicony z eksportem PDF (pdfCashflow)
           const fs = nM > 20 ? 6 : nM > 16 ? 6.5 : nM > 12 ? 7.5 : nM > 8 ? 8.5 : 9.5;
           const pad = nM > 16 ? "1px 2px" : nM > 12 ? "1px 3px" : "3px 5px";
           const fmtZ = (n) => {
@@ -3929,7 +3942,7 @@ function PodgladPDF({ form, onBack, nazwaPliku, raportId, publiczny, jestAdmin }
           const td = { padding: pad, border: "1px solid #D9D6CE", fontSize: fs };
           return (
             <div className="strona-cashflow">
-            <BlokPDF tytul={`Harmonogram rzepływów finansowych — sprzedaż${wTys ? " (kwoty w tys. zł)" : ""}`}>
+            <BlokPDF tytul={`Harmonogram przepływów finansowych — sprzedaż${wTys ? " (kwoty w tys. zł)" : ""}`}>
               <table style={{ width: "100%", borderCollapse: "collapse", tableLayout: "fixed" }}>
                 <thead>
                   <tr>
