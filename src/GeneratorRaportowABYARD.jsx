@@ -3561,6 +3561,30 @@ function pdfSekcjaTekst(content, tytul, val) {
   if (reszta.length) content.push({ text: reszta, fontSize: 10.5, lineHeight: 1.4, margin: [2, 0, 2, 0] });
 }
 
+// Sekcja tabelaryczna (harmonogram, cashflow) z nagłówkiem sekcji TRWALE
+// związanym z początkiem tabeli. Pierwsza tabela (keepWithHeaderRows) trzyma
+// razem: nagłówek sekcji + nagłówek kolumn + pierwszy wiersz danych — pdfmake
+// nie może ich rozdzielić, więc nagłówek nie zostaje sam na dole strony. Reszta
+// wierszy płynie jako druga tabela z powtarzanym nagłówkiem kolumn.
+// body[0] = wiersz nagłówka kolumn; body[1..] = dane (+ podsumowanie).
+function pushSekcjaTabela(content, tytul, widths, body, layout) {
+  const n = widths.length;
+  const naglRow = [{ ...pdfNaglowekKomorka(tytul), colSpan: n, fillColor: PDF_KOL.czarny }];
+  for (let i = 1; i < n; i++) naglRow.push({});
+  const colH = body[0];
+  const dane = body.slice(1);
+  const first = dane.length ? [dane[0]] : [];
+  const rest = dane.slice(1);
+  // W tabeli-kluczu chowamy górną linię nad paskiem nagłówka sekcji.
+  const layKey = { ...layout, hLineWidth: (i, node) => (i === 0 ? 0 : (layout.hLineWidth ? layout.hLineWidth(i, node) : 0.5)) };
+  content.push({
+    table: { widths, headerRows: 2, keepWithHeaderRows: 1, body: [naglRow, colH, ...first] },
+    layout: layKey,
+    margin: [0, 16, 0, 0],
+  });
+  if (rest.length) content.push({ table: { headerRows: 1, widths, body: [colH, ...rest] }, layout });
+}
+
 async function pdfHarmonogram(content, form) {
   const { czarny, zolty, linia } = PDF_KOL;
   if (form.harmonogramObrazy && form.harmonogramObrazy.length > 0) {
@@ -3574,7 +3598,6 @@ async function pdfHarmonogram(content, form) {
   const wiersze = (form.harmonogram || []).map((r, idx) => ({ ...r, nr: idx + 1 }))
     .filter((r) => { const ef = efektywnyWiersz(r); return ef.start || ef.koniec || ef.rzecz || ef.proc !== ""; });
   if (wiersze.length === 0) return;
-  content.push(pdfNaglowekSekcji("Harmonogram budowy"));
   const th = (t, al) => ({ text: t, fillColor: czarny, color: zolty, bold: true, fontSize: 8, alignment: al || "center", margin: [2, 3, 2, 3] });
   const c = (t, o = {}) => ({ text: t, fontSize: 8, alignment: o.al || "center", bold: o.bold, color: o.color, fillColor: o.fill, margin: [2, 2, 2, 2] });
   const body = [[th("#"), th("Zadanie", "left"), th("Start (umowa)"), th("Koniec (umowa)"), th("Koniec (progn./rzecz.)"), th("% wyk."), th("Opóźnienie")]];
@@ -3612,7 +3635,8 @@ async function pdfHarmonogram(content, form) {
   ]);
   // Kolumny: „#" 24 pt (podpozycje 3.10+ w jednym wierszu), daty 52/52/54
   // („15.06.2026" bez łamania), „Opóźnienie" 50 pt (nagłówek bez łamania słowa).
-  content.push({ table: { headerRows: 1, widths: [24, "*", 52, 52, 54, 26, 50], body }, layout: { hLineColor: () => linia, vLineColor: () => linia, hLineWidth: () => 0.5, vLineWidth: () => 0.5 } });
+  // Nagłówek sekcji trwale związany z początkiem tabeli (nie osieroca się).
+  pushSekcjaTabela(content, "Harmonogram budowy", [24, "*", 52, 52, 54, 26, 50], body, { hLineColor: () => linia, vLineColor: () => linia, hLineWidth: () => 0.5, vLineWidth: () => 0.5 });
 }
 
 function pdfCashflow(content, form) {
@@ -3625,7 +3649,7 @@ function pdfCashflow(content, form) {
   const wTys = nM > 10;                       // ten sam próg co w podglądzie HTML (sekcja cashflow)
   const fs = nM > 18 ? 5.5 : nM > 12 ? 6.5 : nM > 8 ? 7.5 : 8.5;
   const fmtZ = (n) => !n ? "" : (wTys ? Math.round(n / 1000).toLocaleString("pl-PL") : Math.round(n).toLocaleString("pl-PL"));
-  content.push(pdfNaglowekSekcji(`Harmonogram przepływów finansowych — sprzedaż${wTys ? " (kwoty w tys. zł)" : ""}`));
+  const tytulCash = `Harmonogram przepływów finansowych — sprzedaż${wTys ? " (kwoty w tys. zł)" : ""}`;
   const th = (t, al) => ({ text: t, fillColor: czarny, color: zolty, bold: true, fontSize: fs, alignment: al || "right", margin: [1, 2, 1, 2] });
   const thm = (t) => ({ text: t, fillColor: "#3A3A3A", color: "#FFFFFF", bold: true, fontSize: fs, alignment: "right", margin: [1, 2, 1, 2] });
   const c = (t, o = {}) => ({ text: t, fontSize: fs, alignment: o.al || "right", fillColor: o.fill, color: o.color, bold: o.bold, margin: [1, 1, 1, 1] });
@@ -3645,7 +3669,7 @@ function pdfCashflow(content, form) {
   // „Zadanie" (*) + Netto/Start/Koniec; nadmiar miejsca chłonie kolumna „*".
   const monthW = Math.max(13, Math.min(64, Math.floor((PDF_SZER - 180) / nM)));
   const widths = ["*", 40, 30, 30, ...miesiace.map(() => monthW)];
-  content.push({ table: { headerRows: 1, widths, body }, layout: { hLineColor: () => "#D9D6CE", vLineColor: () => "#D9D6CE", hLineWidth: () => 0.4, vLineWidth: () => 0.4 } });
+  pushSekcjaTabela(content, tytulCash, widths, body, { hLineColor: () => "#D9D6CE", vLineColor: () => "#D9D6CE", hLineWidth: () => 0.4, vLineWidth: () => 0.4 });
 }
 
 // Wysokość obszaru druku A4 po marginesach (~757 pt) i przybliżone wysokości
