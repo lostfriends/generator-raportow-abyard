@@ -1376,7 +1376,7 @@ export default function GeneratorRaportowABYARD() {
   //  WIDOK PODGLĄDU / PDF (nowy raport z formularza)
   // ==========================================================================
   if (widok === "preview") {
-    // raportId = zapisanyId: link dla inwestora dostępny, gdy raport jest już w bazie
+    // raportId = zapisanyId: linki do raportu dostępne, gdy raport jest już w bazie
     return <PodgladPDF form={form} raportId={zapisanyId} onBack={() => setWidok("form")} nazwaPliku={nazwaPliku(form)} jestAdmin={profil?.rola === "admin"} />;
   }
 
@@ -3198,7 +3198,7 @@ function WidokArchiwum({ raporty, ladowanie, filtr, setFiltr, onOdswiez, onOtwor
                                 </>
                               );
                             })()}
-                            <button onClick={() => onOtworz(r.id)} title="Podgląd raportu — stamtąd zapiszesz PDF lub wygenerujesz link dla inwestora" style={{ ...miniBtn, background: C.zolty, border: "none", fontWeight: 700 }}>Otwórz</button>
+                            <button onClick={() => onOtworz(r.id)} title="Podgląd raportu — stamtąd zapiszesz PDF lub wygenerujesz link do raportu" style={{ ...miniBtn, background: C.zolty, border: "none", fontWeight: 700 }}>Otwórz</button>
                             {jestAdmin && onPozwolEdycje && (() => {
                               const aktywne = r.edycja_do && new Date(r.edycja_do).getTime() > Date.now();
                               if (aktywne) {
@@ -3294,7 +3294,7 @@ function PanelLinkow({ raportId, jestAdmin }) {
   return (
     <div className="noprint" style={{ maxWidth: 794, margin: "16px auto 0", background: C.bialy, borderRadius: 8, padding: "16px 20px", boxShadow: "0 4px 30px rgba(0,0,0,0.3)", fontSize: 13, color: C.czarny }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10, flexWrap: "wrap", gap: 8 }}>
-        <div style={{ fontWeight: 800, textTransform: "uppercase", letterSpacing: 1, fontSize: 12 }}>Linki do raportu dla inwestora</div>
+        <div style={{ fontWeight: 800, textTransform: "uppercase", letterSpacing: 1, fontSize: 12 }}>Linki do raportu</div>
         <button onClick={nowyLink} disabled={robie} style={{ background: C.zolty, color: C.czarny, border: "none", padding: "7px 16px", borderRadius: 6, fontWeight: 700, fontSize: 13, cursor: "pointer", fontFamily: "inherit" }}>
           {robie ? "Tworzę…" : "+ Nowy link (kopiuje do schowka)"}
         </button>
@@ -3739,12 +3739,12 @@ function PodgladPDF({ form, onBack, nazwaPliku, raportId, publiczny, jestAdmin }
           {onBack && <button style={btnGhostDark} onClick={onBack}>← Wróć do edycji</button>}
           {!publiczny && (raportId ? (
             <button style={btnGhostDark} onClick={() => setPokazLinki((v) => !v)}>
-              {pokazLinki ? "Zamknij linki" : "🔗 Udostępnij link"}
+              {pokazLinki ? "Zamknij linki" : "🔗 Linki do raportu"}
             </button>
           ) : (
             <button style={{ ...btnGhostDark, opacity: 0.45, cursor: "not-allowed" }} disabled
               title="Najpierw zapisz raport w bazie — link musi wskazywać zapisany raport">
-              🔗 Udostępnij link
+              🔗 Linki do raportu
             </button>
           ))}
           <button style={{ ...btnPrimary, opacity: pobieranie ? 0.6 : 1, cursor: pobieranie ? "wait" : "pointer" }} disabled={pobieranie}
