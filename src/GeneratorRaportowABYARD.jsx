@@ -3630,13 +3630,15 @@ async function pdfZdjecia(content, form) {
 
     const elems = [];
     if (zdj.length >= 2) {
-      // Dwa poziome zdjęcia na stronie — WSPÓLNA wysokość, równo wyskalowane.
-      // H ograniczone pionowo (połowa dostępnej przestrzeni) i poziomo (żaden
-      // obraz nie może przekroczyć szerokości strony: H ≤ PDF_SZER / a).
-      const maxA = Math.max(...zdj.map((x) => x.a));
-      const H = Math.max(60, Math.min(Math.floor((dostepna - 24) / zdj.length), Math.floor(PDF_SZER / maxA)));
+      // Dwa poziome zdjęcia na stronie — WSPÓLNA SZEROKOŚĆ, wyśrodkowane.
+      // Ta sama szerokość = wyrównane krawędzie i jednakowy „rozmiar" na oko
+      // (dla zdjęć o zbliżonych proporcjach wychodzą wręcz identyczne).
+      // Szerokość dobrana tak, by suma wysokości (Σ szer/proporcja) zmieściła
+      // się w dostępnej przestrzeni; nigdy nie przekracza szerokości strony.
+      const sumaOdwrProp = zdj.reduce((s, x) => s + 1 / x.a, 0);
+      const W = Math.max(120, Math.min(PDF_SZER, Math.floor((dostepna - 24) / sumaOdwrProp)));
       zdj.forEach((x, i) => {
-        elems.push({ image: x.im.dataUrl, fit: [PDF_SZER, H], alignment: "center", margin: [0, i === 0 ? 6 : 10, 0, 2] });
+        elems.push({ image: x.im.dataUrl, width: W, alignment: "center", margin: [0, i === 0 ? 6 : 10, 0, 2] });
         if (x.z.opis) elems.push({ text: x.z.opis, alignment: "center", bold: true, fontSize: 10, margin: [0, 0, 0, 6] });
       });
     } else {
