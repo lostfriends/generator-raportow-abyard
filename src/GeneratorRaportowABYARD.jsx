@@ -693,6 +693,29 @@ const C = {
   czerwony: "#B22222",
 };
 
+// Paleta PODGLĄDU RAPORTU (odwzorowuje dokładnie eksport PDF / abyard.com).
+// Osobna od globalnej `C`, żeby zmiana designu raportu nie ruszała reszty
+// aplikacji (nawigacja, formularze, panele).
+const CR = {
+  ink: "#0F0F0E", ink2: "#191917", gold: "#F2A900", goldBright: "#FBC441", goldDeep: "#C8880B",
+  card: "#FFFFFF", line: "#E4E1D9", muted: "#6E6A62", muted2: "#9A958B",
+  danger: "#C0392B", ok: "#1B7A3D", band: "#FFF6DF", callout: "#FFF8EC", foot: "#FBF3DF",
+  mono: "'AbyMono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace",
+};
+
+// Overline sekcji podglądu: „/ TYTUŁ" (mono, amber) + hairline + opcjonalny podpis.
+function Overline({ tytul, idx }) {
+  return (
+    <div className="blokpdf-naglowek" style={{ display: "flex", alignItems: "flex-end", gap: 12, marginBottom: 10, breakAfter: "avoid", pageBreakAfter: "avoid", breakInside: "avoid", pageBreakInside: "avoid" }}>
+      <div style={{ fontFamily: CR.mono, fontSize: 12.5, letterSpacing: "0.13em", color: CR.goldDeep, whiteSpace: "nowrap", flexShrink: 0 }}>
+        <span style={{ color: CR.gold, fontWeight: 700 }}>/ </span>{String(tytul).toUpperCase()}
+      </div>
+      <div style={{ flex: 1, height: 1, background: CR.line, marginBottom: 5 }} />
+      {idx && <div style={{ fontFamily: CR.mono, fontSize: 11, color: CR.muted2, flexShrink: 0, marginBottom: 1 }}>{idx}</div>}
+    </div>
+  );
+}
+
 // Wspólny pasek nawigacji — jeden dla wszystkich widoków (formularz, archiwum, panel).
 // aktywny: "form" | "archiwum" | "admin". Zakładka panelu tylko dla admina.
 function PasekNawigacji({ aktywny, jestAdmin, email, onForm, onArchiwum, onKoordynacja, onAdmin, onWyloguj }) {
@@ -4061,8 +4084,13 @@ function PodgladPDF({ form, onBack, nazwaPliku, raportId, publiczny, jestAdmin }
       setPobieranie(false);
     }
   }
+  // Status inwestycji (okładka) — ta sama logika co eksport PDF.
+  const stMeta = statusZRaportu({ harmonogram: form.harmonogram, data_opracowania: form.dataOpracowania, podsumowanie: form.podsumowanie });
+  const opozInw = opoznienieInwestycji(form.harmonogram, form.dataOpracowania);
+  const zagrozenie = stMeta.kod === "zagrozenie";
+  const statusTxt = (zagrozenie ? "Zagrożenie terminu" : "Termin niezagrożony") + (opozInw && opozInw.dni > 0 ? ` — ${opozInw.dni} dni` : "");
   return (
-    <div style={{ background: "#888", minHeight: "100vh", fontFamily: "'Segoe UI', system-ui, sans-serif" }}>
+    <div style={{ background: "#2A2926", minHeight: "100vh", fontFamily: "'Segoe UI', system-ui, sans-serif" }}>
       <style>{printCSS}</style>
       <div className="noprint" style={{ position: "sticky", top: 0, background: C.czarny, padding: "12px 24px", display: "flex", justifyContent: "space-between", alignItems: "center", zIndex: 10, flexWrap: "wrap", gap: 10 }}>
         <span style={{ color: C.bialy, fontSize: 14 }}>Podgląd raportu — <strong>{nazwaPliku}.pdf</strong></span>
@@ -4087,53 +4115,56 @@ function PodgladPDF({ form, onBack, nazwaPliku, raportId, publiczny, jestAdmin }
 
       {pokazLinki && raportId && !publiczny && <PanelLinkow raportId={raportId} jestAdmin={jestAdmin} />}
 
-      <div className="pdf-page" style={{ background: C.bialy, maxWidth: 794, margin: "20px auto", padding: 56, boxShadow: "0 4px 30px rgba(0,0,0,0.3)", color: C.czarny, fontFamily: "'Roboto', 'Segoe UI', system-ui, sans-serif" }}>
-        {/* Logo + kontakt */}
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", borderBottom: `2px solid ${C.czarny}`, paddingBottom: 10, marginBottom: 18 }}>
-          <div><span style={{ color: C.zolty, fontWeight: 800, fontSize: 22 }}>/</span><span style={{ fontWeight: 800, fontSize: 20 }}>Abyard</span></div>
-          <div style={{ fontSize: 10, color: C.szary }}>www.abyard.com · biuro@abyard.pl · tel. (12) 431 30 87</div>
-        </div>
+      <div className="pdf-page" style={{ background: CR.card, maxWidth: 794, margin: "20px auto", boxShadow: "0 4px 30px rgba(0,0,0,0.3)", color: CR.ink, fontFamily: "'Roboto', 'Segoe UI', system-ui, sans-serif", overflow: "hidden" }}>
+        {/* ——— OKŁADKA — ciemny hero (jak strona 1 PDF) ——— */}
+        <div className="pdf-cover" style={{ background: CR.ink, color: "#fff", padding: "40px 56px 44px", textAlign: "center" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", textAlign: "left" }}>
+            <div style={{ fontWeight: 900, fontSize: 22 }}><span style={{ color: CR.gold }}>/</span>Abyard</div>
+            <div style={{ fontFamily: CR.mono, fontSize: 9.5, color: CR.muted2, textAlign: "right", lineHeight: 1.7 }}>Kraków, dn. {fmtPL(form.dataOpracowania) || "—"}<br />www.abyard.com · biuro@abyard.pl</div>
+          </div>
 
-        <div style={{ textAlign: "right", fontSize: 11, color: C.szary, fontStyle: "italic", marginBottom: 4 }}>Kraków, dn. {fmtPL(form.dataOpracowania)}</div>
+          <div style={{ fontFamily: CR.mono, fontSize: 11.5, letterSpacing: "0.2em", color: CR.gold, marginTop: 34 }}>/ RAPORT Z BUDOWY</div>
+          <div style={{ fontWeight: 900, fontSize: 88, lineHeight: 0.9, marginTop: 4 }}><span style={{ color: CR.gold }}>/</span>{String(form.numer).padStart(3, "0")}</div>
+          <h2 style={{ fontWeight: 900, fontSize: 40, margin: "8px 0 0", lineHeight: 1.05, letterSpacing: "-0.01em" }}>{form.projekt}</h2>
+          {form.adres && <p style={{ color: CR.gold, fontWeight: 700, fontSize: 14, margin: "8px 0 0" }}>{form.adres}</p>}
+          {form.tytulZadania && <p style={{ color: "#CBC7BF", fontStyle: "italic", fontSize: 12, margin: "8px auto 0", maxWidth: 560, lineHeight: 1.4 }}>„{form.tytulZadania}”</p>}
 
-        <div style={{ textAlign: "center", marginTop: 8 }}>
-          <div style={{ fontSize: 13, fontWeight: 700, letterSpacing: 3, color: C.szary, textTransform: "uppercase" }}>Raport numer</div>
-          <div style={{ fontSize: 52, fontWeight: 800, lineHeight: 1, margin: "2px 0 10px" }}>
-            <span style={{ color: C.zolty }}>/</span>{String(form.numer).padStart(3, "0")}
+          <div style={{ display: "flex", justifyContent: "center", gap: 10, marginTop: 18, flexWrap: "wrap" }}>
+            <div style={{ fontFamily: CR.mono, fontSize: 11, background: CR.ink2, padding: "8px 14px", letterSpacing: "0.06em" }}><span style={{ color: CR.muted2 }}>ZA OKRES </span><span style={{ color: CR.goldBright }}>{fmtPL(form.okresOd) || "…"} — {fmtPL(form.okresDo) || "…"}</span></div>
+            <div style={{ fontFamily: CR.mono, fontSize: 10.5, fontWeight: 700, letterSpacing: "0.06em", padding: "8px 14px", background: zagrozenie ? "#2A1614" : "#142519", color: zagrozenie ? "#F0A79E" : "#7DDBA0" }}>
+              <span style={{ color: zagrozenie ? CR.danger : "#57C680" }}>● </span>{statusTxt.toUpperCase()}
+            </div>
+          </div>
+
+          {form.grafikaInwestycji && (
+            <>
+              <img className="grafika-okladka" src={form.grafikaInwestycji.dataUrl} alt="" style={{ display: "block", width: "auto", maxWidth: "100%", maxHeight: "88mm", objectFit: "contain", margin: "18px auto 0" }} />
+              <div style={{ height: 1, background: CR.gold, margin: "18px 0 0" }} />
+            </>
+          )}
+
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12, marginTop: 18 }}>
+            {[["Rozpoczęcie", fmtPL(form.rozpoczecie) || "—"], ["Zakończenie robót", fmtPL(form.zakonczenieRobot) || "—"], ["Pozwol. użytkowania", form.pnuNieDotyczy ? "Nie dotyczy" : (fmtPL(form.pnu) || "—")], ["Opracował", form.opracowal || "—"]].map(([l, v], i) => (
+              <div key={i} style={{ textAlign: "center" }}>
+                <div style={{ fontFamily: CR.mono, fontSize: 8.5, letterSpacing: "0.1em", color: CR.muted2, textTransform: "uppercase" }}>{l}</div>
+                <div style={{ fontWeight: 900, fontSize: 15, marginTop: 5 }}>{v}</div>
+              </div>
+            ))}
           </div>
         </div>
 
-        <div style={{ display: "inline-block", background: C.czarny, color: C.zolty, fontWeight: 700, fontSize: 12, padding: "6px 18px", letterSpacing: 1, width: "100%", textAlign: "center", boxSizing: "border-box" }}>
-          RAPORT ZA OKRES&nbsp;&nbsp;{fmtPL(form.okresOd) || "…"} – {fmtPL(form.okresDo) || "…"}
-        </div>
-
-        <h2 style={{ textAlign: "center", fontSize: 30, margin: "20px 0 4px", fontWeight: 800, letterSpacing: -0.5, lineHeight: 1.1 }}>{form.projekt}</h2>
-        {form.adres && <p style={{ textAlign: "center", margin: "2px 0", color: C.czarny, fontSize: 14, fontWeight: 600 }}>{form.adres}</p>}
-        {form.tytulZadania && <p style={{ textAlign: "center", fontStyle: "italic", margin: "8px auto 0", fontSize: 13, color: C.szary, maxWidth: 600, lineHeight: 1.4 }}>„{form.tytulZadania}”</p>}
-        {form.grafikaInwestycji && (
-          <div style={{ textAlign: "center", margin: "16px 0 10px" }}>
-            <img className="grafika-okladka" src={form.grafikaInwestycji.dataUrl} alt="" style={{ width: "auto", maxWidth: "100%", maxHeight: "108mm", objectFit: "contain", borderRadius: 6, border: `1px solid ${C.linia}` }} />
-          </div>
-        )}
-
-        <div className="klucz-daty" style={{ breakInside: "avoid", pageBreakInside: "avoid" }}>
-          <BlokPDF tytul="Kluczowe daty">
-            <p style={pPDF}><strong>Rozpoczęcie budowy:</strong> {fmtPL(form.rozpoczecie) || "—"}</p>
-            <p style={pPDF}><strong>Zakończenie robót:</strong> {fmtPL(form.zakonczenieRobot) || "—"}</p>
-            <p style={pPDF}><strong>Pozwolenie na użytkowanie:</strong> {form.pnuNieDotyczy ? "Nie dotyczy" : (fmtPL(form.pnu) || "—")}</p>
-            <p style={pPDF}><strong>Opracował:</strong> {form.opracowal || "—"}</p>
-          </BlokPDF>
-        </div>
-
-        {/* Twardy podział strony — strona tytułowa kończy się na kluczowych datach */}
+        {/* Twardy podział strony po okładce (druk) */}
         <div className="lamanie-strony" style={{ breakBefore: "page", pageBreakBefore: "always" }} />
+
+        {/* ——— TREŚĆ (biała) ——— */}
+        <div className="pdf-content" style={{ padding: "10px 56px 56px" }}>
 
         <BlokPDF tytul="Informacje ogólne">
           <Tekst v={form.infoOgolne} />
           {maTresc(form.opoznienia) && (
-            <div style={{ marginTop: 10 }}>
-              <div style={{ fontWeight: 800, fontSize: 11, textTransform: "uppercase", letterSpacing: 0.8, color: C.czarny, marginBottom: 4 }}>Opóźnienia i działania naprawcze</div>
-              <div style={{ background: C.zoltyJasny, borderLeft: `3px solid ${C.zolty}`, padding: "8px 12px", fontSize: 12.5 }}><Tekst v={form.opoznienia} /></div>
+            <div style={{ marginTop: 14, background: CR.callout, borderLeft: `3px solid ${CR.gold}`, padding: "12px 16px", breakInside: "avoid", pageBreakInside: "avoid" }}>
+              <div style={{ fontFamily: CR.mono, fontSize: 10.5, letterSpacing: "0.08em", color: CR.goldDeep, marginBottom: 6 }}>⚠ OPÓŹNIENIA I DZIAŁANIA NAPRAWCZE</div>
+              <Tekst v={form.opoznienia} />
             </div>
           )}
         </BlokPDF>
@@ -4145,7 +4176,7 @@ function PodgladPDF({ form, onBack, nazwaPliku, raportId, publiczny, jestAdmin }
         {maTresc(form.placBudowy) && <BlokPDF tytul="Teren placu budowy"><Tekst v={form.placBudowy} /></BlokPDF>}
 
         <BlokPDF tytul="Podsumowanie">
-          <div style={{ borderLeft: `4px solid ${C.zolty}`, paddingLeft: 12, fontWeight: 700, fontSize: 13 }}>{form.podsumowanie}</div>
+          <div style={{ borderLeft: `4px solid ${CR.gold}`, paddingLeft: 16, fontWeight: 900, fontSize: 18, lineHeight: 1.3, color: CR.ink }}>{form.podsumowanie}</div>
         </BlokPDF>
 
         {(() => {
@@ -4170,49 +4201,55 @@ function PodgladPDF({ form, onBack, nazwaPliku, raportId, publiczny, jestAdmin }
           }
           // Brak obrazów — pokazujemy tabelę ZZK, o ile cokolwiek wypełniono.
           if (wiersze.length === 0) return null;
+          const hth = (al) => ({ background: CR.ink, color: "#fff", fontFamily: CR.mono, fontSize: 8.5, fontWeight: 400, letterSpacing: "0.04em", textTransform: "uppercase", padding: "9px 6px", textAlign: al, whiteSpace: "nowrap" });
+          const htd = { padding: "9px 6px", borderBottom: `1px solid ${CR.line}`, textAlign: "center", fontSize: 10, fontFamily: CR.mono, color: CR.muted2 };
+          const htdRz = { ...htd, background: CR.band, fontWeight: 700, color: CR.ink };
           return (
             <BlokPDF tytul="Harmonogram budowy">
-              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11 }}>
+              <div className="tabela-scroll-own" style={{ overflowX: "auto" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse" }}>
                 <thead>
                   <tr>
-                    <th style={{ ...thHarmPdf, width: 28 }}>#</th>
-                    <th style={thHarmPdf}>Zadanie</th>
-                    <th style={thHarmPdf}>Start (umowa)</th>
-                    <th style={thHarmPdf}>Koniec (umowa)</th>
-                    <th style={thHarmPdf}>Koniec (progn./rzecz.)</th>
-                    <th style={thHarmPdf}>% wyk.</th>
-                    <th style={thHarmPdf}>Opóźnienie</th>
+                    <th style={hth("left")}>#</th>
+                    <th style={hth("left")}>Zadanie</th>
+                    <th style={hth("center")}>Start</th>
+                    <th style={hth("center")}>Koniec um.</th>
+                    <th style={{ ...hth("center"), color: CR.goldBright }}>Progn./rzecz.</th>
+                    <th style={hth("right")}>%</th>
+                    <th style={hth("right")}>Opóźn.</th>
                   </tr>
                 </thead>
                 <tbody>
                   {wiersze.map((r) => {
                     const ef = efektywnyWiersz(r);
                     const op = obliczOpoznienie(ef, form.dataOpracowania);
+                    const pctN = parseInt(ef.proc, 10);
                     const pod = maPodpozycje(r) ? r.pod.filter((p) => p && (p.zadanie || p.start || p.koniec || p.rzecz || p.proc)) : [];
                     return (
                       <React.Fragment key={r.nr}>
-                        {/* Pozycja główna (zadanie) — wyróżniona */}
-                        <tr style={{ background: pod.length ? "#F3F0E8" : "transparent" }}>
-                          <td style={{ ...tdHarmPdf, fontWeight: 800, color: C.czarny }}>{r.nr}</td>
-                          <td style={{ ...tdHarmPdf, textAlign: "left", fontWeight: 700 }}>{r.zadanie}</td>
-                          <td style={tdHarmPdf}>{fmtPL(ef.start) || "—"}</td>
-                          <td style={tdHarmPdf}>{fmtPL(ef.koniec) || "—"}</td>
-                          <td style={{ ...tdHarmPdf, fontWeight: ef.rzecz ? 700 : 400 }}>{fmtPL(ef.rzecz) || "—"}</td>
-                          <td style={{ ...tdHarmPdf, fontWeight: 700 }}>{ef.proc !== "" ? `${ef.proc}%` : "—"}</td>
-                          <td style={{ ...tdHarmPdf, color: op ? "#B22" : C.czarny, fontWeight: op ? 800 : 400 }}>{op || "—"}</td>
+                        {/* Pozycja główna (zadanie) — kropka + pogrubienie */}
+                        <tr>
+                          <td style={{ ...htd, color: CR.ink }}>{r.nr}</td>
+                          <td style={{ ...htd, textAlign: "left", fontFamily: "'Roboto', sans-serif", fontWeight: 700, color: CR.ink }}><span style={{ color: CR.gold, marginRight: 7, fontSize: 8 }}>●</span>{r.zadanie}</td>
+                          <td style={htd}>{fmtPL(ef.start) || "—"}</td>
+                          <td style={htd}>{fmtPL(ef.koniec) || "—"}</td>
+                          <td style={htdRz}>{fmtPL(ef.rzecz) || "—"}</td>
+                          <td style={{ ...htd, textAlign: "right", fontWeight: 700, color: (ef.proc !== "" && pctN >= 100) ? CR.ok : CR.ink }}>{ef.proc !== "" ? `${ef.proc}%` : "—"}</td>
+                          <td style={{ ...htd, textAlign: "right", fontWeight: 700, color: op ? CR.danger : CR.ok }}>{op || "—"}</td>
                         </tr>
-                        {/* Podpozycje — cieńsze, wcięte */}
+                        {/* Podpozycje — cieńsze, wcięte, przygaszone */}
                         {pod.map((p, j) => {
                           const opP = obliczOpoznienie(p, form.dataOpracowania);
+                          const ppN = parseInt(p.proc, 10);
                           return (
                             <tr key={`${r.nr}-${j}`}>
-                              <td style={{ ...tdHarmPdf, color: "#999", fontSize: 10 }}>{r.nr}.{j + 1}</td>
-                              <td style={{ ...tdHarmPdf, textAlign: "left", fontWeight: 400, paddingLeft: 18, color: "#444" }}>{p.zadanie || "—"}</td>
-                              <td style={{ ...tdHarmPdf, fontWeight: 400 }}>{fmtPL(p.start) || "—"}</td>
-                              <td style={{ ...tdHarmPdf, fontWeight: 400 }}>{fmtPL(p.koniec) || "—"}</td>
-                              <td style={{ ...tdHarmPdf, fontWeight: 400 }}>{fmtPL(p.rzecz) || "—"}</td>
-                              <td style={{ ...tdHarmPdf, fontWeight: 400 }}>{p.proc !== "" && p.proc != null ? `${p.proc}%` : "—"}</td>
-                              <td style={{ ...tdHarmPdf, color: opP ? "#B22" : C.czarny, fontWeight: 400 }}>{opP || "—"}</td>
+                              <td style={{ ...htd, color: CR.muted2, fontSize: 9 }}>{r.nr}.{j + 1}</td>
+                              <td style={{ ...htd, textAlign: "left", fontFamily: "'Roboto', sans-serif", paddingLeft: 20, color: CR.muted }}>{p.zadanie || "—"}</td>
+                              <td style={htd}>{fmtPL(p.start) || "—"}</td>
+                              <td style={htd}>{fmtPL(p.koniec) || "—"}</td>
+                              <td style={{ ...htdRz, color: "#6B6552" }}>{fmtPL(p.rzecz) || "—"}</td>
+                              <td style={{ ...htd, textAlign: "right", color: (p.proc !== "" && ppN >= 100) ? CR.ok : CR.muted }}>{p.proc !== "" && p.proc != null ? `${p.proc}%` : "—"}</td>
+                              <td style={{ ...htd, textAlign: "right", color: opP ? CR.danger : CR.ok }}>{opP || "—"}</td>
                             </tr>
                           );
                         })}
@@ -4233,21 +4270,22 @@ function PodgladPDF({ form, onBack, nazwaPliku, raportId, publiczny, jestAdmin }
                   const opoz = opoznienieInwestycji(form.harmonogram, form.dataOpracowania);
                   const sumaKwot = sumaWartosciUmowy(form.harmonogram);
                   const maKwoty = harmonogramMaKwoty(form.harmonogram);
-                  const st = { ...tdHarmPdf, borderTop: `2px solid ${C.czarny}`, background: "#F3F0E8", fontWeight: 800 };
+                  const st = { padding: "10px 6px", background: CR.foot, fontFamily: CR.mono, fontWeight: 700, fontSize: 10, borderTop: `2px solid ${CR.ink}`, textAlign: "center" };
                   return (
                     <tfoot>
                       <tr>
                         <td style={st}>Σ</td>
-                        <td style={{ ...st, textAlign: "left" }}>PODSUMOWANIE{maKwoty ? ` · wartość umowy: ${Math.round(sumaKwot).toLocaleString("pl-PL")} zł` : ""}</td>
+                        <td style={{ ...st, textAlign: "left", fontFamily: "'Roboto', sans-serif" }}>PODSUMOWANIE INWESTYCJI{maKwoty ? ` · ${Math.round(sumaKwot).toLocaleString("pl-PL")} zł` : ""}</td>
                         <td style={{ ...st, fontWeight: 400 }}>{fmtPL(dataMin) || "—"}</td>
                         <td style={{ ...st, fontWeight: 400 }} colSpan={2}>{fmtPL(dataMax) || "—"}</td>
                         <td style={st}></td>
-                        <td style={{ ...st, color: opoz && opoz.dni > 0 ? "#B22" : C.czarny }}>{opoz ? (opoz.dni > 0 ? `${opoz.dni} dni` : "brak") : "—"}</td>
+                        <td style={{ ...st, textAlign: "right", color: opoz && opoz.dni > 0 ? CR.danger : CR.ok }}>{opoz ? (opoz.dni > 0 ? `${opoz.dni} dni` : "brak") : "—"}</td>
                       </tr>
                     </tfoot>
                   );
                 })()}
               </table>
+              </div>
             </BlokPDF>
           );
         })()}
@@ -4262,38 +4300,41 @@ function PodgladPDF({ form, onBack, nazwaPliku, raportId, publiczny, jestAdmin }
           // Im więcej miesięcy, tym mniejsza czcionka/padding; przy bardzo wielu — kwoty w tysiącach.
           const wTys = nM > 10;                       // próg ujednolicony z eksportem PDF (pdfCashflow)
           const fs = nM > 20 ? 6 : nM > 16 ? 6.5 : nM > 12 ? 7.5 : nM > 8 ? 8.5 : 9.5;
-          const pad = nM > 16 ? "1px 2px" : nM > 12 ? "1px 3px" : "3px 5px";
+          const pad = nM > 16 ? "4px 2px" : nM > 12 ? "5px 3px" : "6px 5px";
           const fmtZ = (n) => {
             if (!n) return "";
-            if (wTys) return Math.round(n / 1000).toLocaleString("pl-PL"); // w tysiącach
+            if (wTys) return String(Math.round(n / 1000)); // w tysiącach, bez separatora (nie łamie w wąskich kolumnach)
             return Math.round(n).toLocaleString("pl-PL");
           };
-          const thO = { padding: pad, border: "1px solid #C9C6BE", fontSize: fs, whiteSpace: "nowrap", background: C.czarny, color: C.zolty };
-          const thM = { padding: pad, border: "1px solid #C9C6BE", fontSize: fs, whiteSpace: "nowrap", background: "#3A3A3A", color: "#FFF", textAlign: "right" };
-          const td = { padding: pad, border: "1px solid #D9D6CE", fontSize: fs };
+          const fmtMY = (iso) => { if (!iso) return "—"; const p = String(iso).split("-"); return p.length >= 2 ? `${p[1]}.${p[0].slice(2)}` : (fmtPL(iso) || "—"); };
+          const thO = { padding: pad, fontFamily: CR.mono, fontSize: fs, whiteSpace: "nowrap", background: CR.ink, color: "#fff" };
+          const thM = { padding: pad, fontFamily: CR.mono, fontSize: fs, whiteSpace: "nowrap", background: CR.ink, color: CR.goldBright, textAlign: "center", lineHeight: 1.05 };
+          const td = { padding: pad, borderBottom: `1px solid ${CR.line}`, borderRight: `1px solid ${CR.line}`, fontFamily: CR.mono, fontSize: fs, whiteSpace: "nowrap" };
+          const tdZ = { ...td, whiteSpace: "normal", minWidth: 120, maxWidth: 170 };
           return (
             <div className="strona-cashflow">
             <BlokPDF tytul={`Harmonogram przepływów finansowych — sprzedaż${wTys ? " (kwoty w tys. zł)" : ""}`}>
-              <table style={{ width: "100%", borderCollapse: "collapse", tableLayout: "fixed" }}>
+              <div style={{ overflowX: "auto", maxWidth: "100%" }}>
+              <table style={{ borderCollapse: "collapse", width: "auto" }}>
                 <thead>
                   <tr>
                     <th style={{ ...thO, textAlign: "left" }}>Zadanie</th>
-                    <th style={{ ...thO, textAlign: "right" }}>Kwota netto</th>
-                    <th style={{ ...thO, textAlign: "center" }}>Start</th>
-                    <th style={{ ...thO, textAlign: "center" }}>Koniec</th>
-                    {miesiace.map((m) => <th key={m.klucz} style={thM}>{m.etykieta}</th>)}
+                    <th style={{ ...thO, textAlign: "right", color: CR.goldBright }}>Netto</th>
+                    <th style={{ ...thO, textAlign: "center", color: CR.goldBright }}>Start</th>
+                    <th style={{ ...thO, textAlign: "center", color: CR.goldBright }}>Koniec</th>
+                    {miesiace.map((m) => { const [mm, yy] = String(m.etykieta).split("."); return <th key={m.klucz} style={thM}>{mm}<br />{yy}</th>; })}
                   </tr>
                 </thead>
                 <tbody>
                   {zadania.map((z, i) => (
                     <tr key={i}>
-                      <td style={{ ...td, textAlign: "left" }}>{z.nazwa}</td>
-                      <td style={{ ...td, textAlign: "right" }}>{fmtZ(z.kwota)}</td>
-                      <td style={{ ...td, textAlign: "center", color: C.szary }}>{z.start ? fmtPL(z.start) : "—"}</td>
-                      <td style={{ ...td, textAlign: "center", color: C.szary }}>{z.koniec ? fmtPL(z.koniec) : "—"}</td>
+                      <td style={{ ...tdZ, textAlign: "left", color: "#26251F" }}>{z.nazwa}</td>
+                      <td style={{ ...td, textAlign: "right", color: "#26251F" }}>{fmtZ(z.kwota)}</td>
+                      <td style={{ ...td, textAlign: "center", color: CR.muted2 }}>{fmtMY(z.start)}</td>
+                      <td style={{ ...td, textAlign: "center", color: CR.muted2 }}>{fmtMY(z.koniec)}</td>
                       {miesiace.map((m) => {
                         const v = z.komorki[m.klucz];
-                        return <td key={m.klucz} style={{ ...td, textAlign: "right", background: v ? "#FFF9E6" : "transparent" }}>{v ? fmtZ(v) : "–"}</td>;
+                        return <td key={m.klucz} style={{ ...td, textAlign: "right", background: v ? CR.band : "transparent", color: v ? "#26251F" : CR.muted2 }}>{v ? fmtZ(v) : "–"}</td>;
                       })}
                     </tr>
                   ))}
@@ -4306,12 +4347,13 @@ function PodgladPDF({ form, onBack, nazwaPliku, raportId, publiczny, jestAdmin }
                     {miesiace.map((m) => <td key={m.klucz} style={{ ...td, textAlign: "right", fontWeight: 700, background: "#F3F0E8" }}>{fmtZ(sumaMies[m.klucz])}</td>)}
                   </tr>
                   <tr>
-                    <td style={{ ...td, textAlign: "left", fontWeight: 800, background: C.zolty, color: C.czarny }}>Narastająco</td>
-                    <td colSpan={3} style={{ ...td, background: C.zolty }}></td>
-                    {miesiace.map((m) => <td key={m.klucz} style={{ ...td, textAlign: "right", fontWeight: 700, background: C.zolty, color: C.czarny }}>{fmtZ(sumaNaras[m.klucz])}</td>)}
+                    <td style={{ ...td, textAlign: "left", fontWeight: 800, background: CR.gold, color: CR.ink }}>Narastająco</td>
+                    <td colSpan={3} style={{ ...td, background: CR.gold }}></td>
+                    {miesiace.map((m) => <td key={m.klucz} style={{ ...td, textAlign: "right", fontWeight: 700, background: CR.gold, color: CR.ink }}>{fmtZ(sumaNaras[m.klucz])}</td>)}
                   </tr>
                 </tfoot>
               </table>
+              </div>
             </BlokPDF>
             </div>
           );
@@ -4336,12 +4378,8 @@ function PodgladPDF({ form, onBack, nazwaPliku, raportId, publiczny, jestAdmin }
           }
           if (bufor.length) strony.push(bufor);
 
-          const naglowek = (
-            <div className="blok-pdf" style={{ display: "flex", alignItems: "stretch", marginBottom: 10 }}>
-              <div style={{ width: 6, background: C.zolty, flexShrink: 0 }} />
-              <div style={{ background: C.czarny, color: C.bialy, fontWeight: 800, fontSize: 14, textTransform: "uppercase", letterSpacing: 1.5, padding: "8px 16px", flex: 1 }}>Dokumentacja fotograficzna</div>
-            </div>
-          );
+          let fotoNr = 0;
+          const naglowek = <div style={{ marginBottom: 4, width: "100%" }}><Overline tytul="Dokumentacja fotograficzna" /></div>;
 
           // Strona fotograficzna: kontener flex w pionie wypełniający wysokość druku.
           // pierwszaZNaglowkiem = trochę niższy, bo dzieli miejsce z nagłówkiem sekcji.
@@ -4349,12 +4387,18 @@ function PodgladPDF({ form, onBack, nazwaPliku, raportId, publiczny, jestAdmin }
             <div key={key} className={`foto-strona foto-n${zdj.length}${zNaglowkiem ? "" : " foto-strona-break"}`}
               style={{ display: "flex", flexDirection: "column", gap: 12, justifyContent: "center", alignItems: "center", height: 900, marginBottom: 8 }}>
               {zNaglowkiem && naglowek}
-              {zdj.map((z, k) => (
+              {zdj.map((z, k) => {
+                const nr = ++fotoNr;
+                return (
                 <figure key={k} className="foto-fig" style={{ margin: 0, flex: "1 1 0", minHeight: 0, width: "100%", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
                   <img src={z.dataUrl} alt="" style={{ maxWidth: "100%", maxHeight: "100%", width: "auto", height: "auto", objectFit: "contain", borderRadius: 4, display: "block" }} />
-                  {z.opis && <figcaption style={{ fontSize: 12.5, color: C.czarny, marginTop: 6, textAlign: "center", fontWeight: 600, flexShrink: 0 }}>{z.opis}</figcaption>}
+                  <figcaption style={{ marginTop: 6, textAlign: "left", flexShrink: 0, alignSelf: "flex-start" }}>
+                    <span style={{ fontFamily: CR.mono, fontSize: 9.5, color: CR.goldDeep, letterSpacing: "0.08em" }}>FOT. {String(nr).padStart(2, "0")}</span>
+                    {z.opis && <span style={{ fontWeight: 700, color: "#26251F", marginLeft: 8, fontSize: 12.5 }}>{z.opis}</span>}
+                  </figcaption>
                 </figure>
-              ))}
+                );
+              })}
             </div>
           );
 
@@ -4364,6 +4408,7 @@ function PodgladPDF({ form, onBack, nazwaPliku, raportId, publiczny, jestAdmin }
             </div>
           );
         })()}
+        </div>{/* /pdf-content */}
       </div>
     </div>
   );
@@ -4381,14 +4426,11 @@ function Sekcja({ tytul, children }) {
 function Pole({ label, children }) {
   return (<div style={{ marginBottom: 12 }}><label style={lbl}>{label}</label>{children}</div>);
 }
-function BlokPDF({ tytul, children }) {
+function BlokPDF({ tytul, idx, children }) {
   return (
-    <div className="blokpdf" style={{ marginTop: 20 }}>
-      <div className="blokpdf-naglowek" style={{ display: "flex", alignItems: "stretch", marginBottom: 8, breakAfter: "avoid", pageBreakAfter: "avoid", breakInside: "avoid", pageBreakInside: "avoid" }}>
-        <div style={{ width: 6, background: C.zolty, flexShrink: 0 }} />
-        <div style={{ background: C.czarny, color: C.bialy, fontWeight: 800, fontSize: 14, textTransform: "uppercase", letterSpacing: 1.5, padding: "8px 16px", flex: 1 }}>{tytul}</div>
-      </div>
-      <div style={{ padding: "2px 4px" }}>{children}</div>
+    <div className="blokpdf" style={{ marginTop: 26 }}>
+      <Overline tytul={tytul} idx={idx} />
+      <div style={{ padding: "2px 0" }}>{children}</div>
     </div>
   );
 }
