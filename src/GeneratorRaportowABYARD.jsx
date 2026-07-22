@@ -3520,6 +3520,47 @@ function pdfNaglowekSekcji(tytul) {
   };
 }
 
+// Nagłówek sekcji jako KOMÓRKA (żółty pasek + czarna belka) do zagnieżdżenia
+// w tabeli keepWithHeaderRows — używane przez pdfSekcjaTekst.
+function pdfNaglowekKomorka(tytul) {
+  return {
+    table: { widths: [6, "*"], body: [[
+      { text: "", fillColor: PDF_KOL.zolty, border: [false, false, false, false] },
+      { text: tytul.toUpperCase(), fillColor: PDF_KOL.czarny, color: "#FFFFFF", font: "RobotoBlack", fontSize: 11, characterSpacing: 1.2, margin: [8, 5, 8, 5], border: [false, false, false, false] },
+    ]] },
+    layout: "noBorders",
+    border: [false, false, false, false],
+  };
+}
+
+// Sekcja tekstowa z nagłówkiem TRWALE związanym z pierwszą linią treści.
+// Zamiast liczyć pozycję (zawodne pageBreakBefore), wkładamy nagłówek i pierwszą
+// linię do jednej tabeli z keepWithHeaderRows — pdfmake nie może ich rozdzielić,
+// więc nagłówek nigdy nie zostaje sam/ucięty na dole strony. Reszta treści płynie
+// jako osobny węzeł (bez ryzyka ucięcia długich sekcji).
+function pdfSekcjaTekst(content, tytul, val) {
+  if (!maTresc(val)) return;
+  const blok = htmlBlok(val);
+  const runs = Array.isArray(blok.text) ? blok.text : [blok.text];
+  const iNl = runs.findIndex((r) => r && r.text === "\n");
+  const pierwsza = iNl < 0 ? runs : runs.slice(0, iNl);   // pierwsza linia (bez \n)
+  const reszta = iNl < 0 ? [] : runs.slice(iNl + 1);      // reszta (podział daje granica węzła)
+  content.push({
+    table: {
+      headerRows: 1,
+      keepWithHeaderRows: 1,
+      widths: ["*"],
+      body: [
+        [pdfNaglowekKomorka(tytul)],
+        [{ text: pierwsza.length ? pierwsza : [{ text: "" }], fontSize: 10.5, lineHeight: 1.4, margin: [2, 6, 2, 0], border: [false, false, false, false] }],
+      ],
+    },
+    layout: "noBorders",
+    margin: [0, 16, 0, 0],
+  });
+  if (reszta.length) content.push({ text: reszta, fontSize: 10.5, lineHeight: 1.4, margin: [2, 0, 2, 0] });
+}
+
 async function pdfHarmonogram(content, form) {
   const { czarny, zolty, linia } = PDF_KOL;
   if (form.harmonogramObrazy && form.harmonogramObrazy.length > 0) {
@@ -3720,12 +3761,11 @@ async function budujDocDefinition(form) {
       { ...htmlBlok(form.opoznienia), fillColor: PDF_KOL.zoltyJasny, margin: [10, 6, 10, 6], border: [false, false, false, false] },
     ]] }, layout: "noBorders" });
   }
-  const sekcjaTekst = (tytul, val) => { if (!maTresc(val)) return; content.push(pdfNaglowekSekcji(tytul)); content.push(htmlBlok(val)); };
-  sekcjaTekst("Wykonawcy prac", form.wykonawcy);
-  sekcjaTekst("Przetargi", form.przetargi);
-  sekcjaTekst("Sprawy ogólne budowy", form.sprawyBudowy);
-  sekcjaTekst("Sprawy dotyczące Inwestora", form.sprawyInwestora);
-  sekcjaTekst("Teren placu budowy", form.placBudowy);
+  pdfSekcjaTekst(content, "Wykonawcy prac", form.wykonawcy);
+  pdfSekcjaTekst(content, "Przetargi", form.przetargi);
+  pdfSekcjaTekst(content, "Sprawy ogólne budowy", form.sprawyBudowy);
+  pdfSekcjaTekst(content, "Sprawy dotyczące Inwestora", form.sprawyInwestora);
+  pdfSekcjaTekst(content, "Teren placu budowy", form.placBudowy);
 
   content.push(pdfNaglowekSekcji("Podsumowanie"));
   content.push({ table: { widths: [4, "*"], body: [[{ text: "", fillColor: zolty, border: [false, false, false, false] }, { text: form.podsumowanie || "—", bold: true, fontSize: 11, margin: [10, 2, 0, 2], border: [false, false, false, false] }]] }, layout: "noBorders" });
