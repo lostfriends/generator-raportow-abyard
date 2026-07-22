@@ -3644,13 +3644,13 @@ const PDF_SZER = 515; // szerokość treści A4 przy marginesach 40
 
 // Overline sekcji: „/ TYTUŁ" w monospace (amber) + cienki hairline pod spodem.
 // idx — opcjonalny podpis po prawej (numer sekcji / etykieta, np. „TYS. ZŁ").
-function overlineStack(tytul, idx) {
+function overlineStack(tytul, idx, width) {
   return [
     { columns: [
       { text: [{ text: "/ ", color: PDF_KOL.zolty, bold: true }, { text: String(tytul).toUpperCase(), color: PDF_KOL.zoltyDeep }], font: "Mono", fontSize: 11.5, characterSpacing: 1.2, width: "*" },
       idx ? { text: String(idx), font: "Mono", fontSize: 10, color: PDF_KOL.szary2, alignment: "right", width: "auto", margin: [0, 3, 0, 0] } : {},
     ] },
-    { canvas: [{ type: "line", x1: 0, y1: 4, x2: PDF_SZER, y2: 4, lineWidth: 0.8, lineColor: PDF_KOL.linia }], margin: [0, 4, 0, 0] },
+    { canvas: [{ type: "line", x1: 0, y1: 4, x2: width || PDF_SZER, y2: 4, lineWidth: 0.8, lineColor: PDF_KOL.linia }], margin: [0, 4, 0, 0] },
   ];
 }
 
@@ -3802,12 +3802,13 @@ function pdfCashflow(content, form) {
   const { miesiace, zadania, sumaMies, sumaNaras, sumaCalosc } = m;
   const nM = miesiace.length;
   const wTys = nM > 10;                       // ten sam próg co w podglądzie HTML (sekcja cashflow)
-  // Kolumny STAŁE (bez „*") — suma szerokości + krawędzie nigdy nie wychodzi za
-  // margines. Szerokość miesiąca = równy podział reszty; rozmiar czcionki dobrany
-  // do szerokości kolumny, żeby 4-cyfrowe kwoty mieściły się bez nakładania.
-  const fixZ = 90, fixN = 34, fixS = 26, fixK = 26;
-  const monthW = Math.max(12, Math.min(64, Math.floor((PDF_SZER - fixZ - fixN - fixS - fixK - 12) / nM)));
-  const fs = Math.max(5, Math.min(8.5, (monthW - 1) / 2.35));
+  // Strona cashflow w POZIOMIE (landscape) — szeroka tabela finansowa (nawet 30+
+  // miesięcy przy budowach 2–3 letnich) mieści się z zapasem i czytelnym fontem.
+  // Kolumny STAŁE (bez „*"), font wiązany z szerokością kolumny.
+  const CW_L = 762;                            // szerokość treści A4 poziomo (842 − 2·40)
+  const fixZ = 120, fixN = 44, fixS = 30, fixK = 30;
+  const monthW = Math.max(12, Math.min(70, Math.floor((CW_L - fixZ - fixN - fixS - fixK - 20) / nM)));
+  const fs = Math.max(5, Math.min(9, (monthW - 1) / 2.35));
   // W trybie „tys. zł" bez separatora tysięcy — spacja łamała liczby w wąskich
   // kolumnach (przy wielu miesiącach). noWrap na komórkach liczbowych/datowych
   // gwarantuje jedną linię (nazwa zadania nadal się zawija).
@@ -3829,7 +3830,8 @@ function pdfCashflow(content, form) {
   body.push([c("RAZEM mies.", { al: "left", bold: true, fill: "#F3F0E8" }), c(fmtZ(sumaCalosc), { bold: true, fill: "#F3F0E8" }), c("", { fill: "#F3F0E8" }), c("", { fill: "#F3F0E8" }), ...miesiace.map((mi) => c(fmtZ(sumaMies[mi.klucz]), { bold: true, fill: "#F3F0E8" }))]);
   body.push([c("Narastająco", { al: "left", bold: true, fill: zolty, color: ink }), c("", { fill: zolty }), c("", { fill: zolty }), c("", { fill: zolty }), ...miesiace.map((mi) => c(fmtZ(sumaNaras[mi.klucz]), { bold: true, fill: zolty, color: ink }))]);
   const widths = [fixZ, fixN, fixS, fixK, ...miesiace.map(() => monthW)];
-  content.push(pdfNaglowekSekcji(tytulCash));
+  // Overline sekcji na osobnej stronie POZIOMEJ (hairline na pełną szerokość landscape).
+  content.push({ headlineLevel: 1, stack: overlineStack(tytulCash, null, CW_L), margin: [0, 0, 0, 10], pageBreak: "before", pageOrientation: "landscape" });
   content.push({ table: { headerRows: 1, widths, body }, layout: {
     hLineColor: () => linia, vLineColor: () => linia, hLineWidth: (i) => (i === 1 ? 0 : 0.4), vLineWidth: () => 0.3,
     paddingLeft: () => 0, paddingRight: () => 0, paddingTop: () => 0, paddingBottom: () => 0,
@@ -3904,6 +3906,7 @@ async function pdfZdjecia(content, form) {
     if (naglowekTu) {
       const nag = pdfNaglowekSekcji("Dokumentacja fotograficzna");
       nag.pageBreak = "before";
+      nag.pageOrientation = "portrait"; // powrót do pionu po poziomym cashflow
       content.push(nag);
       pierwszaGrupa = false;
     } else {
