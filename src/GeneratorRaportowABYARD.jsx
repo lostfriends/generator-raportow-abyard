@@ -3495,11 +3495,22 @@ function htmlBlok(html) {
   return { ...htmlNaPdfmake(html), fontSize: 10.5, lineHeight: 1.4, margin: [2, 0, 2, 0] };
 }
 
+// Czy pole rich-text ma realną treść? Puste akapity (<div><br></div>), same
+// spacje lub &nbsp; nie liczą się — inaczej „pusta" sekcja rysowała sam
+// nagłówek bez treści (w PDF i w podglądzie).
+function maTresc(html) {
+  if (!html) return false;
+  return html.replace(/<[^>]*>/g, "").replace(/&nbsp;/gi, " ").replace(/\s+/g, "").length > 0;
+}
+
 const PDF_KOL = { czarny: "#1A1A1A", zolty: "#FBC707", szary: "#6B6B6B", linia: "#E0DDD4", zoltyJasny: "#FFF6D6", czerwony: "#B22222" };
 const PDF_SZER = 515; // szerokość treści A4 przy marginesach 40
 
 function pdfNaglowekSekcji(tytul) {
   return {
+    // headlineLevel — używane przez pageBreakBefore, by nagłówek nie został
+    // sam na dole strony (przenosimy go wtedy na następną, do swojej treści).
+    headlineLevel: 1,
     table: { widths: [6, "*"], body: [[
       { text: "", fillColor: PDF_KOL.zolty, border: [false, false, false, false] },
       { text: tytul.toUpperCase(), fillColor: PDF_KOL.czarny, color: "#FFFFFF", font: "RobotoBlack", fontSize: 11, characterSpacing: 1.2, margin: [8, 5, 8, 5], border: [false, false, false, false] },
@@ -3558,9 +3569,9 @@ async function pdfHarmonogram(content, form) {
     sc(fmtPL(dataMin) || "—", { bold: false }), { ...sc(fmtPL(dataMax) || "—", { bold: false }), colSpan: 2 }, {},
     sc(""), sc(opoz ? (opoz.dni > 0 ? `${opoz.dni} dni` : "brak") : "—", { color: opoz && opoz.dni > 0 ? "#B22" : undefined }),
   ]);
-  // Kolumny dat poszerzone (52/52/54), by „15.06.2026" mieściło się w jednym
-  // wierszu — wcześniej 44 pt łamało datę w połowie liczby.
-  content.push({ table: { headerRows: 1, widths: [16, "*", 52, 52, 54, 26, 44], body }, layout: { hLineColor: () => linia, vLineColor: () => linia, hLineWidth: () => 0.5, vLineWidth: () => 0.5 } });
+  // Kolumny: „#" 24 pt (podpozycje 3.10+ w jednym wierszu), daty 52/52/54
+  // („15.06.2026" bez łamania), „Opóźnienie" 50 pt (nagłówek bez łamania słowa).
+  content.push({ table: { headerRows: 1, widths: [24, "*", 52, 52, 54, 26, 50], body }, layout: { hLineColor: () => linia, vLineColor: () => linia, hLineWidth: () => 0.5, vLineWidth: () => 0.5 } });
 }
 
 function pdfCashflow(content, form) {
@@ -3702,14 +3713,14 @@ async function budujDocDefinition(form) {
   nagInfo.pageBreak = "before";
   content.push(nagInfo);
   content.push(htmlBlok(form.infoOgolne));
-  if (form.opoznienia) {
+  if (maTresc(form.opoznienia)) {
     content.push({ text: "OPÓŹNIENIA I DZIAŁANIA NAPRAWCZE", font: "RobotoBlack", fontSize: 9, characterSpacing: 0.8, margin: [0, 8, 0, 4] });
     content.push({ table: { widths: [3, "*"], body: [[
       { text: "", fillColor: PDF_KOL.zolty, border: [false, false, false, false] },
       { ...htmlBlok(form.opoznienia), fillColor: PDF_KOL.zoltyJasny, margin: [10, 6, 10, 6], border: [false, false, false, false] },
     ]] }, layout: "noBorders" });
   }
-  const sekcjaTekst = (tytul, val) => { if (!val) return; content.push(pdfNaglowekSekcji(tytul)); content.push(htmlBlok(val)); };
+  const sekcjaTekst = (tytul, val) => { if (!maTresc(val)) return; content.push(pdfNaglowekSekcji(tytul)); content.push(htmlBlok(val)); };
   sekcjaTekst("Wykonawcy prac", form.wykonawcy);
   sekcjaTekst("Przetargi", form.przetargi);
   sekcjaTekst("Sprawy ogólne budowy", form.sprawyBudowy);
@@ -3728,6 +3739,10 @@ async function budujDocDefinition(form) {
     pageMargins: [40, 40, 40, 45],
     defaultStyle: { font: "Roboto", fontSize: 10, color: czarny, lineHeight: 1.25 },
     content,
+    // Nagłówek sekcji (headlineLevel:1) nie może zostać sam na dole strony —
+    // gdy nic już pod nim nie zmieści się na tej stronie, przenosimy go na
+    // następną, do jego treści. Odpowiednik CSS break-after: avoid z podglądu.
+    pageBreakBefore: (cur, foll, next) => cur.headlineLevel === 1 && foll.length === 0 && next.length > 0,
     footer: (cur, total) => ({ text: `${cur} / ${total}`, alignment: "center", fontSize: 8, color: szary, margin: [0, 6, 0, 0] }),
   };
 }
@@ -3840,7 +3855,7 @@ function PodgladPDF({ form, onBack, nazwaPliku, raportId, publiczny, jestAdmin }
 
         <BlokPDF tytul="Informacje ogólne">
           <Tekst v={form.infoOgolne} />
-          {form.opoznienia && (
+          {maTresc(form.opoznienia) && (
             <div style={{ marginTop: 10 }}>
               <div style={{ fontWeight: 800, fontSize: 11, textTransform: "uppercase", letterSpacing: 0.8, color: C.czarny, marginBottom: 4 }}>Opóźnienia i działania naprawcze</div>
               <div style={{ background: C.zoltyJasny, borderLeft: `3px solid ${C.zolty}`, padding: "8px 12px", fontSize: 12.5 }}><Tekst v={form.opoznienia} /></div>
@@ -3848,11 +3863,11 @@ function PodgladPDF({ form, onBack, nazwaPliku, raportId, publiczny, jestAdmin }
           )}
         </BlokPDF>
 
-        {form.wykonawcy && <BlokPDF tytul="Wykonawcy prac"><Tekst v={form.wykonawcy} /></BlokPDF>}
-        {form.przetargi && <BlokPDF tytul="Przetargi"><Tekst v={form.przetargi} /></BlokPDF>}
-        {form.sprawyBudowy && <BlokPDF tytul="Sprawy ogólne budowy"><Tekst v={form.sprawyBudowy} /></BlokPDF>}
-        {form.sprawyInwestora && <BlokPDF tytul="Sprawy dotyczące Inwestora"><Tekst v={form.sprawyInwestora} /></BlokPDF>}
-        {form.placBudowy && <BlokPDF tytul="Teren placu budowy"><Tekst v={form.placBudowy} /></BlokPDF>}
+        {maTresc(form.wykonawcy) && <BlokPDF tytul="Wykonawcy prac"><Tekst v={form.wykonawcy} /></BlokPDF>}
+        {maTresc(form.przetargi) && <BlokPDF tytul="Przetargi"><Tekst v={form.przetargi} /></BlokPDF>}
+        {maTresc(form.sprawyBudowy) && <BlokPDF tytul="Sprawy ogólne budowy"><Tekst v={form.sprawyBudowy} /></BlokPDF>}
+        {maTresc(form.sprawyInwestora) && <BlokPDF tytul="Sprawy dotyczące Inwestora"><Tekst v={form.sprawyInwestora} /></BlokPDF>}
+        {maTresc(form.placBudowy) && <BlokPDF tytul="Teren placu budowy"><Tekst v={form.placBudowy} /></BlokPDF>}
 
         <BlokPDF tytul="Podsumowanie">
           <div style={{ borderLeft: `4px solid ${C.zolty}`, paddingLeft: 12, fontWeight: 700, fontSize: 13 }}>{form.podsumowanie}</div>
