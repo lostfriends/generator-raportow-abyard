@@ -3568,7 +3568,7 @@ function pdfCashflow(content, form) {
   if (!m.zadania.length || !m.miesiace.length) return;
   const { miesiace, zadania, sumaMies, sumaNaras, sumaCalosc } = m;
   const nM = miesiace.length;
-  const wTys = nM > 10;
+  const wTys = nM > 10;                       // ten sam próg co w podglądzie HTML (sekcja cashflow)
   const fs = nM > 18 ? 5.5 : nM > 12 ? 6.5 : nM > 8 ? 7.5 : 8.5;
   const fmtZ = (n) => !n ? "" : (wTys ? Math.round(n / 1000).toLocaleString("pl-PL") : Math.round(n).toLocaleString("pl-PL"));
   content.push(pdfNaglowekSekcji(`Harmonogram przepływów finansowych — sprzedaż${wTys ? " (kwoty w tys. zł)" : ""}`));
@@ -3929,7 +3929,7 @@ function PodgladPDF({ form, onBack, nazwaPliku, raportId, publiczny, jestAdmin }
           const nM = miesiace.length;
           // Skalowanie do szerokości pionowej A4 (~182mm po marginesach).
           // Im więcej miesięcy, tym mniejsza czcionka/padding; przy bardzo wielu — kwoty w tysiącach.
-          const wTys = nM > 16;                       // kwoty w tys. zł, gdy dużo kolumn
+          const wTys = nM > 10;                       // próg ujednolicony z eksportem PDF (pdfCashflow)
           const fs = nM > 20 ? 6 : nM > 16 ? 6.5 : nM > 12 ? 7.5 : nM > 8 ? 8.5 : 9.5;
           const pad = nM > 16 ? "1px 2px" : nM > 12 ? "1px 3px" : "3px 5px";
           const fmtZ = (n) => {
