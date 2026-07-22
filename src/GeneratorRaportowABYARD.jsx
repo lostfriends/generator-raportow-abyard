@@ -3734,15 +3734,27 @@ async function budujDocDefinition(form) {
   pdfCashflow(content, form);
   await pdfZdjecia(content, form);
 
+  const marginesGora = 40;
+  // Min. wolne miejsce POD początkiem nagłówka (belka ~28 pt + kilka wierszy),
+  // by nagłówek nie został sam/ucięty na dole strony.
+  const MIN_MIEJSCE_NAGL = 80;
   return {
     pageSize: "A4",
-    pageMargins: [40, 40, 40, 45],
+    pageMargins: [40, marginesGora, 40, 45],
     defaultStyle: { font: "Roboto", fontSize: 10, color: czarny, lineHeight: 1.25 },
     content,
-    // Nagłówek sekcji (headlineLevel:1) nie może zostać sam na dole strony —
-    // gdy nic już pod nim nie zmieści się na tej stronie, przenosimy go na
-    // następną, do jego treści. Odpowiednik CSS break-after: avoid z podglądu.
-    pageBreakBefore: (cur, foll, next) => cur.headlineLevel === 1 && foll.length === 0 && next.length > 0,
+    // Nagłówek sekcji (headlineLevel:1) nie może zostać sam na dole strony ani
+    // rozłamać się (samo tło belki na jednej stronie, tekst na drugiej).
+    // Warunek foll.length===0 zawodzi w pdfmake 0.2.10 (kolejny węzeł bywa liczony
+    // jako „na stronie", choć przechodzi dalej), więc wykrywamy sierotę po
+    // pozycji: ile miejsca zostaje pod początkiem nagłówka do dołu obszaru druku.
+    // Jeśli za mało — pageBreakBefore przenosi nagłówek na następną stronę, do
+    // jego treści. Odpowiednik CSS break-after: avoid z podglądu.
+    pageBreakBefore: (cur) => {
+      if (cur.headlineLevel !== 1 || !cur.startPosition) return false;
+      const pozostaje = (marginesGora + cur.startPosition.pageInnerHeight) - cur.startPosition.top;
+      return pozostaje < MIN_MIEJSCE_NAGL;
+    },
     footer: (cur, total) => ({ text: `${cur} / ${total}`, alignment: "center", fontSize: 8, color: szary, margin: [0, 6, 0, 0] }),
   };
 }
