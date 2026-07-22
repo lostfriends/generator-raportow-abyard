@@ -7,3 +7,6 @@ package-lock.json
 # Pliki pośrednie / systemowe
 *.log
 .DS_Store
+
+# Ręcznie pakowany build do deployu manualnego
+abyard-dist.zip
