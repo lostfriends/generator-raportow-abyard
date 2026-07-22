@@ -1169,16 +1169,6 @@ export default function GeneratorRaportowABYARD() {
     }
   }
 
-  // ---- Generowanie PDF (przez okno druku przeglądarki) -----------------------
-  function drukujZNazwa(nazwa) {
-    const poprzedni = document.title;
-    document.title = nazwa; // przeglądarka użyje tego jako domyślnej nazwy pliku PDF
-    const przywroc = () => { document.title = poprzedni; window.removeEventListener("afterprint", przywroc); };
-    window.addEventListener("afterprint", przywroc);
-    window.print();
-    // zabezpieczenie, gdyby afterprint nie zadziałał
-    setTimeout(przywroc, 1500);
-  }
   // Czy można generować raport? Tylko gdy jest zapisany w bazie i nie ma zmian
   // niezapisanych — inaczej PM wygenerowałby raport bez świeżo dodanych zdjęć.
   const mozeGenerowac = !!zapisanyId && !niezapisaneZmiany;
@@ -3395,9 +3385,8 @@ function WidokPubliczny({ token }) {
 /* ---------- Podgląd / PDF ------------------------------------------------- */
 /* ============================================================================
    EKSPORT PDF (pdfmake) — wektorowy plik budowany z danych raportu.
-   Niezależny od okna druku przeglądarki i opcji „Grafika w tle": jeden klik,
-   ten sam plik za każdym razem, tekst zaznaczalny. Układ odwzorowuje podgląd
-   (PodgladPDF); przycisk „Zapisz/Drukuj" zostaje jako alternatywa 1:1 z HTML.
+   Jeden klik „Pobierz PDF", ten sam plik za każdym razem, tekst zaznaczalny.
+   Jedyna droga do PDF — układ i typografia odwzorowują podgląd (PodgladPDF).
    ========================================================================== */
 
 // URL/dataURL -> dataURL (base64). Zwraca null przy błędzie (pomijamy obraz).
@@ -3736,7 +3725,7 @@ function PodgladPDF({ form, onBack, nazwaPliku, raportId, publiczny, jestAdmin }
       await pobierzPDF(form, nazwaPliku);
     } catch (e) {
       console.error(e);
-      alert("Nie udało się wygenerować pliku PDF: " + (e?.message || e) + "\n\nMożesz użyć „Zapisz / Drukuj PDF”.");
+      alert("Nie udało się wygenerować pliku PDF: " + (e?.message || e) + "\n\nSprawdź połączenie i spróbuj ponownie.");
     } finally {
       setPobieranie(false);
     }
@@ -3747,9 +3736,6 @@ function PodgladPDF({ form, onBack, nazwaPliku, raportId, publiczny, jestAdmin }
       <div className="noprint" style={{ position: "sticky", top: 0, background: C.czarny, padding: "12px 24px", display: "flex", justifyContent: "space-between", alignItems: "center", zIndex: 10, flexWrap: "wrap", gap: 10 }}>
         <span style={{ color: C.bialy, fontSize: 14 }}>Podgląd raportu — <strong>{nazwaPliku}.pdf</strong></span>
         <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-          <span style={{ color: C.zolty, fontSize: 12, maxWidth: 260, lineHeight: 1.3 }}>
-            W oknie zapisu zaznacz <strong>„Grafika w tle"</strong>, by zachować kolory
-          </span>
           {onBack && <button style={btnGhostDark} onClick={onBack}>← Wróć do edycji</button>}
           {!publiczny && (raportId ? (
             <button style={btnGhostDark} onClick={() => setPokazLinki((v) => !v)}>
@@ -3761,18 +3747,10 @@ function PodgladPDF({ form, onBack, nazwaPliku, raportId, publiczny, jestAdmin }
               🔗 Udostępnij link
             </button>
           ))}
-          <button style={{ ...btnGhostDark, opacity: pobieranie ? 0.6 : 1, cursor: pobieranie ? "wait" : "pointer" }} disabled={pobieranie}
-            onClick={pobierzPlikPDF} title="Pobierz gotowy plik PDF (niezależny od okna druku i opcji „Grafika w tle”)">
+          <button style={{ ...btnPrimary, opacity: pobieranie ? 0.6 : 1, cursor: pobieranie ? "wait" : "pointer" }} disabled={pobieranie}
+            onClick={pobierzPlikPDF} title="Pobierz gotowy plik PDF raportu">
             {pobieranie ? "Generowanie…" : "⬇ Pobierz PDF"}
           </button>
-          <button style={btnPrimary} onClick={() => {
-            const poprzedni = document.title;
-            document.title = nazwaPliku;
-            const przywroc = () => { document.title = poprzedni; window.removeEventListener("afterprint", przywroc); };
-            window.addEventListener("afterprint", przywroc);
-            window.print();
-            setTimeout(przywroc, 1500);
-          }}>Zapisz / Drukuj PDF</button>
         </div>
       </div>
 
