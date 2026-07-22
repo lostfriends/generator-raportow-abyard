@@ -3888,7 +3888,7 @@ function PodgladPDF({ form, onBack, nazwaPliku, raportId, publiczny, jestAdmin }
 
       {pokazLinki && raportId && !publiczny && <PanelLinkow raportId={raportId} jestAdmin={jestAdmin} />}
 
-      <div className="pdf-page" style={{ background: C.bialy, maxWidth: 794, margin: "20px auto", padding: 56, boxShadow: "0 4px 30px rgba(0,0,0,0.3)", color: C.czarny }}>
+      <div className="pdf-page" style={{ background: C.bialy, maxWidth: 794, margin: "20px auto", padding: 56, boxShadow: "0 4px 30px rgba(0,0,0,0.3)", color: C.czarny, fontFamily: "'Roboto', 'Segoe UI', system-ui, sans-serif" }}>
         {/* Logo + kontakt */}
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", borderBottom: `2px solid ${C.czarny}`, paddingBottom: 10, marginBottom: 18 }}>
           <div><span style={{ color: C.zolty, fontWeight: 800, fontSize: 22 }}>/</span><span style={{ fontWeight: 800, fontSize: 20 }}>Abyard</span></div>
