@@ -3737,7 +3737,7 @@ async function budujDocDefinition(form) {
   const marginesGora = 40;
   // Min. wolne miejsce POD początkiem nagłówka (belka ~28 pt + kilka wierszy),
   // by nagłówek nie został sam/ucięty na dole strony.
-  const MIN_MIEJSCE_NAGL = 90;
+  const MIN_MIEJSCE_NAGL = 80;
   return {
     pageSize: "A4",
     pageMargins: [40, marginesGora, 40, 45],
