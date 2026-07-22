@@ -45,6 +45,25 @@ async function main() {
     logLevel: "info",
   });
 
+  // Krok 1c — fonty Roboto do PODGLĄDU (HTML). Kopiujemy TTF do dist/fonts/,
+  // żeby podgląd renderował w tej samej czcionce co pobierany PDF (pdfmake).
+  // Ładowane leniwie przez przeglądarkę dopiero, gdy podgląd użyje font-family
+  // Roboto (nie obciąża ekranów logowania/formularza).
+  const FONTS_DIR = path.join(OUT_DIR, "fonts");
+  if (!fs.existsSync(FONTS_DIR)) fs.mkdirSync(FONTS_DIR, { recursive: true });
+  for (const f of fs.readdirSync("src/fonts").filter((n) => n.endsWith(".ttf"))) {
+    fs.copyFileSync(path.join("src/fonts", f), path.join(FONTS_DIR, f));
+  }
+
+  const fontFace = `
+<style>
+@font-face{font-family:'Roboto';font-weight:400;font-style:normal;font-display:swap;src:url('fonts/Roboto-Regular.ttf') format('truetype');}
+@font-face{font-family:'Roboto';font-weight:400;font-style:italic;font-display:swap;src:url('fonts/Roboto-Italic.ttf') format('truetype');}
+@font-face{font-family:'Roboto';font-weight:700;font-style:normal;font-display:swap;src:url('fonts/Roboto-Bold.ttf') format('truetype');}
+@font-face{font-family:'Roboto';font-weight:700;font-style:italic;font-display:swap;src:url('fonts/Roboto-BoldItalic.ttf') format('truetype');}
+@font-face{font-family:'Roboto';font-weight:900;font-style:normal;font-display:swap;src:url('fonts/Roboto-Black.ttf') format('truetype');}
+</style>`;
+
   // Krok 2 — owinięcie bundla w kompletny dokument HTML
   const bundle = fs.readFileSync(BUNDLE_TMP, "utf8");
   const html = `<!DOCTYPE html>
@@ -52,7 +71,7 @@ async function main() {
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Generator raportów z budowy ABYARD</title>
+<title>Generator raportów z budowy ABYARD</title>${fontFace}
 </head>
 <body>
 <div id="root"></div>
