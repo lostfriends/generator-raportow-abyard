@@ -3558,7 +3558,9 @@ async function pdfHarmonogram(content, form) {
     sc(fmtPL(dataMin) || "—", { bold: false }), { ...sc(fmtPL(dataMax) || "—", { bold: false }), colSpan: 2 }, {},
     sc(""), sc(opoz ? (opoz.dni > 0 ? `${opoz.dni} dni` : "brak") : "—", { color: opoz && opoz.dni > 0 ? "#B22" : undefined }),
   ]);
-  content.push({ table: { headerRows: 1, widths: [16, "*", 44, 44, 50, 24, 40], body }, layout: { hLineColor: () => linia, vLineColor: () => linia, hLineWidth: () => 0.5, vLineWidth: () => 0.5 } });
+  // Kolumny dat poszerzone (52/52/54), by „15.06.2026" mieściło się w jednym
+  // wierszu — wcześniej 44 pt łamało datę w połowie liczby.
+  content.push({ table: { headerRows: 1, widths: [16, "*", 52, 52, 54, 26, 44], body }, layout: { hLineColor: () => linia, vLineColor: () => linia, hLineWidth: () => 0.5, vLineWidth: () => 0.5 } });
 }
 
 function pdfCashflow(content, form) {
@@ -3585,8 +3587,12 @@ function pdfCashflow(content, form) {
   }
   body.push([c("RAZEM mies.", { al: "left", bold: true, fill: "#F3F0E8" }), c(fmtZ(sumaCalosc), { bold: true, fill: "#F3F0E8" }), c("", { fill: "#F3F0E8" }), c("", { fill: "#F3F0E8" }), ...miesiace.map((mi) => c(fmtZ(sumaMies[mi.klucz]), { bold: true, fill: "#F3F0E8" }))]);
   body.push([c("Narastająco", { al: "left", bold: true, fill: zolty }), c("", { fill: zolty }), c("", { fill: zolty }), c("", { fill: zolty }), ...miesiace.map((mi) => c(fmtZ(sumaNaras[mi.klucz]), { bold: true, fill: zolty }))]);
-  const monthW = Math.max(13, Math.floor((PDF_SZER - 130) / nM));
-  const widths = ["*", 30, 30, 30, ...miesiace.map(() => monthW)];
+  // Szerokość kolumny miesiąca: wypełnia miejsce po kolumnach stałych, ale z
+  // GÓRNYM limitem — przy małej liczbie miesięcy bez limitu kolumny robiły się
+  // ogromne i tabela wychodziła poza prawy margines strony. Rezerwa 170 pt na
+  // „Zadanie" (*) + Netto/Start/Koniec; nadmiar miejsca chłonie kolumna „*".
+  const monthW = Math.max(13, Math.min(64, Math.floor((PDF_SZER - 180) / nM)));
+  const widths = ["*", 40, 30, 30, ...miesiace.map(() => monthW)];
   content.push({ table: { headerRows: 1, widths, body }, layout: { hLineColor: () => "#D9D6CE", vLineColor: () => "#D9D6CE", hLineWidth: () => 0.4, vLineWidth: () => 0.4 } });
 }
 
