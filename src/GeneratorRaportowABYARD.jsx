@@ -622,6 +622,65 @@ const PUSTY_RAPORT = {
   zdjecia: [], // {nazwa, dataUrl, opis}
 };
 
+/* ============================================================================
+   WERSJA ROBOCZA (auto-zapis w przeglądarce)
+   ---------------------------------------------------------------------------
+   Chroni wpisaną treść przed utratą przy przypadkowym zamknięciu/odświeżeniu
+   przeglądarki. Trzymamy CAŁY formularz (łącznie ze zdjęciami base64) w
+   IndexedDB — w przeciwieństwie do localStorage nie ma tu limitu ~5 MB, więc
+   zdjęcia też przeżywają. Jeden rekord („aktualny") = bieżąca, niezapisana praca.
+   ========================================================================== */
+const DRAFT_DB = "abyard_raporty";
+const DRAFT_STORE = "wersje_robocze";
+const DRAFT_KLUCZ = "aktualny";
+
+function otworzDraftDB() {
+  return new Promise((res, rej) => {
+    if (typeof indexedDB === "undefined") { rej(new Error("brak IndexedDB")); return; }
+    const req = indexedDB.open(DRAFT_DB, 1);
+    req.onupgradeneeded = () => { const db = req.result; if (!db.objectStoreNames.contains(DRAFT_STORE)) db.createObjectStore(DRAFT_STORE); };
+    req.onsuccess = () => res(req.result);
+    req.onerror = () => rej(req.error);
+  });
+}
+async function zapiszDraftIDB(dane) {
+  const db = await otworzDraftDB();
+  await new Promise((res, rej) => {
+    const tx = db.transaction(DRAFT_STORE, "readwrite");
+    tx.objectStore(DRAFT_STORE).put(dane, DRAFT_KLUCZ);
+    tx.oncomplete = res; tx.onerror = () => rej(tx.error); tx.onabort = () => rej(tx.error);
+  });
+  db.close();
+}
+async function wczytajDraftIDB() {
+  const db = await otworzDraftDB();
+  const wynik = await new Promise((res, rej) => {
+    const tx = db.transaction(DRAFT_STORE, "readonly");
+    const r = tx.objectStore(DRAFT_STORE).get(DRAFT_KLUCZ);
+    r.onsuccess = () => res(r.result || null); r.onerror = () => rej(r.error);
+  });
+  db.close();
+  return wynik;
+}
+async function usunDraftIDB() {
+  const db = await otworzDraftDB();
+  await new Promise((res) => {
+    const tx = db.transaction(DRAFT_STORE, "readwrite");
+    tx.objectStore(DRAFT_STORE).delete(DRAFT_KLUCZ);
+    tx.oncomplete = res; tx.onerror = res; tx.onabort = res;
+  });
+  db.close();
+}
+// Czy formularz ma treść wartą zapisania (żeby nie tworzyć pustej wersji roboczej)?
+function maDraftTresc(f) {
+  if (!f) return false;
+  const teksty = ["projekt", "adres", "tytulZadania", "infoOgolne", "opoznienia", "wykonawcy", "przetargi", "sprawyBudowy", "sprawyInwestora", "placBudowy", "rozpoczecie", "zakonczenieRobot", "pnu", "okresOd", "okresDo"];
+  if (teksty.some((k) => (f[k] || "").toString().replace(/<[^>]*>/g, "").trim().length > 0)) return true;
+  if ((f.zdjecia || []).length || (f.harmonogramObrazy || []).length || f.grafikaInwestycji) return true;
+  if (Array.isArray(f.harmonogram) && f.harmonogram.some((r) => r && (r.zadanie || r.start || r.koniec || r.rzecz || (r.proc !== "" && r.proc != null)))) return true;
+  return false;
+}
+
 const C = {
   zolty: "#FBC707",
   czarny: "#1A1A1A",
@@ -748,6 +807,9 @@ export default function GeneratorRaportowABYARD() {
   // PM nie zapisze (częsty błąd: dodają zdjęcia i generują raport bez zapisu).
   const [niezapisaneZmiany, setNiezapisaneZmiany] = useState(false);
   const pomijajDirtyRef = useRef(false); // pomiń najbliższe oznaczenie „dirty" (po programowym załadowaniu)
+  const draftGotowyRef = useRef(false);  // czy próba przywrócenia wersji roboczej już się odbyła (dopiero potem auto-zapis)
+  const draftTimerRef = useRef(null);    // debouncer auto-zapisu wersji roboczej
+  const [przywroconoDraft, setPrzywroconoDraft] = useState(null); // {ts} — pasek „przywrócono wersję roboczą"
   const [selectKey, setSelectKey] = useState(0); // wymusza odświeżenie selecta po anulowaniu zmiany budowy
   const [toast, setToast] = useState("");
   // Archiwum:
@@ -865,6 +927,58 @@ export default function GeneratorRaportowABYARD() {
     setNiezapisaneZmiany(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [form]);
+
+  // ---- WERSJA ROBOCZA: przywrócenie przy starcie -----------------------------
+  // Raz, przy montowaniu: jeśli w przeglądarce jest niezapisana wersja robocza,
+  // wczytujemy ją do formularza i pokazujemy pasek informacyjny. Dopiero po tej
+  // próbie włączamy auto-zapis (żeby pusty formularz nie nadpisał wersji roboczej).
+  useEffect(() => {
+    let anulowane = false;
+    wczytajDraftIDB()
+      .then((d) => {
+        if (anulowane) return;
+        if (d && d.form && maDraftTresc(d.form)) {
+          setForm(d.form); // brak pomijajDirtyRef → traktujemy jako niezapisane zmiany
+          if (d.zapisanyId) setZapisanyId(d.zapisanyId);
+          if (typeof d.cashflowWlaczony === "boolean") setCashflowWlaczony(d.cashflowWlaczony);
+          setPrzywroconoDraft({ ts: d.ts || null });
+        }
+      })
+      .catch(() => {})
+      .finally(() => { if (!anulowane) draftGotowyRef.current = true; });
+    return () => { anulowane = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // ---- WERSJA ROBOCZA: auto-zapis przy każdej zmianie (z opóźnieniem) ---------
+  // Zapisujemy CAŁY formularz (ze zdjęciami) do IndexedDB. Debounce 800 ms, żeby
+  // nie pisać przy każdym znaku. Pusty formularz kasuje wersję roboczą.
+  useEffect(() => {
+    if (!draftGotowyRef.current) return;
+    clearTimeout(draftTimerRef.current);
+    draftTimerRef.current = setTimeout(() => {
+      if (maDraftTresc(form)) {
+        zapiszDraftIDB({ form, zapisanyId, cashflowWlaczony, ts: Date.now() }).catch(() => {});
+      } else {
+        usunDraftIDB().catch(() => {});
+      }
+    }, 800);
+    return () => clearTimeout(draftTimerRef.current);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form, zapisanyId, cashflowWlaczony]);
+
+  // Ręczne wyczyszczenie formularza (kasuje też wersję roboczą).
+  function wyczyscFormularz() {
+    if (!window.confirm("Wyczyścić formularz? Wpisana treść i wersja robocza zostaną usunięte. Zapisane w bazie raporty pozostają nietknięte.")) return;
+    pomijajDirtyRef.current = true; // reset do pustego to nie „zmiana użytkownika"
+    setForm({ ...PUSTY_RAPORT, dataOpracowania: dzisISO(), opracowal: nazwaZalogowanego });
+    setZapisanyId(null);
+    setCashflowWlaczony(false);
+    setNiezapisaneZmiany(false);
+    setPrzywroconoDraft(null);
+    wczytanaBudowaRef.current = null;
+    usunDraftIDB().catch(() => {});
+  }
 
   // Wyczyść wszystkie kwoty "wartość umowy" (przy wyłączaniu cashflow)
   function wyczyscKwoty() {
@@ -1155,6 +1269,8 @@ export default function GeneratorRaportowABYARD() {
       // by przy aktualizacji nie wgrać ich drugi raz
       plikiRef.current = { grafika: null, harm: [], zdjecia: [] };
       setNiezapisaneZmiany(false); // stan formularza = stan w bazie → „Generuj raport" odblokowany
+      setPrzywroconoDraft(null);
+      usunDraftIDB().catch(() => {}); // praca jest już w bazie — wersja robocza niepotrzebna
     } catch (e) {
       console.error(e);
       // Najczęstszy błąd na starcie: duplikat numeru (unique projekt_id+numer)
@@ -1468,6 +1584,16 @@ export default function GeneratorRaportowABYARD() {
       />
 
       <main style={{ maxWidth: 1080, margin: "0 auto", padding: "28px 24px 120px" }}>
+
+        {przywroconoDraft && (
+          <div style={{ marginBottom: 16, padding: "10px 16px", background: C.zoltyJasny, border: `1px solid ${C.zolty}`, borderRadius: 8, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, fontSize: 13, flexWrap: "wrap" }}>
+            <span>↩︎ <strong>Przywrócono niezapisaną wersję roboczą</strong>{przywroconoDraft.ts ? ` (z ${new Date(przywroconoDraft.ts).toLocaleString("pl-PL", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })})` : ""}. Kontynuuj pracę albo wyczyść formularz.</span>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button style={miniBtn} onClick={() => setPrzywroconoDraft(null)}>OK, kontynuuję</button>
+              <button style={{ ...miniBtn, borderColor: C.czerwony, color: C.czerwony, fontWeight: 700 }} onClick={wyczyscFormularz}>Wyczyść</button>
+            </div>
+          </div>
+        )}
 
         {/* Pasek akcji: wybór projektu z listy */}
         <section style={card}>
@@ -1856,6 +1982,9 @@ export default function GeneratorRaportowABYARD() {
                 : <>Najpierw <strong>zapisz raport w bazie</strong> — dopiero wtedy odblokuje się „Generuj raport".</>}
           </span>
           <div style={{ display: "flex", gap: 10 }}>
+            <button style={{ ...btnGhost, borderColor: C.linia, color: C.szary }} onClick={wyczyscFormularz} disabled={zapisywanie} title="Wyczyść widoczny formularz (i wersję roboczą). Zapisane raporty w bazie zostają.">
+              Wyczyść
+            </button>
             <button style={btnGhost} onClick={zapiszArchiwum} disabled={zapisywanie}>
               {zapisywanie ? "Zapisywanie…" : zapisanyId ? "Aktualizuj raport" : "Zapisz raport w bazie"}
             </button>
