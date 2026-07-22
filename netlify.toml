@@ -11,3 +11,22 @@
 [build.environment]
   # Pin wersji Node, żeby build był przewidywalny (esbuild 0.28 wymaga Node 18+).
   NODE_VERSION = "20"
+
+# Cała aplikacja (z logiką generowania PDF) siedzi w index.html, a biblioteka
+# pdfmake w pdfmake-lib.js. Wymuszamy rewalidację przy każdym wejściu, żeby po
+# publikacji nowej wersji przeglądarka nie serwowała starego kodu z cache
+# (inaczej „Pobierz PDF" używa nieaktualnej wersji mimo wdrożonej poprawki).
+[[headers]]
+  for = "/"
+  [headers.values]
+    Cache-Control = "public, max-age=0, must-revalidate"
+
+[[headers]]
+  for = "/index.html"
+  [headers.values]
+    Cache-Control = "public, max-age=0, must-revalidate"
+
+[[headers]]
+  for = "/pdfmake-lib.js"
+  [headers.values]
+    Cache-Control = "public, max-age=0, must-revalidate"
