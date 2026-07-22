@@ -3802,30 +3802,37 @@ function pdfCashflow(content, form) {
   const { miesiace, zadania, sumaMies, sumaNaras, sumaCalosc } = m;
   const nM = miesiace.length;
   const wTys = nM > 10;                       // ten sam próg co w podglądzie HTML (sekcja cashflow)
-  const fs = nM > 18 ? 5.5 : nM > 12 ? 6.5 : nM > 8 ? 7.5 : 8.5;
-  const fmtZ = (n) => !n ? "" : (wTys ? Math.round(n / 1000).toLocaleString("pl-PL") : Math.round(n).toLocaleString("pl-PL"));
+  // Kolumny STAŁE (bez „*") — suma szerokości + krawędzie nigdy nie wychodzi za
+  // margines. Szerokość miesiąca = równy podział reszty; rozmiar czcionki dobrany
+  // do szerokości kolumny, żeby 4-cyfrowe kwoty mieściły się bez nakładania.
+  const fixZ = 90, fixN = 34, fixS = 26, fixK = 26;
+  const monthW = Math.max(12, Math.min(64, Math.floor((PDF_SZER - fixZ - fixN - fixS - fixK - 12) / nM)));
+  const fs = Math.max(5, Math.min(8.5, (monthW - 1) / 2.35));
+  // W trybie „tys. zł" bez separatora tysięcy — spacja łamała liczby w wąskich
+  // kolumnach (przy wielu miesiącach). noWrap na komórkach liczbowych/datowych
+  // gwarantuje jedną linię (nazwa zadania nadal się zawija).
+  const fmtZ = (n) => !n ? "" : (wTys ? String(Math.round(n / 1000)) : Math.round(n).toLocaleString("pl-PL"));
+  const fmtMY = (iso) => { if (!iso) return "—"; const p = String(iso).split("-"); return p.length >= 2 ? `${p[1]}.${p[0].slice(2)}` : (fmtPL(iso) || "—"); };
   const tytulCash = `Harmonogram przepływów finansowych — sprzedaż${wTys ? " (tys. zł)" : ""}`;
-  const th = (t, al, col) => ({ text: t, font: "Mono", fillColor: ink, color: col || "#FFFFFF", fontSize: fs, alignment: al || "right", margin: [1, 6, 2, 6], border: [false, false, false, false] });
-  const c = (t, o = {}) => ({ text: t, font: "Mono", fontSize: fs, alignment: o.al || "right", fillColor: o.fill, color: o.color, bold: o.bold, margin: [1, 5, 2, 5] });
-  const body = [[th("Zadanie", "left"), th("Netto", "right", zoltyBright), th("Start", "center", zoltyBright), th("Koniec", "center", zoltyBright), ...miesiace.map((mi) => th(mi.etykieta, "right", zoltyBright))]];
+  const th = (t, al, col) => ({ text: t, font: "Mono", fillColor: ink, color: col || "#FFFFFF", fontSize: fs, alignment: al || "right", noWrap: al !== "left", margin: [1, 6, 1, 6], border: [false, false, false, false] });
+  const c = (t, o = {}) => ({ text: t, font: "Mono", fontSize: fs, alignment: o.al || "right", noWrap: o.al !== "left", fillColor: o.fill, color: o.color, bold: o.bold, margin: [1, 5, 1, 5] });
+  // Nagłówki miesięcy dwuwierszowo („10" nad „24") — mieszczą się w wąskich kolumnach.
+  const thM = (mi) => ({ text: String(mi.etykieta).replace(".", "\n"), font: "Mono", fillColor: ink, color: zoltyBright, fontSize: fs, alignment: "center", lineHeight: 0.95, margin: [1, 4, 1, 4], border: [false, false, false, false] });
+  const body = [[th("Zadanie", "left"), th("Netto", "right", zoltyBright), th("Start", "center", zoltyBright), th("Koniec", "center", zoltyBright), ...miesiace.map(thM)]];
   for (const z of zadania) {
     body.push([
       c(z.nazwa, { al: "left", color: "#26251F" }), c(fmtZ(z.kwota), { color: "#26251F" }),
-      c(z.start ? fmtPL(z.start) : "—", { al: "center", color: szary2 }), c(z.koniec ? fmtPL(z.koniec) : "—", { al: "center", color: szary2 }),
+      c(fmtMY(z.start), { al: "center", color: szary2 }), c(fmtMY(z.koniec), { al: "center", color: szary2 }),
       ...miesiace.map((mi) => { const v = z.komorki[mi.klucz]; return c(v ? fmtZ(v) : "–", { fill: v ? zoltyJasny : undefined, color: v ? "#26251F" : szary2 }); }),
     ]);
   }
   body.push([c("RAZEM mies.", { al: "left", bold: true, fill: "#F3F0E8" }), c(fmtZ(sumaCalosc), { bold: true, fill: "#F3F0E8" }), c("", { fill: "#F3F0E8" }), c("", { fill: "#F3F0E8" }), ...miesiace.map((mi) => c(fmtZ(sumaMies[mi.klucz]), { bold: true, fill: "#F3F0E8" }))]);
   body.push([c("Narastająco", { al: "left", bold: true, fill: zolty, color: ink }), c("", { fill: zolty }), c("", { fill: zolty }), c("", { fill: zolty }), ...miesiace.map((mi) => c(fmtZ(sumaNaras[mi.klucz]), { bold: true, fill: zolty, color: ink }))]);
-  // Szerokość kolumny miesiąca: wypełnia miejsce po kolumnach stałych, ale z
-  // GÓRNYM limitem — przy małej liczbie miesięcy bez limitu kolumny robiły się
-  // ogromne i tabela wychodziła poza prawy margines strony. Rezerwa 170 pt na
-  // „Zadanie" (*) + Netto/Start/Koniec; nadmiar miejsca chłonie kolumna „*".
-  const monthW = Math.max(13, Math.min(64, Math.floor((PDF_SZER - 180) / nM)));
-  const widths = ["*", 40, 30, 30, ...miesiace.map(() => monthW)];
+  const widths = [fixZ, fixN, fixS, fixK, ...miesiace.map(() => monthW)];
   content.push(pdfNaglowekSekcji(tytulCash));
   content.push({ table: { headerRows: 1, widths, body }, layout: {
-    hLineColor: () => linia, vLineColor: () => linia, hLineWidth: (i) => (i === 1 ? 0 : 0.4), vLineWidth: () => 0.4,
+    hLineColor: () => linia, vLineColor: () => linia, hLineWidth: (i) => (i === 1 ? 0 : 0.4), vLineWidth: () => 0.3,
+    paddingLeft: () => 0, paddingRight: () => 0, paddingTop: () => 0, paddingBottom: () => 0,
   }, margin: [0, 2, 0, 0] });
 }
 
