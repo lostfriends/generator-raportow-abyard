@@ -3443,24 +3443,56 @@ async function przygotujObraz(url) {
   } catch { return null; }
 }
 
-// HTML z edytora (b/i/u/br/div/p) -> tablica „runs" dla pdfmake.
+// HTML z edytora (b/i/u/span/listy/br/div/p) -> tablica „runs" dla pdfmake.
+// Pogrubienia, kursywę i podkreślenia wykrywamy zarówno ze znaczników
+// (b/strong, i/em, u/s), jak i ze STYLI INLINE (font-weight/style/text-decoration) —
+// przeglądarki (i execCommand ze styleWithCSS, oraz wklejenia) często zapisują
+// formatowanie właśnie jako style, a wcześniej takie pogrubienia „ginęły" w PDF.
 function htmlNaPdfmake(html) {
   const runs = [];
+  const dopisz = (t, st) => { if (t) runs.push({ text: t, ...st }); };
+  // Zwraca stan formatowania rozszerzony o cechy danego elementu (znaczniki + style).
+  const cechy = (el, st) => {
+    const s = { ...st };
+    const tag = el.tagName.toLowerCase();
+    if (tag === "b" || tag === "strong") s.bold = true;
+    if (tag === "i" || tag === "em") s.italics = true;
+    if (tag === "u" || tag === "ins") s.decoration = "underline";
+    if (tag === "s" || tag === "strike" || tag === "del") s.decoration = "lineThrough";
+    const stl = el.style || {};
+    const fw = String(stl.fontWeight || "").toLowerCase();
+    if (fw === "bold" || fw === "bolder" || parseInt(fw, 10) >= 600) s.bold = true;
+    if (String(stl.fontStyle || "").toLowerCase() === "italic") s.italics = true;
+    const dec = (String(stl.textDecoration || "") + " " + String(stl.textDecorationLine || "")).toLowerCase();
+    if (dec.includes("underline")) s.decoration = "underline";
+    else if (dec.includes("line-through")) s.decoration = "lineThrough";
+    return s;
+  };
   if (html && typeof DOMParser !== "undefined") {
     const doc = new DOMParser().parseFromString(`<div>${html}</div>`, "text/html");
     const walk = (node, st) => {
       node.childNodes.forEach((ch) => {
         if (ch.nodeType === 3) {
-          if (ch.textContent) runs.push({ text: ch.textContent, ...st });
+          dopisz(ch.textContent, st);
         } else if (ch.nodeType === 1) {
           const tag = ch.tagName.toLowerCase();
           if (tag === "br") { runs.push({ text: "\n" }); return; }
-          const s = { ...st };
-          if (tag === "b" || tag === "strong") s.bold = true;
-          if (tag === "i" || tag === "em") s.italics = true;
-          if (tag === "u") s.decoration = "underline";
+          const s = cechy(ch, st);
+          // Listy — każde <li> w osobnym wierszu, z wypunktowaniem/numeracją.
+          if (tag === "ul" || tag === "ol") {
+            let i = 0;
+            ch.childNodes.forEach((li) => {
+              if (li.nodeType === 1 && li.tagName.toLowerCase() === "li") {
+                i += 1;
+                dopisz(tag === "ol" ? `${i}.  ` : "•  ", s);
+                walk(li, s);
+                runs.push({ text: "\n" });
+              }
+            });
+            return;
+          }
           walk(ch, s);
-          if (tag === "div" || tag === "p") runs.push({ text: "\n" });
+          if (tag === "div" || tag === "p" || tag === "li") runs.push({ text: "\n" });
         }
       });
     };
@@ -3481,7 +3513,7 @@ function pdfNaglowekSekcji(tytul) {
   return {
     table: { widths: [6, "*"], body: [[
       { text: "", fillColor: PDF_KOL.zolty, border: [false, false, false, false] },
-      { text: tytul.toUpperCase(), fillColor: PDF_KOL.czarny, color: "#FFFFFF", bold: true, fontSize: 11, characterSpacing: 1, margin: [8, 5, 8, 5], border: [false, false, false, false] },
+      { text: tytul.toUpperCase(), fillColor: PDF_KOL.czarny, color: "#FFFFFF", font: "RobotoBlack", fontSize: 11, characterSpacing: 1.2, margin: [8, 5, 8, 5], border: [false, false, false, false] },
     ]] },
     layout: "noBorders",
     margin: [0, 16, 0, 6],
@@ -3504,7 +3536,7 @@ async function pdfHarmonogram(content, form) {
   content.push(pdfNaglowekSekcji("Harmonogram budowy"));
   const th = (t, al) => ({ text: t, fillColor: czarny, color: zolty, bold: true, fontSize: 8, alignment: al || "center", margin: [2, 3, 2, 3] });
   const c = (t, o = {}) => ({ text: t, fontSize: 8, alignment: o.al || "center", bold: o.bold, color: o.color, fillColor: o.fill, margin: [2, 2, 2, 2] });
-  const body = [[th("#"), th("Zadanie", "left"), th("Start"), th("Koniec"), th("Progn./rzecz."), th("%"), th("Opóźn.")]];
+  const body = [[th("#"), th("Zadanie", "left"), th("Start (umowa)"), th("Koniec (umowa)"), th("Koniec (progn./rzecz.)"), th("% wyk."), th("Opóźnienie")]];
   for (const r of wiersze) {
     const ef = efektywnyWiersz(r);
     const op = obliczOpoznienie(ef, form.dataOpracowania);
@@ -3610,16 +3642,16 @@ async function budujDocDefinition(form) {
 
   // Nagłówek: logo + kontakt + linia
   content.push({ columns: [
-    { text: [{ text: "/", color: zolty, bold: true }, { text: "Abyard", bold: true }], fontSize: 18 },
+    { text: [{ text: "/", color: zolty }, { text: "Abyard" }], font: "RobotoBlack", fontSize: 18 },
     { text: "www.abyard.com · biuro@abyard.pl · tel. (12) 431 30 87", alignment: "right", fontSize: 8, color: szary, margin: [0, 6, 0, 0] },
   ] });
   content.push({ canvas: [{ type: "line", x1: 0, y1: 2, x2: PDF_SZER, y2: 2, lineWidth: 2, lineColor: czarny }], margin: [0, 4, 0, 8] });
 
   content.push({ text: `Kraków, dn. ${fmtPL(form.dataOpracowania) || "—"}`, alignment: "right", italics: true, fontSize: 9, color: szary });
   content.push({ text: "RAPORT NUMER", alignment: "center", fontSize: 11, bold: true, color: szary, characterSpacing: 3, margin: [0, 8, 0, 0] });
-  content.push({ text: [{ text: "/", color: zolty }, { text: String(form.numer).padStart(3, "0") }], alignment: "center", fontSize: 40, bold: true, margin: [0, 0, 0, 8] });
+  content.push({ text: [{ text: "/", color: zolty }, { text: String(form.numer).padStart(3, "0") }], alignment: "center", fontSize: 40, font: "RobotoBlack", margin: [0, 0, 0, 8] });
   content.push({ table: { widths: ["*"], body: [[{ text: `RAPORT ZA OKRES  ${fmtPL(form.okresOd) || "…"} – ${fmtPL(form.okresDo) || "…"}`, alignment: "center", color: zolty, bold: true, fillColor: czarny, margin: [0, 5, 0, 5], border: [false, false, false, false] }]] }, layout: "noBorders" });
-  content.push({ text: form.projekt || "", alignment: "center", fontSize: 22, bold: true, margin: [0, 14, 0, 2] });
+  content.push({ text: form.projekt || "", alignment: "center", fontSize: 22, font: "RobotoBlack", margin: [0, 14, 0, 2] });
   if (form.adres) content.push({ text: form.adres, alignment: "center", fontSize: 12, bold: true });
   if (form.tytulZadania) content.push({ text: `„${form.tytulZadania}”`, alignment: "center", italics: true, fontSize: 10, color: szary, margin: [0, 6, 0, 0] });
 
@@ -3641,8 +3673,11 @@ async function budujDocDefinition(form) {
   content.push(nagInfo);
   content.push(htmlBlok(form.infoOgolne));
   if (form.opoznienia) {
-    content.push({ text: "OPÓŹNIENIA I DZIAŁANIA NAPRAWCZE", bold: true, fontSize: 9, characterSpacing: 0.8, margin: [0, 8, 0, 4] });
-    content.push({ table: { widths: ["*"], body: [[{ ...htmlBlok(form.opoznienia), fillColor: PDF_KOL.zoltyJasny, margin: [10, 6, 10, 6], border: [false, false, false, false] }]] }, layout: "noBorders" });
+    content.push({ text: "OPÓŹNIENIA I DZIAŁANIA NAPRAWCZE", font: "RobotoBlack", fontSize: 9, characterSpacing: 0.8, margin: [0, 8, 0, 4] });
+    content.push({ table: { widths: [3, "*"], body: [[
+      { text: "", fillColor: PDF_KOL.zolty, border: [false, false, false, false] },
+      { ...htmlBlok(form.opoznienia), fillColor: PDF_KOL.zoltyJasny, margin: [10, 6, 10, 6], border: [false, false, false, false] },
+    ]] }, layout: "noBorders" });
   }
   const sekcjaTekst = (tytul, val) => { if (!val) return; content.push(pdfNaglowekSekcji(tytul)); content.push(htmlBlok(val)); };
   sekcjaTekst("Wykonawcy prac", form.wykonawcy);
@@ -3929,7 +3964,7 @@ function PodgladPDF({ form, onBack, nazwaPliku, raportId, publiczny, jestAdmin }
           const td = { padding: pad, border: "1px solid #D9D6CE", fontSize: fs };
           return (
             <div className="strona-cashflow">
-            <BlokPDF tytul={`Harmonogram rzepływów finansowych — sprzedaż${wTys ? " (kwoty w tys. zł)" : ""}`}>
+            <BlokPDF tytul={`Harmonogram przepływów finansowych — sprzedaż${wTys ? " (kwoty w tys. zł)" : ""}`}>
               <table style={{ width: "100%", borderCollapse: "collapse", tableLayout: "fixed" }}>
                 <thead>
                   <tr>

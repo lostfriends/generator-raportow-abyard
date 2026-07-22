@@ -37,6 +37,9 @@ async function main() {
     bundle: true,
     minify: true,
     format: "iife",
+    // Fonty .ttf (Roboto Bold/BoldItalic/Black) wczytywane jako base64 —
+    // dokładnie w formacie, jakiego oczekuje vfs pdfmake.
+    loader: { ".ttf": "base64" },
     define: { "process.env.NODE_ENV": '"production"' },
     outfile: path.join(OUT_DIR, "pdfmake-lib.js"),
     logLevel: "info",
