@@ -3558,7 +3558,9 @@ async function pdfHarmonogram(content, form) {
     sc(fmtPL(dataMin) || "—", { bold: false }), { ...sc(fmtPL(dataMax) || "—", { bold: false }), colSpan: 2 }, {},
     sc(""), sc(opoz ? (opoz.dni > 0 ? `${opoz.dni} dni` : "brak") : "—", { color: opoz && opoz.dni > 0 ? "#B22" : undefined }),
   ]);
-  content.push({ table: { headerRows: 1, widths: [16, "*", 44, 44, 50, 24, 40], body }, layout: { hLineColor: () => linia, vLineColor: () => linia, hLineWidth: () => 0.5, vLineWidth: () => 0.5 } });
+  // Kolumny dat poszerzone (52/52/54), by „15.06.2026" mieściło się w jednym
+  // wierszu — wcześniej 44 pt łamało datę w połowie liczby.
+  content.push({ table: { headerRows: 1, widths: [16, "*", 52, 52, 54, 26, 44], body }, layout: { hLineColor: () => linia, vLineColor: () => linia, hLineWidth: () => 0.5, vLineWidth: () => 0.5 } });
 }
 
 function pdfCashflow(content, form) {
@@ -3585,10 +3587,21 @@ function pdfCashflow(content, form) {
   }
   body.push([c("RAZEM mies.", { al: "left", bold: true, fill: "#F3F0E8" }), c(fmtZ(sumaCalosc), { bold: true, fill: "#F3F0E8" }), c("", { fill: "#F3F0E8" }), c("", { fill: "#F3F0E8" }), ...miesiace.map((mi) => c(fmtZ(sumaMies[mi.klucz]), { bold: true, fill: "#F3F0E8" }))]);
   body.push([c("Narastająco", { al: "left", bold: true, fill: zolty }), c("", { fill: zolty }), c("", { fill: zolty }), c("", { fill: zolty }), ...miesiace.map((mi) => c(fmtZ(sumaNaras[mi.klucz]), { bold: true, fill: zolty }))]);
-  const monthW = Math.max(13, Math.floor((PDF_SZER - 130) / nM));
-  const widths = ["*", 30, 30, 30, ...miesiace.map(() => monthW)];
+  // Szerokość kolumny miesiąca: wypełnia miejsce po kolumnach stałych, ale z
+  // GÓRNYM limitem — przy małej liczbie miesięcy bez limitu kolumny robiły się
+  // ogromne i tabela wychodziła poza prawy margines strony. Rezerwa 170 pt na
+  // „Zadanie" (*) + Netto/Start/Koniec; nadmiar miejsca chłonie kolumna „*".
+  const monthW = Math.max(13, Math.min(64, Math.floor((PDF_SZER - 180) / nM)));
+  const widths = ["*", 40, 30, 30, ...miesiace.map(() => monthW)];
   content.push({ table: { headerRows: 1, widths, body }, layout: { hLineColor: () => "#D9D6CE", vLineColor: () => "#D9D6CE", hLineWidth: () => 0.4, vLineWidth: () => 0.4 } });
 }
+
+// Wysokość obszaru druku A4 po marginesach (~757 pt) i przybliżone wysokości
+// nagłówka sekcji oraz wiersza podpisu — używane do pionowego rozmieszczania
+// zdjęć na stronie (wyśrodkowanie pojedynczego, wspólna wysokość pary).
+const FOTO_USABLE_H = 750;
+const FOTO_HEADER_H = 54;
+const FOTO_CAPTION_H = 22;
 
 async function pdfZdjecia(content, form) {
   if (!form.zdjecia || form.zdjecia.length === 0) return;
@@ -3603,16 +3616,44 @@ async function pdfZdjecia(content, form) {
 
   let pierwszaGrupa = true;
   for (const grupa of strony) {
-    const maxH = grupa.length === 1 ? 620 : 300;
-    const elems = [];
+    // Wczytujemy obrazy z wymiarami (a = proporcja szer./wys.).
+    const zdj = [];
     for (const z of grupa) {
       const im = await przygotujObraz(z.dataUrl || z.url);
-      if (!im) continue;
-      elems.push({ image: im.dataUrl, fit: [PDF_SZER, maxH], alignment: "center", margin: [0, 6, 0, 2] });
-      if (z.opis) elems.push({ text: z.opis, alignment: "center", bold: true, fontSize: 10, margin: [0, 0, 0, 6] });
+      if (im) zdj.push({ z, im, a: im.w / im.h });
     }
-    if (elems.length === 0) continue;
-    if (pierwszaGrupa) {
+    if (zdj.length === 0) continue;
+
+    const naglowekTu = pierwszaGrupa;
+    const podpisy = zdj.filter((x) => x.z.opis).length;
+    const dostepna = FOTO_USABLE_H - (naglowekTu ? FOTO_HEADER_H : 0) - podpisy * FOTO_CAPTION_H;
+
+    const elems = [];
+    if (zdj.length >= 2) {
+      // Dwa poziome zdjęcia na stronie — WSPÓLNA SZEROKOŚĆ, wyśrodkowane.
+      // Ta sama szerokość = wyrównane krawędzie i jednakowy „rozmiar" na oko
+      // (dla zdjęć o zbliżonych proporcjach wychodzą wręcz identyczne).
+      // Szerokość dobrana tak, by suma wysokości (Σ szer/proporcja) zmieściła
+      // się w dostępnej przestrzeni; nigdy nie przekracza szerokości strony.
+      const sumaOdwrProp = zdj.reduce((s, x) => s + 1 / x.a, 0);
+      const W = Math.max(120, Math.min(PDF_SZER, Math.floor((dostepna - 24) / sumaOdwrProp)));
+      zdj.forEach((x, i) => {
+        elems.push({ image: x.im.dataUrl, width: W, alignment: "center", margin: [0, i === 0 ? 6 : 10, 0, 2] });
+        if (x.z.opis) elems.push({ text: x.z.opis, alignment: "center", bold: true, fontSize: 10, margin: [0, 0, 0, 6] });
+      });
+    } else {
+      // Pojedyncze zdjęcie — wyśrodkowane w pionie na stronie.
+      const x = zdj[0];
+      const maxH = Math.min(dostepna, 640);
+      const skala = Math.min(PDF_SZER / x.im.w, maxH / x.im.h);
+      const renderH = x.im.h * skala;
+      const wolne = Math.max(0, dostepna - renderH - (x.z.opis ? FOTO_CAPTION_H : 0));
+      const gora = Math.min(Math.floor(wolne / 2), 240); // wyśrodkowanie, z limitem bezpieczeństwa
+      elems.push({ image: x.im.dataUrl, fit: [PDF_SZER, Math.floor(maxH)], alignment: "center", margin: [0, 6 + gora, 0, 2] });
+      if (x.z.opis) elems.push({ text: x.z.opis, alignment: "center", bold: true, fontSize: 10, margin: [0, 0, 0, 6] });
+    }
+
+    if (naglowekTu) {
       const nag = pdfNaglowekSekcji("Dokumentacja fotograficzna");
       nag.pageBreak = "before";
       content.push(nag);
