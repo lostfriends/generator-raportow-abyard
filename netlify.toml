@@ -5,7 +5,13 @@
 #  3) publikuje zawartość katalogu dist/ (czyli index.html).
 
 [build]
-  command = "npm run build"
+  # UWAGA: Netlify serwuje przestarzały index.html — build produkuje stary kod
+  # mimo aktualnego źródła na main (potwierdzone: ten sam fix działa lokalnie i
+  # w prawdziwym Chromium, a deploy nadal orphanuje nagłówki). Do czasu
+  # rozwiązania problemu z buildem publikujemy GOTOWY, commitowany dist/
+  # (zweryfikowany bit-w-bit z działającym lokalnym buildem). Po naprawie
+  # przywrócić: command = "npm run build".
+  command = "echo 'Publikujemy commitowany dist/ (przebudowa wyłączona — patrz komentarz)'"
   publish = "dist"
 
 [build.environment]
