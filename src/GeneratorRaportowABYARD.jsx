@@ -3632,33 +3632,45 @@ function maTresc(html) {
   return html.replace(/<[^>]*>/g, "").replace(/&nbsp;/gi, " ").replace(/\s+/g, "").length > 0;
 }
 
-const PDF_KOL = { czarny: "#1A1A1A", zolty: "#FBC707", szary: "#6B6B6B", linia: "#E0DDD4", zoltyJasny: "#FFF6D6", czerwony: "#B22222" };
+// Paleta redesignu (spójna z abyard.com): ciepła czerń + złocisty amber jako
+// jedyny akcent, ciepłe hairline'y, kolory semantyczne dla stanu.
+const PDF_KOL = {
+  ink: "#0F0F0E", ink2: "#191917", czarny: "#0F0F0E",
+  zolty: "#F2A900", zoltyBright: "#FBC441", zoltyDeep: "#C8880B", zoltyJasny: "#FFF6DF",
+  szary: "#6E6A62", szary2: "#9A958B", linia: "#E4E1D9",
+  czerwony: "#C0392B", zielony: "#1B7A3D", stopka: "#FBF3DF",
+};
 const PDF_SZER = 515; // szerokość treści A4 przy marginesach 40
 
-function pdfNaglowekSekcji(tytul) {
+// Overline sekcji: „/ TYTUŁ" w monospace (amber) + cienki hairline pod spodem.
+// idx — opcjonalny podpis po prawej (numer sekcji / etykieta, np. „TYS. ZŁ").
+function overlineStack(tytul, idx) {
+  return [
+    { columns: [
+      { text: [{ text: "/ ", color: PDF_KOL.zolty, bold: true }, { text: String(tytul).toUpperCase(), color: PDF_KOL.zoltyDeep }], font: "Mono", fontSize: 11.5, characterSpacing: 1.2, width: "*" },
+      idx ? { text: String(idx), font: "Mono", fontSize: 10, color: PDF_KOL.szary2, alignment: "right", width: "auto", margin: [0, 3, 0, 0] } : {},
+    ] },
+    { canvas: [{ type: "line", x1: 0, y1: 4, x2: PDF_SZER, y2: 4, lineWidth: 0.8, lineColor: PDF_KOL.linia }], margin: [0, 4, 0, 0] },
+  ];
+}
+
+function pdfNaglowekSekcji(tytul, idx) {
   return {
     // headlineLevel — używane przez pageBreakBefore, by nagłówek nie został
     // sam na dole strony (przenosimy go wtedy na następną, do swojej treści).
     headlineLevel: 1,
-    table: { widths: [6, "*"], body: [[
-      { text: "", fillColor: PDF_KOL.zolty, border: [false, false, false, false] },
-      { text: tytul.toUpperCase(), fillColor: PDF_KOL.czarny, color: "#FFFFFF", font: "RobotoBlack", fontSize: 11, characterSpacing: 1.2, margin: [8, 5, 8, 5], border: [false, false, false, false] },
-    ]] },
-    layout: "noBorders",
-    margin: [0, 16, 0, 6],
+    stack: overlineStack(tytul, idx),
+    margin: [0, 22, 0, 10],
   };
 }
 
-// Nagłówek sekcji jako KOMÓRKA (żółty pasek + czarna belka) do zagnieżdżenia
-// w tabeli keepWithHeaderRows — używane przez pdfSekcjaTekst.
-function pdfNaglowekKomorka(tytul) {
+// Nagłówek sekcji jako KOMÓRKA (overline) do zagnieżdżenia w tabeli
+// keepWithHeaderRows — używane przez pdfSekcjaTekst / pushSekcjaTabela.
+function pdfNaglowekKomorka(tytul, idx) {
   return {
-    table: { widths: [6, "*"], body: [[
-      { text: "", fillColor: PDF_KOL.zolty, border: [false, false, false, false] },
-      { text: tytul.toUpperCase(), fillColor: PDF_KOL.czarny, color: "#FFFFFF", font: "RobotoBlack", fontSize: 11, characterSpacing: 1.2, margin: [8, 5, 8, 5], border: [false, false, false, false] },
-    ]] },
-    layout: "noBorders",
     border: [false, false, false, false],
+    stack: overlineStack(tytul, idx),
+    margin: [0, 0, 0, 2],
   };
 }
 
@@ -3698,7 +3710,7 @@ function pdfSekcjaTekst(content, tytul, val) {
 // body[0] = wiersz nagłówka kolumn; body[1..] = dane (+ podsumowanie).
 function pushSekcjaTabela(content, tytul, widths, body, layout) {
   const n = widths.length;
-  const naglRow = [{ ...pdfNaglowekKomorka(tytul), colSpan: n, fillColor: PDF_KOL.czarny }];
+  const naglRow = [{ ...pdfNaglowekKomorka(tytul), colSpan: n }];
   for (let i = 1; i < n; i++) naglRow.push({});
   const colH = body[0];
   const dane = body.slice(1);
@@ -3715,7 +3727,7 @@ function pushSekcjaTabela(content, tytul, widths, body, layout) {
 }
 
 async function pdfHarmonogram(content, form) {
-  const { czarny, zolty, linia } = PDF_KOL;
+  const { ink, zolty, zoltyBright, zoltyJasny, szary, szary2, linia, czerwony, zielony, stopka } = PDF_KOL;
   if (form.harmonogramObrazy && form.harmonogramObrazy.length > 0) {
     content.push(pdfNaglowekSekcji("Harmonogram budowy"));
     for (const o of form.harmonogramObrazy) {
@@ -3727,27 +3739,36 @@ async function pdfHarmonogram(content, form) {
   const wiersze = (form.harmonogram || []).map((r, idx) => ({ ...r, nr: idx + 1 }))
     .filter((r) => { const ef = efektywnyWiersz(r); return ef.start || ef.koniec || ef.rzecz || ef.proc !== ""; });
   if (wiersze.length === 0) return;
-  const th = (t, al) => ({ text: t, fillColor: czarny, color: zolty, bold: true, fontSize: 8, alignment: al || "center", margin: [2, 3, 2, 3] });
-  const c = (t, o = {}) => ({ text: t, fontSize: 8, alignment: o.al || "center", bold: o.bold, color: o.color, fillColor: o.fill, margin: [2, 2, 2, 2] });
-  const body = [[th("#"), th("Zadanie", "left"), th("Start (umowa)"), th("Koniec (umowa)"), th("Koniec (progn./rzecz.)"), th("% wyk."), th("Opóźnienie")]];
+
+  // Kolumna „Progn./rzecz." (kluczowa data) wyróżniona: amber-band + pogrubienie.
+  // Daty umowne (Start/Koniec) przygaszone na szaro, żeby się cofnęły — inaczej
+  // trzy identyczne kolumny dat zlewały się w oczach.
+  const th = (t, al, col) => ({ text: String(t).toUpperCase(), font: "Mono", fontSize: 7, color: col || "#FFFFFF", fillColor: ink, alignment: al || "left", margin: [3, 7, 3, 7], border: [false, false, false, false] });
+  const dot = { text: "●", font: "Mono", color: zolty, fontSize: 5.5 };
+  const umowa = (t) => ({ text: t, font: "Mono", fontSize: 7, color: szary2, alignment: "center", margin: [3, 7, 3, 7] });
+  const rzeczCell = (t, main) => ({ text: t, font: "Mono", fontSize: 7.5, bold: true, color: main ? ink : "#6B6552", alignment: "center", fillColor: zoltyJasny, margin: [3, 7, 3, 7] });
+
+  const body = [[ th("#", "left"), th("Zadanie", "left"), th("Start", "center"), th("Koniec um.", "center"), th("Progn./rzecz.", "center", zoltyBright), th("%", "right"), th("Opóźn.", "right") ]];
   for (const r of wiersze) {
     const ef = efektywnyWiersz(r);
     const op = obliczOpoznienie(ef, form.dataOpracowania);
+    const pctN = parseInt(ef.proc, 10);
     const pod = maPodpozycje(r) ? r.pod.filter((p) => p && (p.zadanie || p.start || p.koniec || p.rzecz || p.proc)) : [];
-    const fill = pod.length ? "#F3F0E8" : undefined;
     body.push([
-      c(String(r.nr), { bold: true, fill }), c(r.zadanie || "—", { al: "left", bold: true, fill }),
-      c(fmtPL(ef.start) || "—", { fill }), c(fmtPL(ef.koniec) || "—", { fill }),
-      c(fmtPL(ef.rzecz) || "—", { bold: !!ef.rzecz, fill }), c(ef.proc !== "" ? `${ef.proc}%` : "—", { bold: true, fill }),
-      c(op || "—", { bold: !!op, color: op ? "#B22" : undefined, fill }),
+      { text: String(r.nr), font: "Mono", fontSize: 7.5, color: ink, margin: [3, 7, 3, 7] },
+      { text: [dot, { text: "  " + (r.zadanie || "—"), bold: true, color: ink, font: "Roboto" }], fontSize: 8.5, margin: [3, 6, 3, 6] },
+      umowa(fmtPL(ef.start) || "—"), umowa(fmtPL(ef.koniec) || "—"), rzeczCell(fmtPL(ef.rzecz) || "—", true),
+      { text: ef.proc !== "" ? `${ef.proc}%` : "—", font: "Mono", fontSize: 7, bold: true, color: (ef.proc !== "" && pctN >= 100) ? zielony : ink, alignment: "right", margin: [3, 7, 3, 7] },
+      { text: op || "—", font: "Mono", fontSize: 7, bold: !!op, color: op ? czerwony : zielony, alignment: "right", margin: [3, 7, 3, 7] },
     ]);
     for (let j = 0; j < pod.length; j++) {
-      const p = pod[j]; const opP = obliczOpoznienie(p, form.dataOpracowania);
+      const p = pod[j]; const opP = obliczOpoznienie(p, form.dataOpracowania); const ppN = parseInt(p.proc, 10);
       body.push([
-        c(`${r.nr}.${j + 1}`, { color: "#999" }), c(p.zadanie || "—", { al: "left", color: "#444" }),
-        c(fmtPL(p.start) || "—", { color: "#444" }), c(fmtPL(p.koniec) || "—", { color: "#444" }),
-        c(fmtPL(p.rzecz) || "—", { color: "#444" }), c((p.proc !== "" && p.proc != null) ? `${p.proc}%` : "—", { color: "#444" }),
-        c(opP || "—", { color: opP ? "#B22" : "#444" }),
+        { text: `${r.nr}.${j + 1}`, font: "Mono", fontSize: 6.5, color: szary2, margin: [3, 7, 3, 7] },
+        { text: p.zadanie || "—", fontSize: 7.5, color: szary, margin: [14, 6, 3, 6] },
+        umowa(fmtPL(p.start) || "—"), umowa(fmtPL(p.koniec) || "—"), rzeczCell(fmtPL(p.rzecz) || "—", false),
+        { text: (p.proc !== "" && p.proc != null) ? `${p.proc}%` : "—", font: "Mono", fontSize: 7, color: (p.proc !== "" && ppN >= 100) ? zielony : szary, alignment: "right", margin: [3, 7, 3, 7] },
+        { text: opP || "—", font: "Mono", fontSize: 7, bold: !!opP, color: opP ? czerwony : zielony, alignment: "right", margin: [3, 7, 3, 7] },
       ]);
     }
   }
@@ -3756,20 +3777,25 @@ async function pdfHarmonogram(content, form) {
   const dataMin = starty.sort()[0] || ""; const dataMax = konce.sort()[konce.length - 1] || "";
   const opoz = opoznienieInwestycji(form.harmonogram, form.dataOpracowania);
   const maKwoty = harmonogramMaKwoty(form.harmonogram); const sumaKwot = sumaWartosciUmowy(form.harmonogram);
-  const sc = (t, o = {}) => ({ text: t, fontSize: 8, bold: o.bold !== false, fillColor: "#F3F0E8", alignment: o.al || "center", color: o.color, margin: [2, 3, 2, 3] });
+  const sf = (t, o = {}) => ({ text: t, font: o.font || "Mono", fontSize: o.fs || 7.5, bold: o.bold !== false, fillColor: stopka, alignment: o.al || "center", color: o.color, margin: [3, 8, 3, 8] });
   body.push([
-    sc("Σ"), sc(`PODSUMOWANIE${maKwoty ? ` · wartość umowy: ${Math.round(sumaKwot).toLocaleString("pl-PL")} zł` : ""}`, { al: "left" }),
-    sc(fmtPL(dataMin) || "—", { bold: false }), { ...sc(fmtPL(dataMax) || "—", { bold: false }), colSpan: 2 }, {},
-    sc(""), sc(opoz ? (opoz.dni > 0 ? `${opoz.dni} dni` : "brak") : "—", { color: opoz && opoz.dni > 0 ? "#B22" : undefined }),
+    sf("Σ", { fs: 8 }),
+    sf(`PODSUMOWANIE INWESTYCJI${maKwoty ? ` · ${Math.round(sumaKwot).toLocaleString("pl-PL")} zł` : ""}`, { font: "Roboto", fs: 8.5, al: "left" }),
+    sf(fmtPL(dataMin) || "—", { bold: false, fs: 7 }),
+    { ...sf(fmtPL(dataMax) || "—", { bold: false, fs: 7 }), colSpan: 2 }, {},
+    sf(""), sf(opoz ? (opoz.dni > 0 ? `${opoz.dni} dni` : "brak") : "—", { color: opoz && opoz.dni > 0 ? czerwony : zielony }),
   ]);
-  // Kolumny: „#" 24 pt (podpozycje 3.10+ w jednym wierszu), daty 52/52/54
-  // („15.06.2026" bez łamania), „Opóźnienie" 50 pt (nagłówek bez łamania słowa).
-  // Nagłówek sekcji trwale związany z początkiem tabeli (nie osieroca się).
-  pushSekcjaTabela(content, "Harmonogram budowy", [24, "*", 52, 52, 54, 26, 50], body, { hLineColor: () => linia, vLineColor: () => linia, hLineWidth: () => 0.5, vLineWidth: () => 0.5 });
+  // Overline sekcji + pojedyncza tabela z headerRows:1 — nagłówek kolumn
+  // powtarza się na kolejnych stronach, bez duplikatu-paska w środku tabeli.
+  content.push(pdfNaglowekSekcji("Harmonogram budowy"));
+  content.push({ table: { headerRows: 1, widths: [24, "*", 52, 52, 56, 28, 46], body }, layout: {
+    hLineColor: () => linia, vLineColor: () => linia, hLineWidth: (i) => (i === 1 ? 0 : 0.5), vLineWidth: () => 0,
+    paddingLeft: () => 0, paddingRight: () => 0, paddingTop: () => 0, paddingBottom: () => 0,
+  }, margin: [0, 2, 0, 0] });
 }
 
 function pdfCashflow(content, form) {
-  const { czarny, zolty, szary } = PDF_KOL;
+  const { ink, zolty, zoltyBright, zoltyJasny, szary2, linia } = PDF_KOL;
   if (!harmonogramMaKwoty(form.harmonogram)) return;
   const m = macierzCashflow(form.harmonogram);
   if (!m.zadania.length || !m.miesiace.length) return;
@@ -3778,27 +3804,29 @@ function pdfCashflow(content, form) {
   const wTys = nM > 10;                       // ten sam próg co w podglądzie HTML (sekcja cashflow)
   const fs = nM > 18 ? 5.5 : nM > 12 ? 6.5 : nM > 8 ? 7.5 : 8.5;
   const fmtZ = (n) => !n ? "" : (wTys ? Math.round(n / 1000).toLocaleString("pl-PL") : Math.round(n).toLocaleString("pl-PL"));
-  const tytulCash = `Harmonogram przepływów finansowych — sprzedaż${wTys ? " (kwoty w tys. zł)" : ""}`;
-  const th = (t, al) => ({ text: t, fillColor: czarny, color: zolty, bold: true, fontSize: fs, alignment: al || "right", margin: [1, 2, 1, 2] });
-  const thm = (t) => ({ text: t, fillColor: "#3A3A3A", color: "#FFFFFF", bold: true, fontSize: fs, alignment: "right", margin: [1, 2, 1, 2] });
-  const c = (t, o = {}) => ({ text: t, fontSize: fs, alignment: o.al || "right", fillColor: o.fill, color: o.color, bold: o.bold, margin: [1, 1, 1, 1] });
-  const body = [[th("Zadanie", "left"), th("Netto"), th("Start", "center"), th("Koniec", "center"), ...miesiace.map((mi) => thm(mi.etykieta))]];
+  const tytulCash = `Harmonogram przepływów finansowych — sprzedaż${wTys ? " (tys. zł)" : ""}`;
+  const th = (t, al, col) => ({ text: t, font: "Mono", fillColor: ink, color: col || "#FFFFFF", fontSize: fs, alignment: al || "right", margin: [1, 6, 2, 6], border: [false, false, false, false] });
+  const c = (t, o = {}) => ({ text: t, font: "Mono", fontSize: fs, alignment: o.al || "right", fillColor: o.fill, color: o.color, bold: o.bold, margin: [1, 5, 2, 5] });
+  const body = [[th("Zadanie", "left"), th("Netto", "right", zoltyBright), th("Start", "center", zoltyBright), th("Koniec", "center", zoltyBright), ...miesiace.map((mi) => th(mi.etykieta, "right", zoltyBright))]];
   for (const z of zadania) {
     body.push([
-      c(z.nazwa, { al: "left" }), c(fmtZ(z.kwota)),
-      c(z.start ? fmtPL(z.start) : "—", { al: "center", color: szary }), c(z.koniec ? fmtPL(z.koniec) : "—", { al: "center", color: szary }),
-      ...miesiace.map((mi) => { const v = z.komorki[mi.klucz]; return c(v ? fmtZ(v) : "–", { fill: v ? "#FFF9E6" : undefined }); }),
+      c(z.nazwa, { al: "left", color: "#26251F" }), c(fmtZ(z.kwota), { color: "#26251F" }),
+      c(z.start ? fmtPL(z.start) : "—", { al: "center", color: szary2 }), c(z.koniec ? fmtPL(z.koniec) : "—", { al: "center", color: szary2 }),
+      ...miesiace.map((mi) => { const v = z.komorki[mi.klucz]; return c(v ? fmtZ(v) : "–", { fill: v ? zoltyJasny : undefined, color: v ? "#26251F" : szary2 }); }),
     ]);
   }
   body.push([c("RAZEM mies.", { al: "left", bold: true, fill: "#F3F0E8" }), c(fmtZ(sumaCalosc), { bold: true, fill: "#F3F0E8" }), c("", { fill: "#F3F0E8" }), c("", { fill: "#F3F0E8" }), ...miesiace.map((mi) => c(fmtZ(sumaMies[mi.klucz]), { bold: true, fill: "#F3F0E8" }))]);
-  body.push([c("Narastająco", { al: "left", bold: true, fill: zolty }), c("", { fill: zolty }), c("", { fill: zolty }), c("", { fill: zolty }), ...miesiace.map((mi) => c(fmtZ(sumaNaras[mi.klucz]), { bold: true, fill: zolty }))]);
+  body.push([c("Narastająco", { al: "left", bold: true, fill: zolty, color: ink }), c("", { fill: zolty }), c("", { fill: zolty }), c("", { fill: zolty }), ...miesiace.map((mi) => c(fmtZ(sumaNaras[mi.klucz]), { bold: true, fill: zolty, color: ink }))]);
   // Szerokość kolumny miesiąca: wypełnia miejsce po kolumnach stałych, ale z
   // GÓRNYM limitem — przy małej liczbie miesięcy bez limitu kolumny robiły się
   // ogromne i tabela wychodziła poza prawy margines strony. Rezerwa 170 pt na
   // „Zadanie" (*) + Netto/Start/Koniec; nadmiar miejsca chłonie kolumna „*".
   const monthW = Math.max(13, Math.min(64, Math.floor((PDF_SZER - 180) / nM)));
   const widths = ["*", 40, 30, 30, ...miesiace.map(() => monthW)];
-  pushSekcjaTabela(content, tytulCash, widths, body, { hLineColor: () => "#D9D6CE", vLineColor: () => "#D9D6CE", hLineWidth: () => 0.4, vLineWidth: () => 0.4 });
+  content.push(pdfNaglowekSekcji(tytulCash));
+  content.push({ table: { headerRows: 1, widths, body }, layout: {
+    hLineColor: () => linia, vLineColor: () => linia, hLineWidth: (i) => (i === 1 ? 0 : 0.4), vLineWidth: () => 0.4,
+  }, margin: [0, 2, 0, 0] });
 }
 
 // Wysokość obszaru druku A4 po marginesach (~757 pt) i przybliżone wysokości
@@ -3807,6 +3835,13 @@ function pdfCashflow(content, form) {
 const FOTO_USABLE_H = 750;
 const FOTO_HEADER_H = 54;
 const FOTO_CAPTION_H = 22;
+
+// Podpis pod zdjęciem: mono „FOT. NN" (amber) + opcjonalny opis użytkownika.
+function fotoPodpis(nr, opis) {
+  const label = { text: "FOT. " + String(nr).padStart(2, "0"), font: "Mono", fontSize: 8, color: PDF_KOL.zoltyDeep, characterSpacing: 1 };
+  if (!opis) return { ...label, margin: [0, 4, 0, 6] };
+  return { columns: [ { ...label, width: "auto", margin: [0, 1, 0, 0] }, { text: opis, fontSize: 9.5, bold: true, color: "#26251F", width: "*", margin: [8, 0, 0, 0] } ], margin: [0, 4, 0, 6] };
+}
 
 async function pdfZdjecia(content, form) {
   if (!form.zdjecia || form.zdjecia.length === 0) return;
@@ -3820,6 +3855,7 @@ async function pdfZdjecia(content, form) {
   if (bufor.length) strony.push(bufor);
 
   let pierwszaGrupa = true;
+  let fotoNr = 0;
   for (const grupa of strony) {
     // Wczytujemy obrazy z wymiarami (a = proporcja szer./wys.).
     const zdj = [];
@@ -3830,7 +3866,7 @@ async function pdfZdjecia(content, form) {
     if (zdj.length === 0) continue;
 
     const naglowekTu = pierwszaGrupa;
-    const podpisy = zdj.filter((x) => x.z.opis).length;
+    const podpisy = zdj.length; // każde zdjęcie ma teraz podpis „FOT. NN"
     const dostepna = FOTO_USABLE_H - (naglowekTu ? FOTO_HEADER_H : 0) - podpisy * FOTO_CAPTION_H;
 
     const elems = [];
@@ -3844,7 +3880,7 @@ async function pdfZdjecia(content, form) {
       const W = Math.max(120, Math.min(PDF_SZER, Math.floor((dostepna - 24) / sumaOdwrProp)));
       zdj.forEach((x, i) => {
         elems.push({ image: x.im.dataUrl, width: W, alignment: "center", margin: [0, i === 0 ? 6 : 10, 0, 2] });
-        if (x.z.opis) elems.push({ text: x.z.opis, alignment: "center", bold: true, fontSize: 10, margin: [0, 0, 0, 6] });
+        elems.push(fotoPodpis(++fotoNr, x.z.opis));
       });
     } else {
       // Pojedyncze zdjęcie — wyśrodkowane w pionie na stronie.
@@ -3855,7 +3891,7 @@ async function pdfZdjecia(content, form) {
       const wolne = Math.max(0, dostepna - renderH - (x.z.opis ? FOTO_CAPTION_H : 0));
       const gora = Math.min(Math.floor(wolne / 2), 240); // wyśrodkowanie, z limitem bezpieczeństwa
       elems.push({ image: x.im.dataUrl, fit: [PDF_SZER, Math.floor(maxH)], alignment: "center", margin: [0, 6 + gora, 0, 2] });
-      if (x.z.opis) elems.push({ text: x.z.opis, alignment: "center", bold: true, fontSize: 10, margin: [0, 0, 0, 6] });
+      elems.push(fotoPodpis(++fotoNr, x.z.opis));
     }
 
     if (naglowekTu) {
@@ -3872,35 +3908,55 @@ async function pdfZdjecia(content, form) {
 
 // Buduje definicję dokumentu pdfmake z formularza raportu (bez pobierania).
 async function budujDocDefinition(form) {
-  const { czarny, zolty, szary } = PDF_KOL;
+  const { ink, ink2, zolty, zoltyBright, zoltyDeep, szary, szary2, czerwony, zielony } = PDF_KOL;
   const content = [];
 
-  // Nagłówek: logo + kontakt + linia
+  // ——— OKŁADKA (ciemna strona 1, kompozycja wyśrodkowana) ———
+  // Masthead: logo po lewej, kontakt po prawej.
   content.push({ columns: [
-    { text: [{ text: "/", color: zolty }, { text: "Abyard" }], font: "RobotoBlack", fontSize: 18 },
-    { text: "www.abyard.com · biuro@abyard.pl · tel. (12) 431 30 87", alignment: "right", fontSize: 8, color: szary, margin: [0, 6, 0, 0] },
+    { text: [{ text: "/", color: zolty }, { text: "Abyard", color: "#FFFFFF" }], font: "RobotoBlack", fontSize: 20, width: "*" },
+    { text: [{ text: `Kraków, dn. ${fmtPL(form.dataOpracowania) || "—"}\n`, color: szary2 }, { text: "www.abyard.com · biuro@abyard.pl", color: szary2 }], font: "Mono", fontSize: 7.5, alignment: "right", width: "auto", margin: [0, 4, 0, 0] },
   ] });
-  content.push({ canvas: [{ type: "line", x1: 0, y1: 2, x2: PDF_SZER, y2: 2, lineWidth: 2, lineColor: czarny }], margin: [0, 4, 0, 8] });
 
-  content.push({ text: `Kraków, dn. ${fmtPL(form.dataOpracowania) || "—"}`, alignment: "right", italics: true, fontSize: 9, color: szary });
-  content.push({ text: "RAPORT NUMER", alignment: "center", fontSize: 11, bold: true, color: szary, characterSpacing: 3, margin: [0, 8, 0, 0] });
-  content.push({ text: [{ text: "/", color: zolty }, { text: String(form.numer).padStart(3, "0") }], alignment: "center", fontSize: 40, font: "RobotoBlack", margin: [0, 0, 0, 8] });
-  content.push({ table: { widths: ["*"], body: [[{ text: `RAPORT ZA OKRES  ${fmtPL(form.okresOd) || "…"} – ${fmtPL(form.okresDo) || "…"}`, alignment: "center", color: zolty, bold: true, fillColor: czarny, margin: [0, 5, 0, 5], border: [false, false, false, false] }]] }, layout: "noBorders" });
-  content.push({ text: form.projekt || "", alignment: "center", fontSize: 22, font: "RobotoBlack", margin: [0, 14, 0, 2] });
-  if (form.adres) content.push({ text: form.adres, alignment: "center", fontSize: 12, bold: true });
-  if (form.tytulZadania) content.push({ text: `„${form.tytulZadania}”`, alignment: "center", italics: true, fontSize: 10, color: szary, margin: [0, 6, 0, 0] });
+  content.push({ text: "/ RAPORT Z BUDOWY", font: "Mono", fontSize: 9.5, characterSpacing: 2, color: zolty, alignment: "center", margin: [0, 30, 0, 0] });
+  content.push({ text: [{ text: "/", color: zolty }, { text: String(form.numer).padStart(3, "0"), color: "#FFFFFF" }], font: "RobotoBlack", fontSize: 80, lineHeight: 0.9, alignment: "center", margin: [0, 2, 0, 0] });
+  content.push({ text: form.projekt || "", color: "#FFFFFF", font: "RobotoBlack", fontSize: 34, alignment: "center", margin: [0, 6, 0, 0] });
+  if (form.adres) content.push({ text: form.adres, color: zolty, bold: true, fontSize: 12, alignment: "center", margin: [0, 5, 0, 0] });
+  if (form.tytulZadania) content.push({ text: `„${form.tytulZadania}”`, color: "#CBC7BF", italics: true, fontSize: 9, lineHeight: 1.35, alignment: "center", margin: [56, 6, 56, 0] });
 
+  // Ribbon (okres) + badge (status) — wyśrodkowane obok siebie.
+  const st = statusZRaportu({ harmonogram: form.harmonogram, data_opracowania: form.dataOpracowania, podsumowanie: form.podsumowanie });
+  const opozInw = opoznienieInwestycji(form.harmonogram, form.dataOpracowania);
+  const zagrozenie = st.kod === "zagrozenie";
+  const statusTxt = (zagrozenie ? "Zagrożenie terminu" : "Termin niezagrożony") + (opozInw && opozInw.dni > 0 ? ` — ${opozInw.dni} dni` : "");
+  const badgeCell = zagrozenie
+    ? { text: [{ text: "● ", color: czerwony }, { text: statusTxt.toUpperCase(), color: "#F0A79E" }], font: "Mono", fontSize: 8, bold: true, fillColor: "#2A1614", margin: [10, 6, 12, 6], border: [false, false, false, false] }
+    : { text: [{ text: "● ", color: "#57C680" }, { text: statusTxt.toUpperCase(), color: "#7DDBA0" }], font: "Mono", fontSize: 8, bold: true, fillColor: "#142519", margin: [10, 6, 12, 6], border: [false, false, false, false] };
+  content.push({ columns: [
+    { width: "*", text: "" },
+    { width: "auto", table: { body: [[ { text: [{ text: "ZA OKRES   ", color: szary2 }, { text: `${fmtPL(form.okresOd) || "…"} — ${fmtPL(form.okresDo) || "…"}`, color: zoltyBright }], font: "Mono", fontSize: 9, fillColor: ink2, margin: [11, 6, 11, 6], border: [false, false, false, false] } ]] }, layout: "noBorders" },
+    { width: "auto", table: { body: [[ badgeCell ]] }, layout: "noBorders", margin: [10, 0, 0, 0] },
+    { width: "*", text: "" },
+  ], columnGap: 0, margin: [0, 16, 0, 0] });
+
+  // Grafika inwestycji — kadr w ramce (wyśrodkowany) + złota linia.
+  // Brak grafiki → okładka zostaje samą czernią (fallback).
   if (form.grafikaInwestycji && (form.grafikaInwestycji.dataUrl || form.grafikaInwestycji.url)) {
     const g = await przygotujObraz(form.grafikaInwestycji.dataUrl || form.grafikaInwestycji.url);
-    if (g) content.push({ image: g.dataUrl, fit: [PDF_SZER, 300], alignment: "center", margin: [0, 14, 0, 6] });
+    if (g) {
+      content.push({ image: g.dataUrl, fit: [PDF_SZER, 210], alignment: "center", margin: [0, 16, 0, 0] });
+      content.push({ canvas: [{ type: "line", x1: 0, y1: 0, x2: PDF_SZER, y2: 0, lineWidth: 1, lineColor: zolty }], margin: [0, 16, 0, 0] });
+    }
   }
 
-  content.push(pdfNaglowekSekcji("Kluczowe daty"));
-  const linijka = (etk, val) => ({ text: [{ text: etk + " ", bold: true }, { text: val }], fontSize: 11, margin: [0, 1, 0, 1] });
-  content.push(linijka("Rozpoczęcie budowy:", fmtPL(form.rozpoczecie) || "—"));
-  content.push(linijka("Zakończenie robót:", fmtPL(form.zakonczenieRobot) || "—"));
-  content.push(linijka("Pozwolenie na użytkowanie:", form.pnuNieDotyczy ? "Nie dotyczy" : (fmtPL(form.pnu) || "—")));
-  content.push(linijka("Opracował:", form.opracowal || "—"));
+  // Kluczowe daty — wyśrodkowane, 4 kolumny.
+  const dcol = (l, v) => ({ stack: [ { text: String(l).toUpperCase(), font: "Mono", fontSize: 7, color: szary2, alignment: "center" }, { text: v, font: "RobotoBlack", fontSize: 13, color: "#FFFFFF", alignment: "center", margin: [0, 5, 0, 0] } ] });
+  content.push({ columns: [
+    dcol("Rozpoczęcie", fmtPL(form.rozpoczecie) || "—"),
+    dcol("Zakończenie robót", fmtPL(form.zakonczenieRobot) || "—"),
+    dcol("Pozwol. użytkowania", form.pnuNieDotyczy ? "Nie dotyczy" : (fmtPL(form.pnu) || "—")),
+    dcol("Opracował", form.opracowal || "—"),
+  ], columnGap: 12, margin: [0, 16, 0, 0] });
 
   // Strona tytułowa kończy się na kluczowych datach — reszta od nowej strony
   const nagInfo = pdfNaglowekSekcji("Informacje ogólne");
@@ -3908,11 +3964,13 @@ async function budujDocDefinition(form) {
   content.push(nagInfo);
   content.push(htmlBlok(form.infoOgolne));
   if (maTresc(form.opoznienia)) {
-    content.push({ text: "OPÓŹNIENIA I DZIAŁANIA NAPRAWCZE", font: "RobotoBlack", fontSize: 9, characterSpacing: 0.8, margin: [0, 8, 0, 4] });
     content.push({ table: { widths: [3, "*"], body: [[
-      { text: "", fillColor: PDF_KOL.zolty, border: [false, false, false, false] },
-      { ...htmlBlok(form.opoznienia), fillColor: PDF_KOL.zoltyJasny, margin: [10, 6, 10, 6], border: [false, false, false, false] },
-    ]] }, layout: "noBorders" });
+      { text: "", fillColor: zolty, border: [false, false, false, false] },
+      { stack: [
+        { text: "⚠ OPÓŹNIENIA I DZIAŁANIA NAPRAWCZE", font: "Mono", fontSize: 8.5, characterSpacing: 1, color: zoltyDeep, margin: [0, 0, 0, 5] },
+        htmlBlok(form.opoznienia),
+      ], fillColor: "#FFF8EC", margin: [12, 10, 12, 10], border: [false, false, false, false] },
+    ]] }, layout: "noBorders", margin: [0, 12, 0, 0] });
   }
   pdfSekcjaTekst(content, "Wykonawcy prac", form.wykonawcy);
   pdfSekcjaTekst(content, "Przetargi", form.przetargi);
@@ -3921,7 +3979,7 @@ async function budujDocDefinition(form) {
   pdfSekcjaTekst(content, "Teren placu budowy", form.placBudowy);
 
   content.push(pdfNaglowekSekcji("Podsumowanie"));
-  content.push({ table: { widths: [4, "*"], body: [[{ text: "", fillColor: zolty, border: [false, false, false, false] }, { text: form.podsumowanie || "—", bold: true, fontSize: 11, margin: [10, 2, 0, 2], border: [false, false, false, false] }]] }, layout: "noBorders" });
+  content.push({ table: { widths: [4, "*"], body: [[{ text: "", fillColor: zolty, border: [false, false, false, false] }, { text: form.podsumowanie || "—", font: "RobotoBlack", fontSize: 14, lineHeight: 1.3, color: ink, margin: [16, 2, 0, 2], border: [false, false, false, false] }]] }, layout: "noBorders" });
 
   await pdfHarmonogram(content, form);
   pdfCashflow(content, form);
@@ -3933,8 +3991,10 @@ async function budujDocDefinition(form) {
   const MIN_MIEJSCE_NAGL = 80;
   return {
     pageSize: "A4",
-    pageMargins: [40, marginesGora, 40, 45],
-    defaultStyle: { font: "Roboto", fontSize: 10, color: czarny, lineHeight: 1.25 },
+    pageMargins: [40, marginesGora, 40, 40],
+    defaultStyle: { font: "Roboto", fontSize: 10, color: ink, lineHeight: 1.25 },
+    // Strona 1 (okładka) ma ciepłe, prawie-czarne tło jak hero na abyard.com.
+    background: (page) => page === 1 ? { canvas: [{ type: "rect", x: 0, y: 0, w: 595.28, h: 841.89, color: ink }] } : null,
     content,
     // Nagłówek sekcji (headlineLevel:1) nie może zostać sam na dole strony ani
     // rozłamać się (samo tło belki na jednej stronie, tekst na drugiej).
@@ -3948,7 +4008,7 @@ async function budujDocDefinition(form) {
       const pozostaje = (marginesGora + cur.startPosition.pageInnerHeight) - cur.startPosition.top;
       return pozostaje < MIN_MIEJSCE_NAGL;
     },
-    footer: (cur, total) => ({ text: `${cur} / ${total}`, alignment: "center", fontSize: 8, color: szary, margin: [0, 6, 0, 0] }),
+    footer: (cur, total) => cur === 1 ? null : ({ text: `${cur} / ${total}`, alignment: "center", font: "Mono", fontSize: 7.5, color: szary2, margin: [0, 8, 0, 0] }),
   };
 }
 

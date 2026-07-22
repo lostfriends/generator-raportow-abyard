@@ -23,6 +23,10 @@ import vfsFonts from "pdfmake/build/vfs_fonts";
 import RobotoBold from "./fonts/Roboto-Bold.ttf";
 import RobotoBoldItalic from "./fonts/Roboto-BoldItalic.ttf";
 import RobotoBlack from "./fonts/Roboto-Black.ttf";
+// Monospace (DejaVu Sans Mono) — do overline'ów sekcji, metadanych i tabel
+// (nadaje raportowi „inżynierski" charakter zgodny z designem abyard.com).
+import DejaVuSansMono from "./fonts/DejaVuSansMono.ttf";
+import DejaVuSansMonoBold from "./fonts/DejaVuSansMono-Bold.ttf";
 
 const baseVfs =
   (vfsFonts && vfsFonts.pdfMake && vfsFonts.pdfMake.vfs) ||
@@ -35,6 +39,8 @@ pdfMake.vfs = {
   "Roboto-Bold.ttf": RobotoBold,
   "Roboto-BoldItalic.ttf": RobotoBoldItalic,
   "Roboto-Black.ttf": RobotoBlack,
+  "DejaVuSansMono.ttf": DejaVuSansMono,
+  "DejaVuSansMono-Bold.ttf": DejaVuSansMonoBold,
 };
 
 // Mapowanie rodzin na konkretne pliki. `Roboto` używa teraz Bold (700) zamiast
@@ -51,6 +57,12 @@ pdfMake.fonts = {
     bold: "Roboto-Black.ttf",
     italics: "Roboto-Black.ttf",
     bolditalics: "Roboto-Black.ttf",
+  },
+  Mono: {
+    normal: "DejaVuSansMono.ttf",
+    bold: "DejaVuSansMono-Bold.ttf",
+    italics: "DejaVuSansMono.ttf",
+    bolditalics: "DejaVuSansMono-Bold.ttf",
   },
 };
 
