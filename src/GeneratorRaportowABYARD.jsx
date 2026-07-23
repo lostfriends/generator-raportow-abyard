@@ -853,6 +853,30 @@ function fmtPL(iso) {
   return `${d}.${m}.${y}`;
 }
 
+// Usuwa POGRUBIENIE z HTML pola rich-text (zachowuje kursywę, podkreślenie, treść).
+// Pogrubienie w formularzu oznacza „nowe informacje w tym raporcie" — przy wczytaniu
+// poprzedniego raportu (baza nowego) odziedziczona treść nie jest już „nowa", więc
+// pogrubienia znikają; PM pogrubia dopiero to, co dopisze w bieżącym raporcie.
+function usunPogrubienie(html) {
+  if (!html || typeof document === "undefined") return html || "";
+  const div = document.createElement("div");
+  div.innerHTML = html;
+  // rozwiń znaczniki <b>/<strong> (zostaw ich zawartość)
+  div.querySelectorAll("b, strong").forEach((el) => {
+    const rodzic = el.parentNode;
+    while (el.firstChild) rodzic.insertBefore(el.firstChild, el);
+    rodzic.removeChild(el);
+  });
+  // usuń font-weight z inline-styli (np. <span style="font-weight:bold">)
+  div.querySelectorAll("[style]").forEach((el) => {
+    if (/font-weight/i.test(el.getAttribute("style") || "")) {
+      el.style.fontWeight = "";
+      if (!(el.getAttribute("style") || "").trim()) el.removeAttribute("style");
+    }
+  });
+  return div.innerHTML;
+}
+
 // ---- Automatyczna kompresja obrazu: skaluje do max 1440px i zapisuje JPEG 0.7
 // Zwraca Promise<string> z dataUrl skompresowanego obrazu.
 function kompresujObraz(file, maxWymiar = 1440, jakosc = 0.7) {
@@ -919,6 +943,10 @@ export default function GeneratorRaportowABYARD() {
   const pomijajDirtyRef = useRef(false); // pomiń najbliższe oznaczenie „dirty" (po programowym załadowaniu)
   const draftGotowyRef = useRef(false);  // czy próba przywrócenia wersji roboczej już się odbyła (dopiero potem auto-zapis)
   const draftTimerRef = useRef(null);    // debouncer auto-zapisu wersji roboczej
+  // Pomija najbliższą auto-aktualizację „daty zakończenia robót" z harmonogramu —
+  // ustawiane przy PROGRAMOWYM wczytaniu formularza (wybór budowy, edycja z archiwum,
+  // wersja robocza, wyczyszczenie), żeby nie nadpisać wczytanej/ręcznie ustawionej daty.
+  const harmProgRef = useRef(false);
   const [przywroconoDraft, setPrzywroconoDraft] = useState(null); // {ts} — pasek „przywrócono wersję roboczą"
   const [selectKey, setSelectKey] = useState(0); // wymusza odświeżenie selecta po anulowaniu zmiany budowy
   const [toast, setToast] = useState("");
@@ -1013,6 +1041,20 @@ export default function GeneratorRaportowABYARD() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [form.harmonogram]);
 
+  // „Data zakończenia robót" (Kluczowe daty) auto-synchronizuje się z najpóźniejszą
+  // planowaną datą zakończenia z harmonogramu. Przy każdej ZMIANIE harmonogramu przez
+  // użytkownika nadpisuje pole (można je potem ręcznie zmienić — zmiana utrzyma się do
+  // następnej edycji harmonogramu). Programowe wczytania (wybór budowy, edycja z archiwum,
+  // wersja robocza) są pomijane przez harmProgRef, by nie kasować wczytanej/ręcznej daty.
+  useEffect(() => {
+    if (harmProgRef.current) { harmProgRef.current = false; return; }
+    setForm((f) => {
+      const najp = najpozniejszePlanowaneZakonczenie(f.harmonogram);
+      return najp && najp !== f.zakonczenieRobot ? { ...f, zakonczenieRobot: najp } : f;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form.harmonogram]);
+
   // Gdy opóźnienie w harmonogramie opóźnia zakończenie CAŁEGO projektu — wymuś status
   // „zagrożenie" (w formularzu opcja „nie powoduje zagrożenia" jest wtedy zablokowana).
   useEffect(() => {
@@ -1047,6 +1089,7 @@ export default function GeneratorRaportowABYARD() {
       .then((d) => {
         if (anulowane) return;
         if (d && d.form && maDraftTresc(d.form)) {
+          harmProgRef.current = true; // wczytanie wersji roboczej — nie nadpisuj daty zakończenia
           setForm(d.form); // brak pomijajDirtyRef → traktujemy jako niezapisane zmiany
           if (d.zapisanyId) setZapisanyId(d.zapisanyId);
           if (typeof d.cashflowWlaczony === "boolean") setCashflowWlaczony(d.cashflowWlaczony);
@@ -1080,6 +1123,7 @@ export default function GeneratorRaportowABYARD() {
   function wyczyscFormularz() {
     if (!window.confirm("Wyczyścić formularz? Wpisana treść i wersja robocza zostaną usunięte. Zapisane w bazie raporty pozostają nietknięte.")) return;
     pomijajDirtyRef.current = true; // reset do pustego to nie „zmiana użytkownika"
+    harmProgRef.current = true; // reset do pustego — nie wywołuj auto-daty zakończenia
     setForm({ ...PUSTY_RAPORT, dataOpracowania: dzisISO(), opracowal: nazwaZalogowanego });
     setZapisanyId(null);
     setCashflowWlaczony(false);
@@ -1191,8 +1235,16 @@ export default function GeneratorRaportowABYARD() {
       if (ost) {
         const bazowy = mapWierszNaForm(ost);
         const nowyNumer = String((parseInt(ost.numer, 10) || 0) + 1);
+        // Pogrubienie oznacza „nowe informacje w tym raporcie". Treść odziedziczona po
+        // poprzednim raporcie nie jest już nowa — czyścimy pogrubienia w polach opisowych,
+        // by PM pogrubiał od zera to, co dopisze w bieżącym raporcie.
+        const POLA_OPISOWE = ["infoOgolne", "opoznienia", "wykonawcy", "przetargi", "sprawyBudowy", "sprawyInwestora", "placBudowy"];
+        const bezPogrubien = {};
+        for (const k of POLA_OPISOWE) bezPogrubien[k] = usunPogrubienie(bazowy[k]);
+        harmProgRef.current = true; // wczytanie poprzedniego raportu — nie nadpisuj daty (jest wczytana)
         setForm({
           ...bazowy,
+          ...bezPogrubien,
           projekt: nazwa,
           numer: nowyNumer,
           okresOd: ost.okres_do || "",
@@ -1208,6 +1260,7 @@ export default function GeneratorRaportowABYARD() {
         pokazToast(`Wczytano dane z raportu nr ${ost.numer} — do aktualizacji`);
       } else {
         // pierwszy raport tej budowy — czysty formularz (nie zostawiamy danych z poprzedniej budowy)
+        harmProgRef.current = true; // pusty formularz — nie wywołuj auto-daty zakończenia
         setForm({
           ...PUSTY_RAPORT,
           projekt: nazwa,
@@ -1570,6 +1623,7 @@ export default function GeneratorRaportowABYARD() {
       const f = mapWierszNaForm(w);
       f.projekt = w.projekty?.nazwa || "";
       pomijajDirtyRef.current = true;    // to wczytanie to nie zmiana użytkownika
+      harmProgRef.current = true;        // edycja z archiwum — nie nadpisuj zapisanej daty zakończenia
       setForm(f);
       // Stan cashflow ustaw jawnie wg wczytanego raportu (inaczej mógłby „zawisnąć"
       // na true z poprzedniej pracy i pokazać pustą kolumnę wartości dla raportu bez kwot).
