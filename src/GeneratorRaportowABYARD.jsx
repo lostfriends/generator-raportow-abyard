@@ -1201,7 +1201,13 @@ export default function GeneratorRaportowABYARD() {
     const file = e.target.files?.[0];
     if (!file) return;
     plikiRef.current.grafika = file; // zachowaj oryginał do uploadu przy zapisie
-    kompresujObraz(file).then(({ dataUrl }) =>
+    // Grafika okładki jest teraz HERO na całą szerokość A4 (~210 mm) i jest JEDNYM
+    // plikiem dziedziczonym przez wszystkie raporty danej inwestycji (nie dokłada się
+    // co raport jak dokumentacja fotograficzna), więc kompresujemy ją znacznie LŻEJ niż
+    // zwykłe zdjęcia (te: 1440 px / 0.7). 2600 px > 300 DPI przy pełnej szerokości,
+    // jakość 0.88 minimalizuje artefakty (banding nieba) — podgląd i PDF wyglądają ostro
+    // bez zauważalnego obciążenia bazy. (Zapisany raport i tak używa oryginału z uploadu.)
+    kompresujObraz(file, 2600, 0.88).then(({ dataUrl }) =>
       setForm((f) => ({ ...f, grafikaInwestycji: { nazwa: file.name, dataUrl } }))
     );
     e.target.value = "";
