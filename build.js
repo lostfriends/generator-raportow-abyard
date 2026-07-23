@@ -62,6 +62,8 @@ async function main() {
 @font-face{font-family:'Roboto';font-weight:700;font-style:normal;font-display:swap;src:url('fonts/Roboto-Bold.ttf') format('truetype');}
 @font-face{font-family:'Roboto';font-weight:700;font-style:italic;font-display:swap;src:url('fonts/Roboto-BoldItalic.ttf') format('truetype');}
 @font-face{font-family:'Roboto';font-weight:900;font-style:normal;font-display:swap;src:url('fonts/Roboto-Black.ttf') format('truetype');}
+@font-face{font-family:'AbyMono';font-weight:400;font-style:normal;font-display:swap;src:url('fonts/DejaVuSansMono.ttf') format('truetype');}
+@font-face{font-family:'AbyMono';font-weight:700;font-style:normal;font-display:swap;src:url('fonts/DejaVuSansMono-Bold.ttf') format('truetype');}
 </style>`;
 
   // Krok 2 — owinięcie bundla w kompletny dokument HTML

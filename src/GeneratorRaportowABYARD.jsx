@@ -227,12 +227,12 @@ function dniMiedzy(aISO, bISO) {
 function statusZRaportu(raport) {
   if (!raport) return { kod: "brak", txt: "brak raportu", kolor: "#8A8A8A", tlo: "#EFEFEF" };
   if (harmonogramWymuszaZagrozenie(raport.harmonogram, raport.data_opracowania))
-    return { kod: "zagrozenie", txt: "Zagrożenie terminu", kolor: "#B22", tlo: "#FBE6E6" };
+    return { kod: "zagrozenie", txt: "Zagrożenie terminu", kolor: "#C0392B", tlo: "#FBECEA" };
   const t = (raport.podsumowanie || "").toLowerCase();
   const brakZagrozenia = t.includes("nie powoduje") || t.includes("niezagroż") || t.includes("nie ma zagroż") || t.includes("bez zagroż");
-  if (brakZagrozenia) return { kod: "ok", txt: "Termin niezagrożony", kolor: "#1B7A3D", tlo: "#E4F4E9" };
-  if (t.includes("zagroż") || t.includes("zagroz")) return { kod: "zagrozenie", txt: "Zagrożenie terminu", kolor: "#B22", tlo: "#FBE6E6" };
-  return { kod: "ok", txt: "Termin niezagrożony", kolor: "#1B7A3D", tlo: "#E4F4E9" };
+  if (brakZagrozenia) return { kod: "ok", txt: "Termin niezagrożony", kolor: "#1B7A3D", tlo: "#E6F3EA" };
+  if (t.includes("zagroż") || t.includes("zagroz")) return { kod: "zagrozenie", txt: "Zagrożenie terminu", kolor: "#C0392B", tlo: "#FBECEA" };
+  return { kod: "ok", txt: "Termin niezagrożony", kolor: "#1B7A3D", tlo: "#E6F3EA" };
 }
 
 // Najnowszy raport z listy (po dacie opracowania, przy remisie po numerze).
@@ -328,6 +328,22 @@ function kwotaZadania(w) {
 // Czy w całym harmonogramie jest jakakolwiek kwota (czy pokazywać cashflow).
 function harmonogramMaKwoty(harmonogram) {
   return (harmonogram || []).some((w) => kwotaZadania(w) > 0);
+}
+
+// Pozycje harmonogramu BEZ uzupełnionej wartości umowy (cashflow) — do egzekwowania
+// obowiązkowego cashflow w 1. raporcie nowej inwestycji. Liczymy per pozycja główna,
+// tą samą logiką co sam cashflow (kwotaZadania): pozycja jest kompletna, gdy ma
+// wartość NA SOBIE albo w podpozycjach (główna sumuje podpozycje). Dzięki temu nie
+// blokujemy PM-a, który wpisał kwotę łączną na pozycji nadrzędnej, a podpozycje
+// służą tylko do dat. Puste wiersze (bez nazwy i bez podpozycji) pomijamy.
+function brakiCashflowu(harmonogram) {
+  const braki = [];
+  (harmonogram || []).forEach((w, i) => {
+    const istotna = (w.zadanie || "").trim() || maPodpozycje(w);
+    if (!istotna) return;
+    if (!(kwotaZadania(w) > 0)) braki.push(`${i + 1}. ${w.zadanie || "(pozycja)"}`);
+  });
+  return braki;
 }
 
 // Rozkład kwoty liniowo-kalendarzowo między start a koniec (włącznie).
@@ -522,7 +538,7 @@ function MacierzCashflow({ dane }) {
         </tfoot>
       </table>
       {rozjazd && (
-        <div style={{ marginTop: 8, padding: "8px 12px", background: "#FBE6E6", border: "1px solid #E0B4B4", borderRadius: 6, fontSize: 12, color: "#B22222" }}>
+        <div style={{ marginTop: 8, padding: "8px 12px", background: "#FBECEA", border: "1px solid #E0B4B4", borderRadius: 6, fontSize: 12, color: "#B22222" }}>
           ⚠ Suma wartości umowy ({fmtZ(sumaCalosc)} zł) różni się od sumy narastającej cashflow ({fmtZ(koniecNaras)} zł).
           Prawdopodobnie któreś zadanie ma wpisaną kwotę bez kompletu dat (start/koniec) — taka kwota nie trafia do rozkładu miesięcznego. Uzupełnij daty, aby sumy się zgadzały.
         </div>
@@ -681,17 +697,102 @@ function maDraftTresc(f) {
   return false;
 }
 
+// Globalna paleta aplikacji — ujednolicona z abyard.com i z raportem:
+// ciepła czerń + złocisty amber jako jedyny akcent, mono do etykiet/overline'ów.
 const C = {
-  zolty: "#FBC707",
-  czarny: "#1A1A1A",
-  grafit: "#2C2C2C",
-  szary: "#6B6B6B",
-  jasny: "#F5F3EE",
+  zolty: "#F2A900",
+  zoltyBright: "#FBC441",
+  zoltyDeep: "#C8880B",
+  czarny: "#0F0F0E",
+  ink2: "#191917",
+  grafit: "#232320",
+  szary: "#6E6A62",
+  szary2: "#9A958B",
+  jasny: "#F4F3EF",
   bialy: "#FFFFFF",
-  linia: "#E0DDD4",
-  zoltyJasny: "#FFF6D6",
-  czerwony: "#B22222",
+  linia: "#E4E1D9",
+  zoltyJasny: "#FFF6DF",
+  czerwony: "#C0392B",
+  zielony: "#1B7A3D",
+  mono: "'AbyMono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace",
 };
+
+// Paleta PODGLĄDU RAPORTU (odwzorowuje dokładnie eksport PDF / abyard.com).
+// Osobna od globalnej `C`, żeby zmiana designu raportu nie ruszała reszty
+// aplikacji (nawigacja, formularze, panele).
+const CR = {
+  ink: "#0F0F0E", ink2: "#191917", gold: "#F2A900", goldBright: "#FBC441", goldDeep: "#C8880B",
+  card: "#FFFFFF", line: "#E4E1D9", muted: "#6E6A62", muted2: "#9A958B",
+  danger: "#C0392B", ok: "#1B7A3D", band: "#FFF6DF", callout: "#FFF8EC", foot: "#FBF3DF",
+  mono: "'AbyMono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace",
+};
+
+// Overline sekcji podglądu: „/ TYTUŁ" (mono, amber) + hairline + opcjonalny podpis.
+function Overline({ tytul, idx }) {
+  return (
+    <div className="blokpdf-naglowek" style={{ display: "flex", alignItems: "flex-end", gap: 12, marginBottom: 10, breakAfter: "avoid", pageBreakAfter: "avoid", breakInside: "avoid", pageBreakInside: "avoid" }}>
+      <div style={{ fontFamily: CR.mono, fontSize: 12.5, letterSpacing: "0.13em", color: CR.goldDeep, whiteSpace: "nowrap", flexShrink: 0 }}>
+        <span style={{ color: CR.gold, fontWeight: 700 }}>/ </span>{String(tytul).toUpperCase()}
+      </div>
+      <div style={{ flex: 1, height: 1, background: CR.line, marginBottom: 5 }} />
+      {idx && <div style={{ fontFamily: CR.mono, fontSize: 11, color: CR.muted2, flexShrink: 0, marginBottom: 1 }}>{idx}</div>}
+    </div>
+  );
+}
+
+// Nagłówek ekranu w języku abyard.com: mono eyebrow „/ X", wielki tytuł
+// (Roboto Black) z opcjonalną złotą liczbą, podtytuł. Po prawej opcjonalne akcje.
+function NaglowekEkranu({ eyebrow, tytul, num, sub, akcje }) {
+  return (
+    <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", gap: 16, flexWrap: "wrap", marginBottom: 18 }}>
+      <div style={{ minWidth: 0 }}>
+        <div style={{ fontFamily: C.mono, fontSize: 11, letterSpacing: "0.16em", textTransform: "uppercase", color: C.zoltyDeep }}>
+          <span style={{ color: C.zolty, fontWeight: 700 }}>/</span> {eyebrow}
+        </div>
+        <h1 style={{ fontFamily: "'Roboto', system-ui, sans-serif", fontWeight: 900, fontSize: 30, letterSpacing: "-0.02em", color: C.czarny, margin: "6px 0 0", textWrap: "balance" }}>
+          {tytul}{num != null && <span style={{ color: C.zolty }}> {num}</span>}
+        </h1>
+        {sub && <p style={{ color: C.szary, fontSize: 13.5, margin: "6px 0 0", lineHeight: 1.5 }}>{sub}</p>}
+      </div>
+      {akcje && <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>{akcje}</div>}
+    </div>
+  );
+}
+
+// Status jako chip-pigułka z kropką (mono, uppercase) — spójne z mockupem.
+// wariant: "warn" (zagrożenie, czerwony) | "ok" (zielony) | "hold" (wstrzymana, bursztyn) | "neutral".
+function Chip({ wariant = "neutral", children, title }) {
+  const M = {
+    warn: { kolor: C.czerwony, tlo: "#FBECEA" },
+    ok: { kolor: C.zielony, tlo: "#E6F3EA" },
+    hold: { kolor: "#B9791A", tlo: "#FBF0DC" },
+    neutral: { kolor: C.szary, tlo: C.jasny },
+  }[wariant] || { kolor: C.szary, tlo: C.jasny };
+  return (
+    <span title={title} style={{ display: "inline-flex", alignItems: "center", gap: 7, fontFamily: C.mono, fontSize: 10, letterSpacing: "0.08em", textTransform: "uppercase", fontWeight: 700, padding: "5px 10px", borderRadius: 999, color: M.kolor, background: M.tlo, whiteSpace: "nowrap" }}>
+      <span style={{ width: 7, height: 7, borderRadius: "50%", background: "currentColor", flexShrink: 0 }} />
+      {children}
+    </span>
+  );
+}
+
+// Pasek postępu (zaawansowanie) — cienki, złoty; z opcjonalnym podpisem pod spodem.
+function PasekPostepu({ proc, etykieta, szer = 120 }) {
+  const p = Math.max(0, Math.min(100, Number(proc) || 0));
+  const pelny = p >= 100;
+  return (
+    <div style={{ width: szer }}>
+      <div style={{ height: 6, borderRadius: 3, background: C.linia, overflow: "hidden" }}>
+        <div style={{ height: "100%", width: `${p}%`, background: pelny ? C.zielony : C.zolty }} />
+      </div>
+      {etykieta !== undefined && (
+        <div style={{ fontFamily: C.mono, fontSize: 10, color: C.szary, marginTop: 4, display: "flex", justifyContent: "space-between" }}>
+          <span>{etykieta}</span><span>{proc == null ? "—" : `${p}%`}</span>
+        </div>
+      )}
+    </div>
+  );
+}
 
 // Wspólny pasek nawigacji — jeden dla wszystkich widoków (formularz, archiwum, panel).
 // aktywny: "form" | "archiwum" | "admin". Zakładka panelu tylko dla admina.
@@ -700,9 +801,10 @@ function PasekNawigacji({ aktywny, jestAdmin, email, onForm, onArchiwum, onKoord
     const akt = aktywny === kod;
     return (
       <button onClick={onClick}
-        style={{ background: akt ? C.zolty : "transparent", color: akt ? C.czarny : C.zolty,
-          border: `1.5px solid ${C.zolty}`, padding: "8px 16px", borderRadius: 6, fontWeight: 700, fontSize: 13,
-          cursor: "pointer", fontFamily: "inherit" }}>
+        style={{ background: akt ? C.zolty : "transparent", color: akt ? "#161512" : "#CFCCC5",
+          border: `1px solid ${akt ? C.zolty : "rgba(255,255,255,0.12)"}`, padding: "8px 13px", borderRadius: 4,
+          fontWeight: akt ? 700 : 400, fontSize: 11, letterSpacing: "0.08em", textTransform: "uppercase",
+          fontFamily: C.mono, cursor: "pointer" }}>
         {etykieta}
       </button>
     );
@@ -719,12 +821,12 @@ function PasekNawigacji({ aktywny, jestAdmin, email, onForm, onArchiwum, onKoord
           {zakl("archiwum", "Archiwum raportów", onArchiwum)}
           {onKoordynacja && zakl("koordynacja-pm", "Kto co prowadzi", onKoordynacja)}
           {jestAdmin && zakl("admin", "Panel admina", onAdmin)}
-          <span style={{ color: C.szary, fontSize: 12, display: "flex", alignItems: "center", gap: 8, marginLeft: 4 }}>
+          <span style={{ color: "#8A867E", fontFamily: C.mono, fontSize: 11, display: "flex", alignItems: "center", gap: 8, marginLeft: 4 }}>
             {email}
-            {jestAdmin && <span style={{ background: C.zolty, color: C.czarny, fontWeight: 700, fontSize: 10, padding: "2px 7px", borderRadius: 10 }}>ADMIN</span>}
+            {jestAdmin && <span style={{ background: C.zolty, color: "#161512", fontWeight: 700, fontSize: 9, letterSpacing: "0.06em", padding: "2px 6px", borderRadius: 3 }}>ADMIN</span>}
           </span>
           <button onClick={onWyloguj}
-            style={{ background: "transparent", color: C.szary, border: `1px solid ${C.grafit}`, padding: "7px 14px", borderRadius: 6, fontWeight: 600, fontSize: 12, cursor: "pointer", fontFamily: "inherit" }}>
+            style={{ background: "transparent", color: "#8A867E", fontFamily: C.mono, border: `1px solid rgba(255,255,255,0.12)`, padding: "6px 12px", borderRadius: 4, fontSize: 10.5, cursor: "pointer" }}>
             Wyloguj
           </button>
         </div>
@@ -1127,6 +1229,8 @@ export default function GeneratorRaportowABYARD() {
           harmonogramObrazy: [],
         });
         plikiRef.current = { grafika: null, harm: [], zdjecia: [] };
+        // Kolejny raport: cashflow włączony tylko, gdy poprzedni raport miał kwoty.
+        setCashflowWlaczony(harmonogramMaKwoty(bazowy.harmonogram));
         pokazToast(`Wczytano dane z raportu nr ${ost.numer} — do aktualizacji`);
       } else {
         // pierwszy raport tej budowy — czysty formularz (nie zostawiamy danych z poprzedniej budowy)
@@ -1138,6 +1242,9 @@ export default function GeneratorRaportowABYARD() {
           opracowal: nazwaZalogowanego || PUSTY_RAPORT.opracowal,
         });
         plikiRef.current = { grafika: null, harm: [], zdjecia: [] };
+        // Pierwszy raport nowej inwestycji: cashflow domyślnie WŁĄCZONY (można wyłączyć).
+        // To on ustanawia finansową bazę projektu, dziedziczoną przez kolejne raporty.
+        setCashflowWlaczony(true);
         pokazToast(`To pierwszy raport budowy „${nazwa}” — numer 1`);
       }
     } catch (e) {
@@ -1201,6 +1308,39 @@ export default function GeneratorRaportowABYARD() {
         `Nie można zapisać raportu.\n\nNastępujące zadania nie są ukończone (< 100%), a ich termin (prognoza/umowa) już minął. Zaktualizuj prognozowaną datę zakończenia lub ustaw 100%:\n\n${lista}${wiecej}`
       );
       return;
+    }
+    // Egzekwowanie obowiązkowego cashflow dla PIERWSZEGO raportu inwestycji.
+    // Raport nr 1 ustanawia bazę finansową (wartości umowy pozycji harmonogramu),
+    // którą dziedziczą kolejne raporty tej budowy — dlatego musi być kompletny:
+    // cashflow włączony i KAŻDA pozycja harmonogramu z wartością umowy > 0.
+    // Egzekwujemy TYLKO przy pierwszym utworzeniu raportu nr 1 (jeszcze nie zapisany
+    // w tej sesji ani nie otwarty do edycji z archiwum). Dzięki temu edycja starego
+    // (legacy) raportu nr 1 bez cashflow — np. poprawka literówki — nie jest blokowana.
+    const pierwszyRaport = (parseInt(form.numer, 10) || 0) === 1 && !zapisanyId;
+    if (pierwszyRaport) {
+      // Cashflow musi realnie istnieć: włączony ORAZ z jakąkolwiek wartością umowy.
+      // Sam warunek `cashflowWlaczony` nie wystarczy — pusty/nietknięty harmonogram
+      // (PUSTY_RAPORT.harmonogram = null) przeszedłby blokadę mimo zera cashflow.
+      if (!cashflowWlaczony || !harmonogramMaKwoty(form.harmonogram)) {
+        window.alert(
+          "Nie można zapisać pierwszego raportu tej inwestycji bez cashflow.\n\n" +
+          "Cashflow (wartości umowy pozycji harmonogramu) jest obowiązkowy dla raportu nr 1 — " +
+          "ustanawia bazę finansową dziedziczoną przez kolejne raporty tej budowy.\n\n" +
+          "Włącz cashflow w sekcji harmonogramu i uzupełnij wartości umowy przy pozycjach."
+        );
+        return;
+      }
+      const braki = brakiCashflowu(form.harmonogram);
+      if (braki.length > 0) {
+        const lista = braki.slice(0, 12).join("\n");
+        const wiecej = braki.length > 12 ? `\n…i ${braki.length - 12} więcej` : "";
+        window.alert(
+          "Nie można zapisać pierwszego raportu tej inwestycji.\n\n" +
+          "Uzupełnij wartość umowy (cashflow) dla KAŻDEJ pozycji harmonogramu. Brakuje:\n\n" +
+          `${lista}${wiecej}`
+        );
+        return;
+      }
     }
     // Nadpisanie istniejącego raportu — wymagaj potwierdzenia
     if (zapisanyId) {
@@ -1288,6 +1428,9 @@ export default function GeneratorRaportowABYARD() {
   // Czy można generować raport? Tylko gdy jest zapisany w bazie i nie ma zmian
   // niezapisanych — inaczej PM wygenerowałby raport bez świeżo dodanych zdjęć.
   const mozeGenerowac = !!zapisanyId && !niezapisaneZmiany;
+  // Pierwszy raport inwestycji (nr 1), świeżo tworzony (nie z edycji archiwum) —
+  // tylko dla niego cashflow jest obowiązkowy (spójne z blokadą zapisu poniżej).
+  const pierwszyRaportForm = (parseInt(form.numer, 10) || 0) === 1 && !zapisanyId;
 
   // Otwiera podgląd raportu — tam użytkownik wybiera: zapis do PDF lub link
   // dla inwestora (druk nie odpala się już automatycznie).
@@ -1453,6 +1596,9 @@ export default function GeneratorRaportowABYARD() {
       f.projekt = w.projekty?.nazwa || "";
       pomijajDirtyRef.current = true;    // to wczytanie to nie zmiana użytkownika
       setForm(f);
+      // Stan cashflow ustaw jawnie wg wczytanego raportu (inaczej mógłby „zawisnąć"
+      // na true z poprzedniej pracy i pokazać pustą kolumnę wartości dla raportu bez kwot).
+      setCashflowWlaczony(harmonogramMaKwoty(f.harmonogram));
       setZapisanyId(id);                 // kolejny zapis nadpisze ten raport
       wczytanaBudowaRef.current = f.projekt; // nie wymuszaj przeładowania budowy
       // załaduj surowe pliki jako już-wgrane URL-e, by nie wgrywać ich ponownie
@@ -1583,7 +1729,7 @@ export default function GeneratorRaportowABYARD() {
         onWyloguj={async () => { await wyloguj(); setWidok("form"); }}
       />
 
-      <main style={{ maxWidth: 1080, margin: "0 auto", padding: "28px 24px 120px" }}>
+      <main className="ekran-formularz" style={{ maxWidth: 1080, margin: "0 auto", padding: "28px 24px 120px" }}>
 
         {przywroconoDraft && (
           <div style={{ marginBottom: 16, padding: "10px 16px", background: C.zoltyJasny, border: `1px solid ${C.zolty}`, borderRadius: 8, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, fontSize: 13, flexWrap: "wrap" }}>
@@ -1650,7 +1796,7 @@ export default function GeneratorRaportowABYARD() {
                 <img src={form.grafikaInwestycji.dataUrl} alt="" style={{ width: 220, maxHeight: 150, objectFit: "contain", borderRadius: 4 }} />
                 <div>
                   <div style={{ fontSize: 13, marginBottom: 8 }}>{form.grafikaInwestycji.nazwa}</div>
-                  <button style={{ ...miniBtn, color: "#B22", borderColor: "#E0B4B4" }} onClick={usunGrafike}>Usuń grafikę</button>
+                  <button style={{ ...miniBtn, color: "#C0392B", borderColor: "#E0B4B4" }} onClick={usunGrafike}>Usuń grafikę</button>
                 </div>
               </div>
             )}
@@ -1749,25 +1895,25 @@ export default function GeneratorRaportowABYARD() {
                       <tr style={{ background: sumaryczny ? "#F3F0E8" : "transparent" }}>
                         <td style={{ ...tdHarm, textAlign: "center", color: C.szary, fontWeight: 700 }}>{i + 1}</td>
                         <td style={{ ...tdHarm, textAlign: "left", fontWeight: 700 }}>
-                          {r.zadanie}
-                          {wymaga && <div style={{ fontSize: 11, color: "#B22", fontWeight: 600, marginTop: 2 }}>⚠ uzupełnij prognozę</div>}
+                          <span style={{ color: C.zolty, marginRight: 6, fontSize: 8, verticalAlign: "middle" }}>●</span>{r.zadanie}
+                          {wymaga && <div style={{ fontSize: 11, color: "#C0392B", fontWeight: 600, marginTop: 2 }}>⚠ uzupełnij prognozę</div>}
                         </td>
                         {sumaryczny ? (
                           <>
                             <td style={{ ...tdHarm, textAlign: "center", fontWeight: 600, color: C.czarny }}>{fmtPL(ef.start) || "—"}</td>
                             <td style={{ ...tdHarm, textAlign: "center", fontWeight: 600, color: C.czarny }}>{fmtPL(ef.koniec) || "—"}</td>
-                            <td style={{ ...tdHarm, textAlign: "center", fontWeight: 600, color: C.czarny }}>{fmtPL(ef.rzecz) || "—"}</td>
+                            <td style={{ ...tdHarm, textAlign: "center", fontWeight: 700, color: C.czarny, background: C.zoltyJasny }}>{fmtPL(ef.rzecz) || "—"}</td>
                             <td style={{ ...tdHarm, textAlign: "center", fontWeight: 700, color: C.czarny }}>{ef.proc !== "" ? `${ef.proc}%` : "—"}</td>
                           </>
                         ) : (
                           <>
                             <td style={tdHarm}><input type="date" style={cellInp} value={r.start} onChange={(e) => updHarm(i, "start", e.target.value)} /></td>
                             <td style={tdHarm}><input type="date" style={cellInp} value={r.koniec} onChange={(e) => updHarm(i, "koniec", e.target.value)} /></td>
-                            <td style={tdHarm}><input type="date" style={{ ...cellInp, ...(wymaga ? { border: "2px solid #B22", outline: "none" } : {}) }} value={r.rzecz} onChange={(e) => updHarm(i, "rzecz", e.target.value)} /></td>
+                            <td style={{ ...tdHarm, background: C.zoltyJasny }}><input type="date" style={{ ...cellInp, background: "transparent", fontWeight: 700, ...(wymaga ? { border: "2px solid #C0392B", outline: "none" } : {}) }} value={r.rzecz} onChange={(e) => updHarm(i, "rzecz", e.target.value)} /></td>
                             <td style={tdHarm}><input type="number" min="0" max="100" style={{ ...cellInp, width: 64, textAlign: "center" }} value={r.proc} onChange={(e) => updHarm(i, "proc", e.target.value)} placeholder="—" /></td>
                           </>
                         )}
-                        <td style={{ ...tdHarm, textAlign: "center", color: op ? "#B22" : C.szary, fontWeight: op ? 700 : 400 }}>{op || "—"}</td>
+                        <td style={{ ...tdHarm, textAlign: "center", color: op ? "#C0392B" : C.szary, fontWeight: op ? 700 : 400 }}>{op || "—"}</td>
                         {cashflowWlaczony && (() => {
                           const podKwoty = sumaryczny && pod.reduce((s, p) => s + (parseFloat(p.kwota) || 0), 0) > 0;
                           if (podKwoty) {
@@ -1790,17 +1936,17 @@ export default function GeneratorRaportowABYARD() {
                           <td style={{ ...tdHarm, textAlign: "right", color: "#A09A88", fontSize: 11 }}>{i + 1}.{j + 1}</td>
                           <td style={{ ...tdHarm, textAlign: "left", paddingLeft: 22 }}>
                             <input type="text" style={{ ...cellInp, fontWeight: 400 }} value={p.zadanie} onChange={(e) => updPodpozycje(i, j, "zadanie", e.target.value)} placeholder="nazwa podpozycji" />
-                            {wymagaP && <div style={{ fontSize: 10, color: "#B22", fontWeight: 600, marginTop: 2 }}>⚠ uzupełnij prognozę</div>}
+                            {wymagaP && <div style={{ fontSize: 10, color: "#C0392B", fontWeight: 600, marginTop: 2 }}>⚠ uzupełnij prognozę</div>}
                           </td>
                           <td style={tdHarm}><input type="date" style={cellInp} value={p.start} onChange={(e) => updPodpozycje(i, j, "start", e.target.value)} /></td>
                           <td style={tdHarm}><input type="date" style={cellInp} value={p.koniec} onChange={(e) => updPodpozycje(i, j, "koniec", e.target.value)} /></td>
                           <td style={tdHarm}><input type="date" style={{ ...cellInp, ...(wymagaP ? { border: "2px solid #B22", outline: "none" } : {}) }} value={p.rzecz} onChange={(e) => updPodpozycje(i, j, "rzecz", e.target.value)} /></td>
                           <td style={tdHarm}><input type="number" min="0" max="100" style={{ ...cellInp, width: 64, textAlign: "center" }} value={p.proc} onChange={(e) => updPodpozycje(i, j, "proc", e.target.value)} placeholder="—" /></td>
-                          <td style={{ ...tdHarm, textAlign: "center", color: obliczOpoznienie(p, form.dataOpracowania) ? "#B22" : C.szary, fontSize: 12 }}>{obliczOpoznienie(p, form.dataOpracowania) || "—"}</td>
+                          <td style={{ ...tdHarm, textAlign: "center", color: obliczOpoznienie(p, form.dataOpracowania) ? "#C0392B" : C.szary, fontSize: 12 }}>{obliczOpoznienie(p, form.dataOpracowania) || "—"}</td>
                           {cashflowWlaczony && <td style={tdHarm}><input type="number" min="0" step="1000" style={{ ...cellInp, width: 110, textAlign: "right" }} value={p.kwota || ""} onChange={(e) => updPodpozycje(i, j, "kwota", e.target.value)} placeholder="—" /></td>}
                           <td style={{ ...tdHarm, textAlign: "center" }}>
                             <button type="button" onClick={() => usunPodpozycje(i, j)} title="Usuń podpozycję"
-                              style={{ border: `1px solid ${C.linia}`, background: C.bialy, borderRadius: 4, cursor: "pointer", fontSize: 14, lineHeight: 1, width: 26, height: 26, color: "#B22" }}>×</button>
+                              style={{ border: `1px solid ${C.linia}`, background: C.bialy, borderRadius: 4, cursor: "pointer", fontSize: 14, lineHeight: 1, width: 26, height: 26, color: "#C0392B" }}>×</button>
                           </td>
                         </tr>
                         );
@@ -1847,18 +1993,32 @@ export default function GeneratorRaportowABYARD() {
           <div style={{ marginTop: 20, paddingTop: 16, borderTop: `1px solid ${C.linia}` }}>
             {!cashflowWlaczony ? (
               <>
-                <label style={lbl}>Cashflow sprzedażowy (wartość umowy rozłożona w czasie)</label>
+                <label style={lbl}>Cashflow sprzedażowy (wartość umowy rozłożona w czasie)
+                  {pierwszyRaportForm && <span style={{ marginLeft: 8, fontFamily: C.mono, fontSize: 9, fontWeight: 700, color: C.czerwony, background: "#FBECEA", padding: "2px 7px", borderRadius: 999, letterSpacing: "0.06em" }}>WYMAGANE — RAPORT NR 1</span>}
+                </label>
+                {pierwszyRaportForm && (
+                  <p style={{ fontSize: 12.5, color: C.czerwony, marginTop: 2, marginBottom: 8, lineHeight: 1.5 }}>
+                    To pierwszy raport tej inwestycji — cashflow jest obowiązkowy. Ustanawia bazę finansową dziedziczoną przez kolejne raporty. Bez wartości umowy przy każdej pozycji harmonogramu nie zapiszesz raportu.
+                  </p>
+                )}
                 <p style={{ fontSize: 12, color: C.szary, marginTop: -2, marginBottom: 10 }}>
                   Włącz, aby przy zadaniach harmonogramu pojawiła się kolumna „Wartość umowy". Na jej podstawie oraz dat i procentu zaawansowania powstanie miesięczne zestawienie sprzedaży (narastająco). Kwoty można podać na zadaniu głównym lub podpozycjach.
                 </p>
-                <button style={btnGhost} onClick={() => setCashflowWlaczony(true)}>+ Utwórz cashflow</button>
+                <button style={pierwszyRaportForm ? btnPrimary : btnGhost} onClick={() => setCashflowWlaczony(true)}>+ Utwórz cashflow</button>
               </>
             ) : (
               <>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap", marginBottom: 10 }}>
-                  <label style={{ ...lbl, marginBottom: 0 }}>Cashflow sprzedażowy</label>
-                  <button style={{ ...miniBtn, color: "#B22", borderColor: "#E0B4B4" }}
-                    onClick={() => { if (window.confirm("Wyłączyć cashflow? Wpisane wartości umowy zostaną usunięte z tego raportu.")) { wyczyscKwoty(); setCashflowWlaczony(false); } }}>
+                  <label style={{ ...lbl, marginBottom: 0 }}>Cashflow sprzedażowy
+                    {pierwszyRaportForm && <span style={{ marginLeft: 8, fontFamily: C.mono, fontSize: 9, fontWeight: 700, color: C.czerwony, background: "#FBECEA", padding: "2px 7px", borderRadius: 999, letterSpacing: "0.06em" }}>WYMAGANE — RAPORT NR 1</span>}
+                  </label>
+                  <button style={{ ...miniBtn, color: "#C0392B", borderColor: "#E0B4B4" }}
+                    onClick={() => {
+                      const ostrz = pierwszyRaportForm
+                        ? "Cashflow jest OBOWIĄZKOWY dla pierwszego raportu inwestycji — bez niego nie zapiszesz raportu. Wyłączyć mimo to? Wpisane wartości umowy zostaną usunięte."
+                        : "Wyłączyć cashflow? Wpisane wartości umowy zostaną usunięte z tego raportu.";
+                      if (window.confirm(ostrz)) { wyczyscKwoty(); setCashflowWlaczony(false); }
+                    }}>
                     Usuń cashflow
                   </button>
                 </div>
@@ -1898,7 +2058,7 @@ export default function GeneratorRaportowABYARD() {
                       <div style={{ display: "flex", gap: 8 }}>
                         <button style={miniBtn} onClick={() => przesunObrazHarm(i, -1)} disabled={i === 0}>↑</button>
                         <button style={miniBtn} onClick={() => przesunObrazHarm(i, 1)} disabled={i === form.harmonogramObrazy.length - 1}>↓</button>
-                        <button style={{ ...miniBtn, color: "#B22", borderColor: "#E0B4B4" }} onClick={() => usunObrazHarm(i)}>Usuń</button>
+                        <button style={{ ...miniBtn, color: "#C0392B", borderColor: "#E0B4B4" }} onClick={() => usunObrazHarm(i)}>Usuń</button>
                       </div>
                     </div>
                   </div>
@@ -1924,7 +2084,7 @@ export default function GeneratorRaportowABYARD() {
                   <div style={{ display: "flex", gap: 8 }}>
                     <button style={miniBtn} onClick={() => przesunZdjecie(i, -1)} disabled={i === 0}>↑</button>
                     <button style={miniBtn} onClick={() => przesunZdjecie(i, 1)} disabled={i === form.zdjecia.length - 1}>↓</button>
-                    <button style={{ ...miniBtn, color: "#B22", borderColor: "#E0B4B4" }} onClick={() => usunZdjecie(i)}>Usuń</button>
+                    <button style={{ ...miniBtn, color: "#C0392B", borderColor: "#E0B4B4" }} onClick={() => usunZdjecie(i)}>Usuń</button>
                   </div>
                 </div>
               </div>
@@ -1960,7 +2120,7 @@ export default function GeneratorRaportowABYARD() {
                   );
                 })}
                 {wymuszone && (
-                  <div style={{ marginTop: 2, fontSize: 12.5, color: "#B22", background: "#FBE6E6", borderLeft: "3px solid #B22", padding: "8px 12px", borderRadius: 4 }}>
+                  <div style={{ marginTop: 2, fontSize: 12.5, color: "#C0392B", background: "#FBECEA", borderLeft: "3px solid #B22", padding: "8px 12px", borderRadius: 4 }}>
                     Opóźnienie w harmonogramie opóźnia zakończenie całości projektu — status „zagrożenie” jest ustawiony automatycznie i zablokowany.
                   </div>
                 )}
@@ -1981,7 +2141,7 @@ export default function GeneratorRaportowABYARD() {
                 ? "Raport zapisany — możesz go wygenerować. Kolejny zapis nadpisze (aktualizacja)."
                 : <>Najpierw <strong>zapisz raport w bazie</strong> — dopiero wtedy odblokuje się „Generuj raport".</>}
           </span>
-          <div style={{ display: "flex", gap: 10 }}>
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
             <button style={{ ...btnGhost, borderColor: C.linia, color: C.szary }} onClick={wyczyscFormularz} disabled={zapisywanie} title="Wyczyść widoczny formularz (i wersję roboczą). Zapisane raporty w bazie zostają.">
               Wyczyść
             </button>
@@ -2046,26 +2206,29 @@ function EkranLogowania({ pokazToast }) {
 
   const tytul = tryb === "login" ? "Zaloguj się" : tryb === "rejestracja" ? "Załóż konto" : "Reset hasła";
 
+  const loginInp = { ...inp, background: C.ink2, border: "1px solid rgba(255,255,255,0.12)", color: C.bialy, marginBottom: 0 };
+  const loginLab = { ...lbl, color: C.zoltyDeep };
   return (
-    <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: C.czarny, fontFamily: "'Segoe UI', system-ui, sans-serif", padding: 20 }}>
+    <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: C.czarny, fontFamily: "'Roboto', 'Segoe UI', system-ui, sans-serif", padding: 20 }}>
       <style>{globalCSS}</style>
-      <div style={{ width: "100%", maxWidth: 400, background: C.bialy, borderRadius: 12, padding: 32, boxShadow: "0 8px 40px rgba(0,0,0,0.4)" }}>
-        <div style={{ display: "flex", alignItems: "baseline", gap: 2, marginBottom: 6 }}>
-          <span style={{ color: C.zolty, fontWeight: 800, fontSize: 28 }}>/</span>
-          <span style={{ color: C.czarny, fontWeight: 800, fontSize: 26 }}>Abyard</span>
+      <div style={{ width: "100%", maxWidth: 420 }}>
+        <div style={{ fontWeight: 900, fontSize: 30, color: C.bialy, letterSpacing: "-0.01em" }}>
+          <span style={{ color: C.zolty }}>/</span>Abyard
         </div>
-        <div style={{ color: C.szary, fontSize: 13, marginBottom: 24 }}>Generator raportów z budowy</div>
+        <div style={{ fontFamily: C.mono, fontSize: 10.5, letterSpacing: "0.2em", textTransform: "uppercase", color: C.szary2, marginTop: 6 }}>/ Generator raportów z budowy</div>
 
-        <div style={{ fontWeight: 800, fontSize: 18, marginBottom: 18 }}>{tytul}</div>
+        <h2 style={{ fontWeight: 900, fontSize: 34, color: C.bialy, margin: "30px 0 22px", letterSpacing: "-0.01em" }}>{tytul}</h2>
 
-        <label style={lbl}>E-mail</label>
-        <input style={{ ...inp, marginBottom: 14 }} type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="np. jkowalski@abyard.pl" autoComplete="username" />
+        <div style={{ marginBottom: 16 }}>
+          <label style={loginLab}>Adres e-mail</label>
+          <input style={loginInp} type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="np. jkowalski@abyard.pl" autoComplete="username" />
+        </div>
 
         {tryb !== "reset" && (
-          <>
-            <label style={lbl}>Hasło</label>
+          <div style={{ marginBottom: 16 }}>
+            <label style={loginLab}>Hasło</label>
             <input
-              style={{ ...inp, marginBottom: 14 }}
+              style={loginInp}
               type="password"
               value={haslo}
               onChange={(e) => setHaslo(e.target.value)}
@@ -2073,20 +2236,20 @@ function EkranLogowania({ pokazToast }) {
               autoComplete={tryb === "login" ? "current-password" : "new-password"}
               onKeyDown={(e) => { if (e.key === "Enter") submit(); }}
             />
-          </>
+          </div>
         )}
 
         {info && (
-          <div style={{ fontSize: 13, color: info.includes("błąd") || info.includes("Błędny") || info.includes("Podaj") || info.includes("Hasło musi") ? "#B22" : "#1B7A3D", marginBottom: 14, lineHeight: 1.4 }}>
+          <div style={{ fontSize: 13, color: info.includes("błąd") || info.includes("Błędny") || info.includes("Podaj") || info.includes("Hasło musi") ? "#F0A79E" : "#7DDBA0", marginBottom: 14, lineHeight: 1.4 }}>
             {info}
           </div>
         )}
 
-        <button onClick={submit} disabled={busy} style={{ ...btnPrimary, width: "100%", padding: "12px", marginBottom: 14, opacity: busy ? 0.6 : 1 }}>
-          {busy ? "Proszę czekać…" : tytul}
+        <button onClick={submit} disabled={busy} style={{ ...btnPrimary, width: "100%", padding: "13px", fontSize: 14, marginTop: 4, opacity: busy ? 0.6 : 1 }}>
+          {busy ? "Proszę czekać…" : (tryb === "login" ? "Zaloguj się →" : tytul)}
         </button>
 
-        <div style={{ fontSize: 13, color: C.szary, textAlign: "center", lineHeight: 1.8 }}>
+        <div style={{ fontFamily: C.mono, fontSize: 11, color: C.szary2, textAlign: "center", marginTop: 18, letterSpacing: "0.04em", lineHeight: 1.9 }}>
           {tryb === "login" && (
             <>
               <span onClick={() => { setTryb("rejestracja"); setInfo(""); }} style={linkStyl}>Załóż konto</span>
@@ -2105,7 +2268,7 @@ function EkranLogowania({ pokazToast }) {
     </div>
   );
 }
-const linkStyl = { color: "#1668C7", cursor: "pointer", textDecoration: "underline" };
+const linkStyl = { color: "#FBC441", cursor: "pointer", textDecoration: "none" };
 
 /* ---------- PANEL ADMINISTRATORA ----------------------------------------- */
 function PanelAdmina({ pokazToast, email, onForm, onArchiwum, onKoordynacja, onWyloguj }) {
@@ -2221,22 +2384,26 @@ function PanelAdmina({ pokazToast, email, onForm, onArchiwum, onKoordynacja, onW
       />
 
       <main style={{ maxWidth: 1080, margin: "0 auto", padding: "28px 24px 80px" }}>
-        {/* Zakładki panelu + odśwież */}
-        <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", marginBottom: 22, borderBottom: `2px solid ${C.linia}` }}>
-          <div style={{ display: "flex", gap: 4 }}>
-            {[["zarzadzanie", "Zarządzanie"], ["koordynacja", "Koordynacja PM"], ["inwestycje", "Koordynacja Inwestycji"]].map(([kod, et]) => (
-              <button key={kod} onClick={() => setZakladka(kod)}
-                style={{ border: "none", background: "transparent", padding: "10px 18px", fontSize: 14, fontWeight: 700, cursor: "pointer",
-                  color: zakladka === kod ? C.czarny : C.szary,
-                  borderBottom: zakladka === kod ? `3px solid ${C.zolty}` : "3px solid transparent", marginBottom: -2 }}>
-                {et}
-              </button>
-            ))}
-          </div>
-          <button onClick={async () => { await wczytaj(); pokazToast("Odświeżono dane"); }}
-            style={{ border: `1px solid ${C.linia}`, background: C.bialy, borderRadius: 6, padding: "7px 14px", fontSize: 13, fontWeight: 600, cursor: "pointer", marginBottom: 6, color: C.czarny }}>
-            ↻ Odśwież
-          </button>
+        <NaglowekEkranu
+          eyebrow="Administracja"
+          tytul="Użytkownicy i uprawnienia"
+          akcje={
+            <button onClick={async () => { await wczytaj(); pokazToast("Odświeżono dane"); }}
+              style={{ ...miniBtn, padding: "8px 14px", fontWeight: 600 }}>
+              ↻ Odśwież
+            </button>
+          }
+        />
+        {/* Zakładki panelu */}
+        <div style={{ display: "flex", alignItems: "flex-end", marginBottom: 22, borderBottom: `2px solid ${C.linia}`, gap: 4, flexWrap: "wrap" }}>
+          {[["zarzadzanie", "Zarządzanie"], ["koordynacja", "Koordynacja PM"], ["inwestycje", "Koordynacja Inwestycji"]].map(([kod, et]) => (
+            <button key={kod} onClick={() => setZakladka(kod)}
+              style={{ border: "none", background: "transparent", padding: "10px 16px", fontFamily: C.mono, fontSize: 11, letterSpacing: "0.08em", textTransform: "uppercase", fontWeight: zakladka === kod ? 700 : 400, cursor: "pointer",
+                color: zakladka === kod ? C.czarny : C.szary,
+                borderBottom: zakladka === kod ? `3px solid ${C.zolty}` : "3px solid transparent", marginBottom: -2 }}>
+              {et}
+            </button>
+          ))}
         </div>
         {ladowanie ? (
           <div style={{ textAlign: "center", padding: 40, color: C.szary }}>Wczytywanie…</div>
@@ -2258,44 +2425,42 @@ function PanelAdmina({ pokazToast, email, onForm, onArchiwum, onKoordynacja, onW
           <>
             {/* Użytkownicy i role */}
             <section style={card}>
-              <div style={secTitle}>Użytkownicy i role</div>
-              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13.5 }}>
+              <div style={secTitle}><span style={{ color: C.zolty, fontWeight: 700 }}>/ </span>Użytkownicy i role</div>
+              <div className="tabela-scroll-own" style={{ overflowX: "auto" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13, minWidth: 520 }}>
                 <thead>
-                  <tr style={{ borderBottom: `2px solid ${C.linia}` }}>
-                    <th style={{ textAlign: "left", padding: "8px 10px", color: C.szary, fontSize: 11, textTransform: "uppercase" }}>Imię i nazwisko</th>
-                    <th style={{ textAlign: "left", padding: "8px 10px", color: C.szary, fontSize: 11, textTransform: "uppercase" }}>E-mail</th>
-                    <th style={{ textAlign: "center", padding: "8px 10px", color: C.szary, fontSize: 11, textTransform: "uppercase" }}>Rola</th>
-                    <th style={{ textAlign: "right", padding: "8px 10px" }}></th>
+                  <tr>
+                    <th style={thAdm}>Imię i nazwisko</th>
+                    <th style={thAdm}>E-mail</th>
+                    <th style={{ ...thAdm, textAlign: "center" }}>Rola</th>
                   </tr>
                 </thead>
                 <tbody>
                   {uzytkownicy.map((u) => (
                     <tr key={u.id} style={{ borderBottom: `1px solid ${C.linia}` }}>
-                      <td style={{ padding: "8px 10px" }}>
+                      <td style={{ padding: "10px 12px" }}>
                         <input type="text" defaultValue={u.imie_nazwisko || ""} placeholder="—"
                           onBlur={(e) => zapiszImie(u.id, e.target.value)}
-                          style={{ width: "100%", padding: "6px 8px", border: `1px solid ${C.linia}`, borderRadius: 6, fontSize: 13.5 }} />
+                          style={{ width: "100%", padding: "6px 8px", border: `1px solid ${C.linia}`, borderRadius: 6, fontSize: 13.5, background: "#FCFBF8" }} />
                       </td>
-                      <td style={{ padding: "10px", color: C.szary, fontSize: 12.5 }}>{u.email}</td>
-                      <td style={{ padding: "10px", textAlign: "center" }}>
-                        <span style={{ fontSize: 11, fontWeight: 700, padding: "3px 10px", borderRadius: 12, color: u.rola === "admin" ? C.czarny : C.szary, background: u.rola === "admin" ? C.zolty : C.jasny }}>
-                          {u.rola === "admin" ? "ADMIN" : "PM"}
+                      <td style={{ padding: "10px 12px", color: C.szary, fontFamily: C.mono, fontSize: 11.5 }}>{u.email}</td>
+                      <td style={{ padding: "10px 12px", textAlign: "center" }}>
+                        <span style={{ display: "inline-flex", border: `1px solid ${C.linia}`, borderRadius: 999, overflow: "hidden", fontFamily: C.mono, fontSize: 10, letterSpacing: "0.06em", cursor: "pointer" }}
+                          onClick={() => przelaczRole(u)} title="Kliknij, aby przełączyć rolę">
+                          <span style={{ padding: "5px 12px", background: u.rola === "admin" ? C.czarny : "transparent", color: u.rola === "admin" ? C.zoltyBright : C.szary, fontWeight: u.rola === "admin" ? 700 : 400 }}>Admin</span>
+                          <span style={{ padding: "5px 12px", background: u.rola !== "admin" ? C.czarny : "transparent", color: u.rola !== "admin" ? C.zoltyBright : C.szary, fontWeight: u.rola !== "admin" ? 700 : 400 }}>PM</span>
                         </span>
-                      </td>
-                      <td style={{ padding: "10px", textAlign: "right" }}>
-                        <button style={miniBtn} onClick={() => przelaczRole(u)}>
-                          {u.rola === "admin" ? "Cofnij admina" : "Nadaj admina"}
-                        </button>
                       </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
+              </div>
             </section>
 
             {/* Przypisania PM -> inwestycje */}
             <section style={card}>
-              <div style={secTitle}>Przypisania PM do inwestycji</div>
+              <div style={secTitle}><span style={{ color: C.zolty, fontWeight: 700 }}>/ </span>Przypisania PM do inwestycji</div>
               <p style={{ color: C.szary, fontSize: 13, marginTop: -6, marginBottom: 14 }}>
                 Wybierz użytkownika, a następnie zaznacz budowy, dla których ma móc tworzyć raporty. Administrator ma dostęp do wszystkich budów niezależnie od przypisań.
               </p>
@@ -2387,8 +2552,8 @@ function KompaktowaListaInwestycji({ projekty, przypisania, zakresy, zakresMap, 
                       : "Inwestycja aktywna — punkty liczą się do obciążenia. Kliknij, aby wstrzymać."}
                     style={{ border: "none", cursor: "pointer", fontFamily: "inherit", fontSize: 11, fontWeight: 700,
                       padding: "3px 10px", borderRadius: 20,
-                      color: p.wstrzymana ? "#B35A00" : "#1B7A3D",
-                      background: p.wstrzymana ? "#FBF0DC" : "#E4F4E9" }}>
+                      color: p.wstrzymana ? "#B9791A" : "#1B7A3D",
+                      background: p.wstrzymana ? "#FBF0DC" : "#E6F3EA" }}>
                     {p.wstrzymana ? "Wstrzymana" : "Aktywna"}
                   </button>
                 </td>
@@ -2490,8 +2655,8 @@ function ZakladkaKoordynacja({ uzytkownicy, projektyAll, przypisania, zakresy, t
   }, [kierownicy, przypisania, projektMap, terminyDomyslne, zakresMap, horyzont]);
 
   const [rozwiniety, setRozwiniety] = React.useState(null); // id kierownika z rozwiniętymi tematami
-  function kolorProc(p) { return p > 100 ? C.czerwony : p >= 80 ? "#D98A00" : "#1B7A3D"; }
-  function stanProc(p) { return p > 100 ? ["przeciążony", C.czerwony, "#FBE6E6"] : p >= 80 ? ["pełne obłożenie", "#D98A00", "#FBF0DC"] : ["ma zapas", "#1B7A3D", "#E4F4E9"]; }
+  function kolorProc(p) { return p > 100 ? C.czerwony : p >= 80 ? "#B9791A" : "#1B7A3D"; }
+  function stanProc(p) { return p > 100 ? ["przeciążony", C.czerwony, "#FBECEA"] : p >= 80 ? ["pełne obłożenie", "#B9791A", "#FBF0DC"] : ["ma zapas", "#1B7A3D", "#E6F3EA"]; }
 
   // Inwestycje przefiltrowane szukajką (do sekcji edycji)
   const projektyWidoczne = React.useMemo(() => {
@@ -2558,7 +2723,7 @@ function ZakladkaKoordynacja({ uzytkownicy, projektyAll, przypisania, zakresy, t
         </div>
         <div style={{ display: "flex", gap: 16, flexWrap: "wrap", fontSize: 12, color: C.szary, marginBottom: 14 }}>
           <span>● <span style={{ color: "#1B7A3D" }}>do 80%</span> zapas</span>
-          <span>● <span style={{ color: "#D98A00" }}>80–100%</span> pełne</span>
+          <span>● <span style={{ color: "#B9791A" }}>80–100%</span> pełne</span>
           <span>● <span style={{ color: C.czerwony }}>ponad 100%</span> przeciążenie</span>
         </div>
         {analiza.length === 0 ? (
@@ -2849,8 +3014,8 @@ function ZakladkaKoordynacjaInwestycji({ projektyAll, przypisania, uzytkownicy, 
   );
   // Etykieta „ostatni raport": ile dni temu + numer, z kolorem wg zalegania
   function ostatniRaportKom(d) {
-    if (d.dniOd === null) return <span style={{ color: "#B22", fontWeight: 700 }}>brak raportu</span>;
-    const kol = d.zalega ? "#B35A00" : C.szary;
+    if (d.dniOd === null) return <span style={{ color: "#C0392B", fontWeight: 700 }}>brak raportu</span>;
+    const kol = d.zalega ? "#B9791A" : C.szary;
     return (
       <span style={{ color: kol }}>
         {d.dniOd === 0 ? "dziś" : `${d.dniOd} dni temu`}
@@ -2865,8 +3030,8 @@ function ZakladkaKoordynacjaInwestycji({ projektyAll, przypisania, uzytkownicy, 
       <section style={{ ...card, display: "flex", flexWrap: "wrap", gap: 10, alignItems: "stretch" }}>
         {[
           ["Inwestycje aktywne", liczby.razem, C.czarny, C.jasny],
-          ["Zagrożony termin", liczby.zagrozone, "#B22", "#FBE6E6"],
-          [`Bez raportu > ${prog} dni`, liczby.zalegle, "#B35A00", "#FBF0DC"],
+          ["Zagrożony termin", liczby.zagrozone, "#C0392B", "#FBECEA"],
+          [`Bez raportu > ${prog} dni`, liczby.zalegle, "#B9791A", "#FBF0DC"],
           ["Wstrzymane", liczby.wstrzymane, C.szary, C.jasny],
         ].map(([et, n, kol, tlo]) => (
           <div key={et} style={{ flex: "1 1 160px", border: `1px solid ${C.linia}`, borderRadius: 8, padding: "12px 16px", background: tlo }}>
@@ -2907,8 +3072,8 @@ function ZakladkaKoordynacjaInwestycji({ projektyAll, przypisania, uzytkownicy, 
                 </div>
                 <div style={{ textAlign: "right" }}>
                   {d.dniOd === null
-                    ? chip("BRAK RAPORTU", "#B22", "#FBE6E6")
-                    : chip(`${d.dniOd} dni od raportu (nr ${d.ost.numer})`, "#B35A00", "#FBF0DC")}
+                    ? chip("BRAK RAPORTU", "#C0392B", "#FBECEA")
+                    : chip(`${d.dniOd} dni od raportu (nr ${d.ost.numer})`, "#B9791A", "#FBF0DC")}
                 </div>
               </div>
             ))}
@@ -2958,12 +3123,12 @@ function ZakladkaKoordynacjaInwestycji({ projektyAll, przypisania, uzytkownicy, 
                     </td>
                     <td style={{ ...td, color: d.pmy.length ? C.czarny : C.szary, fontSize: 12.5 }}>{d.pmy.length ? d.pmy.join(", ") : "—"}</td>
                     <td style={td}>{chip(d.status.txt, d.status.kolor, d.status.tlo)}</td>
-                    <td style={{ ...td, textAlign: "center", color: d.opozDni > 0 ? "#B22" : C.szary, fontWeight: d.opozDni > 0 ? 800 : 400 }}>{d.opozDni > 0 ? `${d.opozDni} dni` : "—"}</td>
+                    <td style={{ ...td, textAlign: "center", color: d.opozDni > 0 ? "#C0392B" : C.szary, fontWeight: d.opozDni > 0 ? 800 : 400 }}>{d.opozDni > 0 ? `${d.opozDni} dni` : "—"}</td>
                     <td style={{ ...td, textAlign: "center", fontWeight: 700 }}>{d.postep != null ? `${d.postep}%` : "—"}</td>
                     <td style={td}>{ostatniRaportKom(d)}</td>
                     <td style={{ ...td, fontSize: 12.5 }}>
                       {d.termin ? (
-                        <span style={{ color: d.dniDoTerminu != null && d.dniDoTerminu < 0 ? "#B22" : (d.dniDoTerminu != null && d.dniDoTerminu <= 60 ? "#B35A00" : C.czarny), fontWeight: 600 }}>
+                        <span style={{ color: d.dniDoTerminu != null && d.dniDoTerminu < 0 ? "#C0392B" : (d.dniDoTerminu != null && d.dniDoTerminu <= 60 ? "#B9791A" : C.czarny), fontWeight: 600 }}>
                           {fmtPL(d.termin)}{d.terminAuto ? " ·auto" : ""}
                         </span>
                       ) : <span style={{ color: C.szary }}>—</span>}
@@ -3046,7 +3211,7 @@ function WidokKtoCoProwadzi({ jestAdmin, email, onForm, onArchiwum, onAdmin, onW
     })();
   }, []);
 
-  const th = { textAlign: "left", padding: "9px 12px", color: C.szary, fontSize: 11, textTransform: "uppercase", letterSpacing: .5, borderBottom: `2px solid ${C.linia}` };
+  const th = { textAlign: "left", padding: "9px 12px", color: C.szary, fontFamily: C.mono, fontSize: 9.5, fontWeight: 400, textTransform: "uppercase", letterSpacing: "0.1em", borderBottom: `2px solid ${C.linia}` };
   const td = { padding: "9px 12px", borderBottom: `1px solid ${C.jasny}`, fontSize: 13.5 };
 
   return (
@@ -3063,29 +3228,29 @@ function WidokKtoCoProwadzi({ jestAdmin, email, onForm, onArchiwum, onAdmin, onW
         onWyloguj={onWyloguj}
       />
       <main style={{ maxWidth: 1080, margin: "0 auto", padding: "28px 24px 80px" }}>
-        <h1 style={{ fontSize: 22, fontWeight: 800, marginBottom: 12 }}>Kto co prowadzi</h1>
-
-        {/* Przełącznik widoku */}
-        <div style={{ display: "flex", border: `1px solid ${C.linia}`, borderRadius: 8, overflow: "hidden", width: "fit-content", marginBottom: 12 }}>
-          {[["pm", "Wg kierownika"], ["inwestycje", "Wg inwestycji"]].map(([kod, et]) => (
-            <button key={kod} onClick={() => setTryb(kod)}
-              style={{ border: "none", background: tryb === kod ? C.czarny : C.bialy, color: tryb === kod ? C.bialy : C.czarny,
-                padding: "8px 18px", fontSize: 13, fontWeight: 600, cursor: "pointer", borderRight: kod === "pm" ? `1px solid ${C.linia}` : "none" }}>
-              {et}
-            </button>
-          ))}
-        </div>
-
-        <p style={{ color: C.szary, fontSize: 13.5, marginBottom: 22 }}>
-          {tryb === "pm"
+        <NaglowekEkranu
+          eyebrow="Koordynacja"
+          tytul="Kto co prowadzi"
+          sub={tryb === "pm"
             ? "Zestawienie kierowników i przypisanych im inwestycji. Data zakończenia pochodzi z harmonogramu (najpóźniejsza z terminów) lub z ręcznego wpisu w panelu koordynacji."
             : "Zestawienie inwestycji i przypisanych do nich kierowników. Data zakończenia pochodzi z harmonogramu (najpóźniejsza z terminów) lub z ręcznego wpisu w panelu koordynacji."}
-        </p>
+          akcje={
+            <div style={{ display: "inline-flex", border: `1px solid ${C.linia}`, borderRadius: 999, overflow: "hidden", fontFamily: C.mono, fontSize: 10.5, letterSpacing: "0.06em", textTransform: "uppercase" }}>
+              {[["pm", "Wg kierownika"], ["inwestycje", "Wg inwestycji"]].map(([kod, et]) => (
+                <button key={kod} onClick={() => setTryb(kod)}
+                  style={{ border: "none", background: tryb === kod ? C.czarny : C.bialy, color: tryb === kod ? C.zoltyBright : C.szary,
+                    fontWeight: tryb === kod ? 700 : 400, padding: "7px 14px", cursor: "pointer", fontFamily: "inherit", letterSpacing: "inherit", textTransform: "inherit" }}>
+                  {et}
+                </button>
+              ))}
+            </div>
+          }
+        />
 
         {ladowanie ? (
           <div style={{ textAlign: "center", padding: 40, color: C.szary }}>Wczytywanie…</div>
         ) : blad ? (
-          <div style={{ color: "#B22", fontSize: 14 }}>{blad}</div>
+          <div style={{ color: "#C0392B", fontSize: 14 }}>{blad}</div>
         ) : tryb === "pm" ? (
           grupy.length === 0 ? (
             <div style={{ color: C.szary, fontSize: 14, fontStyle: "italic" }}>Brak przypisanych inwestycji.</div>
@@ -3136,7 +3301,7 @@ function WidokKtoCoProwadzi({ jestAdmin, email, onForm, onArchiwum, onAdmin, onW
                     </span>
                   </div>
                   {inw.pmowie.length === 0 ? (
-                    <div style={{ padding: "12px 16px", fontSize: 13, color: "#B22", fontStyle: "italic" }}>
+                    <div style={{ padding: "12px 16px", fontSize: 13, color: "#C0392B", fontStyle: "italic" }}>
                       brak przypisanego kierownika
                     </div>
                   ) : (
@@ -3166,10 +3331,10 @@ function WidokArchiwum({ raporty, ladowanie, filtr, setFiltr, onOdswiez, onOtwor
   // Status na plakietce czyta z pola „Podsumowanie" raportu. Dodatkowo, gdy opóźnienie
   // w harmonogramie realnie opóźnia zakończenie całości projektu, wymuszamy „zagrożenie"
   // (zabezpiecza też starsze raporty zapisane z domyślną opcją „nie powoduje zagrożenia").
-  const ZAGROZENIE = { txt: "Zagrożenie terminu", kolor: "#B22", tlo: "#FBE6E6" };
-  const NIEZAGROZONY = { txt: "Termin niezagrożony", kolor: "#1B7A3D", tlo: "#E4F4E9" };
+  const ZAGROZENIE = { txt: "Zagrożenie terminu", kolor: "#C0392B", tlo: "#FBECEA", wariant: "warn" };
+  const NIEZAGROZONY = { txt: "Termin niezagrożony", kolor: "#1B7A3D", tlo: "#E6F3EA", wariant: "ok" };
   function statusInwestycji(raport) {
-    if (!raport) return { txt: "—", kolor: C.szary, tlo: "transparent" };
+    if (!raport) return { txt: "—", kolor: C.szary, tlo: "transparent", wariant: "neutral" };
     if (harmonogramWymuszaZagrozenie(raport.harmonogram, raport.data_opracowania)) return ZAGROZENIE;
     const t = (raport.podsumowanie || "").toLowerCase();
     const brakZagrozenia = t.includes("nie powoduje") || t.includes("niezagroż") || t.includes("nie ma zagroż") || t.includes("bez zagroż");
@@ -3196,14 +3361,16 @@ function WidokArchiwum({ raporty, ladowanie, filtr, setFiltr, onOdswiez, onOtwor
         onAdmin={onAdmin}
         onWyloguj={onWyloguj}
       />
-      <div style={{ background: C.grafit, borderBottom: `1px solid ${C.linia}` }}>
-        <div style={{ maxWidth: 1080, margin: "0 auto", padding: "10px 24px", display: "flex", justifyContent: "flex-end", gap: 12, alignItems: "center" }}>
-          <button onClick={onOdswiez} style={btnGhostDark}>Odśwież</button>
-          <button onClick={onNowyRaport} style={{ background: C.zolty, color: C.czarny, border: "none", padding: "8px 18px", borderRadius: 6, fontWeight: 700, fontSize: 13, cursor: "pointer", fontFamily: "inherit" }}>+ Nowy raport</button>
-        </div>
-      </div>
-
       <main style={{ maxWidth: 1080, margin: "0 auto", padding: "28px 24px 80px" }}>
+        <NaglowekEkranu
+          eyebrow="Archiwum"
+          tytul="Raporty z budów"
+          sub="Kliknij kartę budowy, aby zawęzić listę. Otwórz raport, by pobrać PDF lub udostępnić link."
+          akcje={<>
+            <button onClick={onOdswiez} style={{ ...miniBtn, padding: "8px 14px", fontWeight: 600 }}>↻ Odśwież</button>
+            <button onClick={onNowyRaport} style={{ background: C.zolty, color: C.czarny, border: "none", padding: "9px 16px", borderRadius: 6, fontWeight: 700, fontSize: 12.5, cursor: "pointer", fontFamily: "inherit" }}>+ Nowy raport</button>
+          </>}
+        />
         {ladowanie && (
           <div style={{ textAlign: "center", padding: 40, color: C.szary }}>Wczytywanie z bazy…</div>
         )}
@@ -3235,12 +3402,9 @@ function WidokArchiwum({ raporty, ladowanie, filtr, setFiltr, onOdswiez, onOtwor
                       transition: "border-color .15s",
                     }}
                   >
-                    <div style={{ fontWeight: 800, fontSize: 15, marginBottom: 8 }}>{b.nazwa}</div>
-                    <div style={{ fontSize: 13, color: C.szary, marginBottom: 4 }}>
-                      Raportów: <strong style={{ color: C.czarny }}>{b.liczba}</strong> · ostatni: <strong style={{ color: C.czarny }}>nr {b.ostatni?.numer}</strong>
-                    </div>
-                    <div style={{ fontSize: 12, color: C.szary, marginBottom: 10 }}>
-                      {b.ostatni?.data_opracowania ? fmtPL(b.ostatni.data_opracowania) : "—"}
+                    <div style={{ fontWeight: 800, fontSize: 15, marginBottom: 6 }}>{b.nazwa}</div>
+                    <div style={{ fontFamily: C.mono, fontSize: 10, letterSpacing: "0.03em", color: C.szary2, textTransform: "uppercase", marginBottom: 12 }}>
+                      {b.liczba} {b.liczba === 1 ? "raport" : "raportów"} · nr {b.ostatni?.numer} · {b.ostatni?.data_opracowania ? fmtPL(b.ostatni.data_opracowania) : "—"}
                     </div>
                     {(() => {
                       const o = b.ostatni || {};
@@ -3248,17 +3412,17 @@ function WidokArchiwum({ raporty, ladowanie, filtr, setFiltr, onOdswiez, onOtwor
                       const opoz = opoznienieInwestycji(o.harmonogram, o.data_opracowania);
                       const komorka = (etykieta, wartosc, kolor) => (
                         <div style={{ flex: "1 1 calc(50% - 4px)", background: C.jasny, borderRadius: 6, padding: "6px 8px" }}>
-                          <div style={{ fontSize: 9.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.4, color: C.szary }}>{etykieta}</div>
+                          <div style={{ fontFamily: C.mono, fontSize: 9, fontWeight: 400, textTransform: "uppercase", letterSpacing: "0.08em", color: C.szary2 }}>{etykieta}</div>
                           <div style={{ fontSize: 13, fontWeight: 700, color: kolor || C.czarny }}>{wartosc}</div>
                         </div>
                       );
-                      return (
-                        <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 10 }}>
-                          {komorka("Postęp ogólny", postep !== null ? `${postep}%` : "—")}
+                      return (<>
+                        {postep !== null && <div style={{ marginBottom: 10 }}><PasekPostepu proc={postep} etykieta="zaawansowanie" szer="100%" /></div>}
+                        <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 12 }}>
                           {komorka(
                             "Opóźnienie",
                             opoz === null ? "—" : opoz.dni > 0 ? `${opoz.dni} dni` : "brak",
-                            opoz && opoz.dni > 0 ? "#B22" : C.czarny
+                            opoz && opoz.dni > 0 ? "#C0392B" : C.czarny
                           )}
                           {komorka("Zakończenie wg umowy", (() => {
                             const zHarm = najpozniejszePlanowaneZakonczenie(o.harmonogram);
@@ -3267,11 +3431,9 @@ function WidokArchiwum({ raporty, ladowanie, filtr, setFiltr, onOdswiez, onOtwor
                           })())}
                           {komorka("Pozwolenie (PNU)", o.pnu_nie_dotyczy ? "Nie dotyczy" : (o.pnu ? fmtPL(o.pnu) : "—"))}
                         </div>
-                      );
+                      </>);
                     })()}
-                    <span style={{ display: "inline-block", fontSize: 11, fontWeight: 700, padding: "3px 10px", borderRadius: 20, color: st.kolor, background: st.tlo }}>
-                      {st.txt}
-                    </span>
+                    <Chip wariant={st.wariant}>{st.txt}</Chip>
                   </div>
                 );
               })}
@@ -3281,82 +3443,70 @@ function WidokArchiwum({ raporty, ladowanie, filtr, setFiltr, onOdswiez, onOtwor
             {filtr && (
               <div style={{ marginBottom: 14, fontSize: 13, color: C.szary }}>
                 Filtr: <strong style={{ color: C.czarny }}>{filtr}</strong> ·{" "}
-                <span onClick={() => setFiltr("")} style={{ color: "#1668C7", cursor: "pointer", textDecoration: "underline" }}>pokaż wszystkie</span>
+                <span onClick={() => setFiltr("")} style={{ color: C.zoltyDeep, fontWeight: 600, cursor: "pointer", textDecoration: "underline" }}>pokaż wszystkie</span>
               </div>
             )}
 
-            {/* 2) Lista raportów */}
-            <div style={{ background: C.bialy, border: `1px solid ${C.linia}`, borderRadius: 10, overflow: "hidden" }}>
-              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13.5 }}>
-                <thead>
-                  <tr style={{ background: C.czarny }}>
-                    <th style={thArch}>Nr</th>
-                    <th style={{ ...thArch, textAlign: "left" }}>Budowa</th>
-                    <th style={thArch}>Okres</th>
-                    <th style={thArch}>Data</th>
-                    <th style={{ ...thArch, textAlign: "left" }}>Opracował</th>
-                    <th style={thArch}>Status</th>
-                    <th style={thArch}></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {widoczne.map((r) => {
-                    const st = statusInwestycji(r);
-                    return (
-                      <tr key={r.id} style={{ borderTop: `1px solid ${C.linia}` }}>
-                        <td style={{ ...tdArch, fontWeight: 800, textAlign: "center" }}>{r.numer}</td>
-                        <td style={{ ...tdArch, fontWeight: 600 }}>{r.nazwaProjektu}</td>
-                        <td style={{ ...tdArch, textAlign: "center", whiteSpace: "nowrap" }}>
-                          {r.okres_od ? `${fmtPL(r.okres_od)} – ${fmtPL(r.okres_do)}` : "—"}
-                        </td>
-                        <td style={{ ...tdArch, textAlign: "center", whiteSpace: "nowrap" }}>{r.data_opracowania ? fmtPL(r.data_opracowania) : "—"}</td>
-                        <td style={tdArch}>{r.opracowal || "—"}</td>
-                        <td style={{ ...tdArch, textAlign: "center" }}>
-                          <span style={{ display: "inline-block", width: 11, height: 11, borderRadius: "50%", background: st.kolor }} title={st.txt} />
-                        </td>
-                        <td style={{ ...tdArch }}>
-                          <div style={{ display: "flex", flexWrap: "wrap", gap: 6, justifyContent: "flex-end", alignItems: "center" }}>
-                            {mozeEdytowac && mozeEdytowac(r) && (() => {
-                              const h = godzinyDoEdycji && godzinyDoEdycji(r);
-                              return (
-                                <>
-                                  <button onClick={() => onEdytuj(r.id)} style={{ ...miniBtn, background: C.bialy, border: `1px solid ${C.linia}`, fontWeight: 600 }}>Edytuj</button>
-                                  {h != null && (
-                                    <span style={{ fontSize: 11, color: C.szary, whiteSpace: "nowrap" }} title="Czas, przez jaki możesz jeszcze edytować ten raport">zostało ~{h}h</span>
-                                  )}
-                                </>
-                              );
-                            })()}
-                            <button onClick={() => onOtworz(r.id)} title="Podgląd raportu — stamtąd zapiszesz PDF lub wygenerujesz link do raportu" style={{ ...miniBtn, background: C.zolty, border: "none", fontWeight: 700 }}>Otwórz</button>
-                            {jestAdmin && onPozwolEdycje && (() => {
-                              const aktywne = r.edycja_do && new Date(r.edycja_do).getTime() > Date.now();
-                              if (aktywne) {
-                                const h = Math.max(1, Math.ceil((new Date(r.edycja_do).getTime() - Date.now()) / (3600 * 1000)));
-                                return (
-                                  <>
-                                    <span style={{ fontSize: 11, color: "#1B7A3D", whiteSpace: "nowrap" }} title="Edycja odblokowana — autor i przypisani PM mogą edytować">edycja otwarta ~{h}h</span>
-                                    <button onClick={() => onPozwolEdycje(r)} title="Przedłuż okno edycji o kolejne 24h" style={{ ...miniBtn, background: C.bialy, border: `1px solid ${C.linia}`, fontWeight: 600 }}>Przedłuż</button>
-                                    <button onClick={() => onCofnijEdycje(r)} title="Zamknij okno edycji od razu" style={{ ...miniBtn, background: C.bialy, border: `1px solid ${C.linia}`, fontWeight: 600 }}>Cofnij</button>
-                                  </>
-                                );
-                              }
-                              return (
-                                <button onClick={() => onPozwolEdycje(r)} title="Odblokuj edycję tego raportu na 24h — dla autora i PM przypisanych do budowy" style={{ ...miniBtn, background: C.bialy, border: `1px solid ${C.linia}`, fontWeight: 600 }}>Pozwól na edycję</button>
-                              );
-                            })()}
-                            {jestAdmin && onUsun && (
-                              <button onClick={() => onUsun(r)} title="Usuń raport wraz ze zdjęciami (nieodwracalne)"
-                                style={{ ...miniBtn, background: C.bialy, border: `1px solid ${C.czerwony}`, color: C.czerwony, fontWeight: 600 }}>
-                                Usuń
-                              </button>
+            {/* 2) Lista raportów — wiersze w stylu abyard.com (numbadge + meta mono + postęp + chip) */}
+            <div style={{ background: C.bialy, border: `1px solid ${C.linia}`, borderRadius: 10, padding: "4px 20px" }}>
+              {widoczne.map((r, idx) => {
+                const st = statusInwestycji(r);
+                const postep = sredniPostep(r.harmonogram);
+                const meta = [
+                  r.okres_od ? `${fmtPL(r.okres_od)} – ${fmtPL(r.okres_do)}` : null,
+                  r.data_opracowania ? fmtPL(r.data_opracowania) : null,
+                  r.opracowal || null,
+                ].filter(Boolean).join(" · ");
+                return (
+                  <div key={r.id} style={{ display: "flex", alignItems: "center", gap: 16, padding: "15px 4px", borderBottom: idx === widoczne.length - 1 ? "none" : `1px solid ${C.linia}`, flexWrap: "wrap" }}>
+                    <div style={{ fontFamily: "'Roboto', system-ui, sans-serif", fontWeight: 900, fontSize: 22, color: C.czarny, width: 66, flexShrink: 0 }}>
+                      <span style={{ color: C.zolty }}>/</span>{String(r.numer).padStart(3, "0")}
+                    </div>
+                    <div style={{ flex: "1 1 200px", minWidth: 0 }}>
+                      <div style={{ fontWeight: 700, fontSize: 15, color: C.czarny }}>{r.nazwaProjektu}</div>
+                      <div style={{ fontFamily: C.mono, fontSize: 10.5, color: C.szary2, marginTop: 3, letterSpacing: "0.02em", textTransform: "uppercase" }}>{meta || "—"}</div>
+                    </div>
+                    {postep !== null && <PasekPostepu proc={postep} etykieta="zaawansowanie" szer={120} />}
+                    <Chip wariant={st.wariant} title={st.txt}>{st.wariant === "warn" ? "Zagrożenie" : st.wariant === "ok" ? "Niezagrożony" : st.txt}</Chip>
+                    <div className="arow-act" style={{ display: "flex", flexWrap: "wrap", gap: 6, justifyContent: "flex-end", alignItems: "center", flexShrink: 0 }}>
+                      {mozeEdytowac && mozeEdytowac(r) && (() => {
+                        const h = godzinyDoEdycji && godzinyDoEdycji(r);
+                        return (
+                          <>
+                            <button onClick={() => onEdytuj(r.id)} style={{ ...miniBtn, background: C.bialy, border: `1px solid ${C.linia}`, fontWeight: 600 }}>Edytuj</button>
+                            {h != null && (
+                              <span style={{ fontFamily: C.mono, fontSize: 10, color: C.szary, whiteSpace: "nowrap" }} title="Czas, przez jaki możesz jeszcze edytować ten raport">~{h}h</span>
                             )}
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+                          </>
+                        );
+                      })()}
+                      <button onClick={() => onOtworz(r.id)} title="Podgląd raportu — stamtąd zapiszesz PDF lub wygenerujesz link do raportu" style={{ ...miniBtn, background: C.zolty, border: "none", fontWeight: 700 }}>Otwórz</button>
+                      {jestAdmin && onPozwolEdycje && (() => {
+                        const aktywne = r.edycja_do && new Date(r.edycja_do).getTime() > Date.now();
+                        if (aktywne) {
+                          const h = Math.max(1, Math.ceil((new Date(r.edycja_do).getTime() - Date.now()) / (3600 * 1000)));
+                          return (
+                            <>
+                              <span style={{ fontFamily: C.mono, fontSize: 10, color: "#1B7A3D", whiteSpace: "nowrap" }} title="Edycja odblokowana — autor i przypisani PM mogą edytować">otwarta ~{h}h</span>
+                              <button onClick={() => onPozwolEdycje(r)} title="Przedłuż okno edycji o kolejne 24h" style={{ ...miniBtn, background: C.bialy, border: `1px solid ${C.linia}`, fontWeight: 600 }}>Przedłuż</button>
+                              <button onClick={() => onCofnijEdycje(r)} title="Zamknij okno edycji od razu" style={{ ...miniBtn, background: C.bialy, border: `1px solid ${C.linia}`, fontWeight: 600 }}>Cofnij</button>
+                            </>
+                          );
+                        }
+                        return (
+                          <button onClick={() => onPozwolEdycje(r)} title="Odblokuj edycję tego raportu na 24h — dla autora i PM przypisanych do budowy" style={{ ...miniBtn, background: C.bialy, border: `1px solid ${C.linia}`, fontWeight: 600 }}>Pozwól na edycję</button>
+                        );
+                      })()}
+                      {jestAdmin && onUsun && (
+                        <button onClick={() => onUsun(r)} title="Usuń raport wraz ze zdjęciami (nieodwracalne)"
+                          style={{ ...miniBtn, background: C.bialy, border: `1px solid ${C.czerwony}`, color: C.czerwony, fontWeight: 600 }}>
+                          Usuń
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
             </div>
             <div style={{ marginTop: 12, fontSize: 12, color: C.szary, textAlign: "right" }}>
               Raportów w archiwum: {widoczne.length}{filtr ? ` (z ${lista.length})` : ""}
@@ -3417,7 +3567,7 @@ function PanelLinkow({ raportId, jestAdmin }) {
 
   const aktywny = (l) => !l.wylaczony;
   const statusLinku = (l) => l.wylaczony
-    ? { txt: "unieważniony", kolor: "#B22" }
+    ? { txt: "unieważniony", kolor: "#C0392B" }
     : { txt: "aktywny", kolor: "#1B7A3D" };
 
   return (
@@ -3632,33 +3782,45 @@ function maTresc(html) {
   return html.replace(/<[^>]*>/g, "").replace(/&nbsp;/gi, " ").replace(/\s+/g, "").length > 0;
 }
 
-const PDF_KOL = { czarny: "#1A1A1A", zolty: "#FBC707", szary: "#6B6B6B", linia: "#E0DDD4", zoltyJasny: "#FFF6D6", czerwony: "#B22222" };
+// Paleta redesignu (spójna z abyard.com): ciepła czerń + złocisty amber jako
+// jedyny akcent, ciepłe hairline'y, kolory semantyczne dla stanu.
+const PDF_KOL = {
+  ink: "#0F0F0E", ink2: "#191917", czarny: "#0F0F0E",
+  zolty: "#F2A900", zoltyBright: "#FBC441", zoltyDeep: "#C8880B", zoltyJasny: "#FFF6DF",
+  szary: "#6E6A62", szary2: "#9A958B", linia: "#E4E1D9",
+  czerwony: "#C0392B", zielony: "#1B7A3D", stopka: "#FBF3DF",
+};
 const PDF_SZER = 515; // szerokość treści A4 przy marginesach 40
 
-function pdfNaglowekSekcji(tytul) {
+// Overline sekcji: „/ TYTUŁ" w monospace (amber) + cienki hairline pod spodem.
+// idx — opcjonalny podpis po prawej (numer sekcji / etykieta, np. „TYS. ZŁ").
+function overlineStack(tytul, idx, width) {
+  return [
+    { columns: [
+      { text: [{ text: "/ ", color: PDF_KOL.zolty, bold: true }, { text: String(tytul).toUpperCase(), color: PDF_KOL.zoltyDeep }], font: "Mono", fontSize: 11.5, characterSpacing: 1.2, width: "*" },
+      idx ? { text: String(idx), font: "Mono", fontSize: 10, color: PDF_KOL.szary2, alignment: "right", width: "auto", margin: [0, 3, 0, 0] } : {},
+    ] },
+    { canvas: [{ type: "line", x1: 0, y1: 4, x2: width || PDF_SZER, y2: 4, lineWidth: 0.8, lineColor: PDF_KOL.linia }], margin: [0, 4, 0, 0] },
+  ];
+}
+
+function pdfNaglowekSekcji(tytul, idx) {
   return {
     // headlineLevel — używane przez pageBreakBefore, by nagłówek nie został
     // sam na dole strony (przenosimy go wtedy na następną, do swojej treści).
     headlineLevel: 1,
-    table: { widths: [6, "*"], body: [[
-      { text: "", fillColor: PDF_KOL.zolty, border: [false, false, false, false] },
-      { text: tytul.toUpperCase(), fillColor: PDF_KOL.czarny, color: "#FFFFFF", font: "RobotoBlack", fontSize: 11, characterSpacing: 1.2, margin: [8, 5, 8, 5], border: [false, false, false, false] },
-    ]] },
-    layout: "noBorders",
-    margin: [0, 16, 0, 6],
+    stack: overlineStack(tytul, idx),
+    margin: [0, 22, 0, 10],
   };
 }
 
-// Nagłówek sekcji jako KOMÓRKA (żółty pasek + czarna belka) do zagnieżdżenia
-// w tabeli keepWithHeaderRows — używane przez pdfSekcjaTekst.
-function pdfNaglowekKomorka(tytul) {
+// Nagłówek sekcji jako KOMÓRKA (overline) do zagnieżdżenia w tabeli
+// keepWithHeaderRows — używane przez pdfSekcjaTekst / pushSekcjaTabela.
+function pdfNaglowekKomorka(tytul, idx) {
   return {
-    table: { widths: [6, "*"], body: [[
-      { text: "", fillColor: PDF_KOL.zolty, border: [false, false, false, false] },
-      { text: tytul.toUpperCase(), fillColor: PDF_KOL.czarny, color: "#FFFFFF", font: "RobotoBlack", fontSize: 11, characterSpacing: 1.2, margin: [8, 5, 8, 5], border: [false, false, false, false] },
-    ]] },
-    layout: "noBorders",
     border: [false, false, false, false],
+    stack: overlineStack(tytul, idx),
+    margin: [0, 0, 0, 2],
   };
 }
 
@@ -3698,7 +3860,7 @@ function pdfSekcjaTekst(content, tytul, val) {
 // body[0] = wiersz nagłówka kolumn; body[1..] = dane (+ podsumowanie).
 function pushSekcjaTabela(content, tytul, widths, body, layout) {
   const n = widths.length;
-  const naglRow = [{ ...pdfNaglowekKomorka(tytul), colSpan: n, fillColor: PDF_KOL.czarny }];
+  const naglRow = [{ ...pdfNaglowekKomorka(tytul), colSpan: n }];
   for (let i = 1; i < n; i++) naglRow.push({});
   const colH = body[0];
   const dane = body.slice(1);
@@ -3715,7 +3877,7 @@ function pushSekcjaTabela(content, tytul, widths, body, layout) {
 }
 
 async function pdfHarmonogram(content, form) {
-  const { czarny, zolty, linia } = PDF_KOL;
+  const { ink, zolty, zoltyBright, zoltyJasny, szary, szary2, linia, czerwony, zielony, stopka } = PDF_KOL;
   if (form.harmonogramObrazy && form.harmonogramObrazy.length > 0) {
     content.push(pdfNaglowekSekcji("Harmonogram budowy"));
     for (const o of form.harmonogramObrazy) {
@@ -3727,27 +3889,36 @@ async function pdfHarmonogram(content, form) {
   const wiersze = (form.harmonogram || []).map((r, idx) => ({ ...r, nr: idx + 1 }))
     .filter((r) => { const ef = efektywnyWiersz(r); return ef.start || ef.koniec || ef.rzecz || ef.proc !== ""; });
   if (wiersze.length === 0) return;
-  const th = (t, al) => ({ text: t, fillColor: czarny, color: zolty, bold: true, fontSize: 8, alignment: al || "center", margin: [2, 3, 2, 3] });
-  const c = (t, o = {}) => ({ text: t, fontSize: 8, alignment: o.al || "center", bold: o.bold, color: o.color, fillColor: o.fill, margin: [2, 2, 2, 2] });
-  const body = [[th("#"), th("Zadanie", "left"), th("Start (umowa)"), th("Koniec (umowa)"), th("Koniec (progn./rzecz.)"), th("% wyk."), th("Opóźnienie")]];
+
+  // Kolumna „Progn./rzecz." (kluczowa data) wyróżniona: amber-band + pogrubienie.
+  // Daty umowne (Start/Koniec) przygaszone na szaro, żeby się cofnęły — inaczej
+  // trzy identyczne kolumny dat zlewały się w oczach.
+  const th = (t, al, col) => ({ text: String(t).toUpperCase(), font: "Mono", fontSize: 7, color: col || "#FFFFFF", fillColor: ink, alignment: al || "left", margin: [3, 7, 3, 7], border: [false, false, false, false] });
+  const dot = { text: "●", font: "Mono", color: zolty, fontSize: 5.5 };
+  const umowa = (t) => ({ text: t, font: "Mono", fontSize: 7, color: szary2, alignment: "center", margin: [3, 7, 3, 7] });
+  const rzeczCell = (t, main) => ({ text: t, font: "Mono", fontSize: 7.5, bold: true, color: main ? ink : "#6B6552", alignment: "center", fillColor: zoltyJasny, margin: [3, 7, 3, 7] });
+
+  const body = [[ th("#", "left"), th("Zadanie", "left"), th("Start", "center"), th("Koniec um.", "center"), th("Progn./rzecz.", "center", zoltyBright), th("%", "right"), th("Opóźn.", "right") ]];
   for (const r of wiersze) {
     const ef = efektywnyWiersz(r);
     const op = obliczOpoznienie(ef, form.dataOpracowania);
+    const pctN = parseInt(ef.proc, 10);
     const pod = maPodpozycje(r) ? r.pod.filter((p) => p && (p.zadanie || p.start || p.koniec || p.rzecz || p.proc)) : [];
-    const fill = pod.length ? "#F3F0E8" : undefined;
     body.push([
-      c(String(r.nr), { bold: true, fill }), c(r.zadanie || "—", { al: "left", bold: true, fill }),
-      c(fmtPL(ef.start) || "—", { fill }), c(fmtPL(ef.koniec) || "—", { fill }),
-      c(fmtPL(ef.rzecz) || "—", { bold: !!ef.rzecz, fill }), c(ef.proc !== "" ? `${ef.proc}%` : "—", { bold: true, fill }),
-      c(op || "—", { bold: !!op, color: op ? "#B22" : undefined, fill }),
+      { text: String(r.nr), font: "Mono", fontSize: 7.5, color: ink, margin: [3, 7, 3, 7] },
+      { text: [dot, { text: "  " + (r.zadanie || "—"), bold: true, color: ink, font: "Roboto" }], fontSize: 8.5, margin: [3, 6, 3, 6] },
+      umowa(fmtPL(ef.start) || "—"), umowa(fmtPL(ef.koniec) || "—"), rzeczCell(fmtPL(ef.rzecz) || "—", true),
+      { text: ef.proc !== "" ? `${ef.proc}%` : "—", font: "Mono", fontSize: 7, bold: true, color: (ef.proc !== "" && pctN >= 100) ? zielony : ink, alignment: "right", margin: [3, 7, 3, 7] },
+      { text: op || "—", font: "Mono", fontSize: 7, bold: !!op, color: op ? czerwony : zielony, alignment: "right", margin: [3, 7, 3, 7] },
     ]);
     for (let j = 0; j < pod.length; j++) {
-      const p = pod[j]; const opP = obliczOpoznienie(p, form.dataOpracowania);
+      const p = pod[j]; const opP = obliczOpoznienie(p, form.dataOpracowania); const ppN = parseInt(p.proc, 10);
       body.push([
-        c(`${r.nr}.${j + 1}`, { color: "#999" }), c(p.zadanie || "—", { al: "left", color: "#444" }),
-        c(fmtPL(p.start) || "—", { color: "#444" }), c(fmtPL(p.koniec) || "—", { color: "#444" }),
-        c(fmtPL(p.rzecz) || "—", { color: "#444" }), c((p.proc !== "" && p.proc != null) ? `${p.proc}%` : "—", { color: "#444" }),
-        c(opP || "—", { color: opP ? "#B22" : "#444" }),
+        { text: `${r.nr}.${j + 1}`, font: "Mono", fontSize: 6.5, color: szary2, margin: [3, 7, 3, 7] },
+        { text: p.zadanie || "—", fontSize: 7.5, color: szary, margin: [14, 6, 3, 6] },
+        umowa(fmtPL(p.start) || "—"), umowa(fmtPL(p.koniec) || "—"), rzeczCell(fmtPL(p.rzecz) || "—", false),
+        { text: (p.proc !== "" && p.proc != null) ? `${p.proc}%` : "—", font: "Mono", fontSize: 7, color: (p.proc !== "" && ppN >= 100) ? zielony : szary, alignment: "right", margin: [3, 7, 3, 7] },
+        { text: opP || "—", font: "Mono", fontSize: 7, bold: !!opP, color: opP ? czerwony : zielony, alignment: "right", margin: [3, 7, 3, 7] },
       ]);
     }
   }
@@ -3756,49 +3927,65 @@ async function pdfHarmonogram(content, form) {
   const dataMin = starty.sort()[0] || ""; const dataMax = konce.sort()[konce.length - 1] || "";
   const opoz = opoznienieInwestycji(form.harmonogram, form.dataOpracowania);
   const maKwoty = harmonogramMaKwoty(form.harmonogram); const sumaKwot = sumaWartosciUmowy(form.harmonogram);
-  const sc = (t, o = {}) => ({ text: t, fontSize: 8, bold: o.bold !== false, fillColor: "#F3F0E8", alignment: o.al || "center", color: o.color, margin: [2, 3, 2, 3] });
+  const sf = (t, o = {}) => ({ text: t, font: o.font || "Mono", fontSize: o.fs || 7.5, bold: o.bold !== false, fillColor: stopka, alignment: o.al || "center", color: o.color, margin: [3, 8, 3, 8] });
   body.push([
-    sc("Σ"), sc(`PODSUMOWANIE${maKwoty ? ` · wartość umowy: ${Math.round(sumaKwot).toLocaleString("pl-PL")} zł` : ""}`, { al: "left" }),
-    sc(fmtPL(dataMin) || "—", { bold: false }), { ...sc(fmtPL(dataMax) || "—", { bold: false }), colSpan: 2 }, {},
-    sc(""), sc(opoz ? (opoz.dni > 0 ? `${opoz.dni} dni` : "brak") : "—", { color: opoz && opoz.dni > 0 ? "#B22" : undefined }),
+    sf("Σ", { fs: 8 }),
+    sf(`PODSUMOWANIE INWESTYCJI${maKwoty ? ` · ${Math.round(sumaKwot).toLocaleString("pl-PL")} zł` : ""}`, { font: "Roboto", fs: 8.5, al: "left" }),
+    sf(fmtPL(dataMin) || "—", { bold: false, fs: 7 }),
+    { ...sf(fmtPL(dataMax) || "—", { bold: false, fs: 7 }), colSpan: 2 }, {},
+    sf(""), sf(opoz ? (opoz.dni > 0 ? `${opoz.dni} dni` : "brak") : "—", { color: opoz && opoz.dni > 0 ? czerwony : zielony }),
   ]);
-  // Kolumny: „#" 24 pt (podpozycje 3.10+ w jednym wierszu), daty 52/52/54
-  // („15.06.2026" bez łamania), „Opóźnienie" 50 pt (nagłówek bez łamania słowa).
-  // Nagłówek sekcji trwale związany z początkiem tabeli (nie osieroca się).
-  pushSekcjaTabela(content, "Harmonogram budowy", [24, "*", 52, 52, 54, 26, 50], body, { hLineColor: () => linia, vLineColor: () => linia, hLineWidth: () => 0.5, vLineWidth: () => 0.5 });
+  // Overline sekcji + pojedyncza tabela z headerRows:1 — nagłówek kolumn
+  // powtarza się na kolejnych stronach, bez duplikatu-paska w środku tabeli.
+  content.push(pdfNaglowekSekcji("Harmonogram budowy"));
+  content.push({ table: { headerRows: 1, widths: [24, "*", 52, 52, 56, 28, 46], body }, layout: {
+    hLineColor: () => linia, vLineColor: () => linia, hLineWidth: (i) => (i === 1 ? 0 : 0.5), vLineWidth: () => 0,
+    paddingLeft: () => 0, paddingRight: () => 0, paddingTop: () => 0, paddingBottom: () => 0,
+  }, margin: [0, 2, 0, 0] });
 }
 
 function pdfCashflow(content, form) {
-  const { czarny, zolty, szary } = PDF_KOL;
+  const { ink, zolty, zoltyBright, zoltyJasny, szary2, linia } = PDF_KOL;
   if (!harmonogramMaKwoty(form.harmonogram)) return;
   const m = macierzCashflow(form.harmonogram);
   if (!m.zadania.length || !m.miesiace.length) return;
   const { miesiace, zadania, sumaMies, sumaNaras, sumaCalosc } = m;
   const nM = miesiace.length;
   const wTys = nM > 10;                       // ten sam próg co w podglądzie HTML (sekcja cashflow)
-  const fs = nM > 18 ? 5.5 : nM > 12 ? 6.5 : nM > 8 ? 7.5 : 8.5;
-  const fmtZ = (n) => !n ? "" : (wTys ? Math.round(n / 1000).toLocaleString("pl-PL") : Math.round(n).toLocaleString("pl-PL"));
-  const tytulCash = `Harmonogram przepływów finansowych — sprzedaż${wTys ? " (kwoty w tys. zł)" : ""}`;
-  const th = (t, al) => ({ text: t, fillColor: czarny, color: zolty, bold: true, fontSize: fs, alignment: al || "right", margin: [1, 2, 1, 2] });
-  const thm = (t) => ({ text: t, fillColor: "#3A3A3A", color: "#FFFFFF", bold: true, fontSize: fs, alignment: "right", margin: [1, 2, 1, 2] });
-  const c = (t, o = {}) => ({ text: t, fontSize: fs, alignment: o.al || "right", fillColor: o.fill, color: o.color, bold: o.bold, margin: [1, 1, 1, 1] });
-  const body = [[th("Zadanie", "left"), th("Netto"), th("Start", "center"), th("Koniec", "center"), ...miesiace.map((mi) => thm(mi.etykieta))]];
+  // Strona cashflow w POZIOMIE (landscape) — szeroka tabela finansowa (nawet 30+
+  // miesięcy przy budowach 2–3 letnich) mieści się z zapasem i czytelnym fontem.
+  // Kolumny STAŁE (bez „*"), font wiązany z szerokością kolumny.
+  const CW_L = 762;                            // szerokość treści A4 poziomo (842 − 2·40)
+  const fixZ = 120, fixN = 44, fixS = 30, fixK = 30;
+  const monthW = Math.max(12, Math.min(70, Math.floor((CW_L - fixZ - fixN - fixS - fixK - 20) / nM)));
+  const fs = Math.max(5, Math.min(9, (monthW - 1) / 2.35));
+  // W trybie „tys. zł" bez separatora tysięcy — spacja łamała liczby w wąskich
+  // kolumnach (przy wielu miesiącach). noWrap na komórkach liczbowych/datowych
+  // gwarantuje jedną linię (nazwa zadania nadal się zawija).
+  const fmtZ = (n) => !n ? "" : (wTys ? String(Math.round(n / 1000)) : Math.round(n).toLocaleString("pl-PL"));
+  const fmtMY = (iso) => { if (!iso) return "—"; const p = String(iso).split("-"); return p.length >= 2 ? `${p[1]}.${p[0].slice(2)}` : (fmtPL(iso) || "—"); };
+  const tytulCash = `Harmonogram przepływów finansowych — sprzedaż${wTys ? " (tys. zł)" : ""}`;
+  const th = (t, al, col) => ({ text: t, font: "Mono", fillColor: ink, color: col || "#FFFFFF", fontSize: fs, alignment: al || "right", noWrap: al !== "left", margin: [1, 6, 1, 6], border: [false, false, false, false] });
+  const c = (t, o = {}) => ({ text: t, font: "Mono", fontSize: fs, alignment: o.al || "right", noWrap: o.al !== "left", fillColor: o.fill, color: o.color, bold: o.bold, margin: [1, 5, 1, 5] });
+  // Nagłówki miesięcy dwuwierszowo („10" nad „24") — mieszczą się w wąskich kolumnach.
+  const thM = (mi) => ({ text: String(mi.etykieta).replace(".", "\n"), font: "Mono", fillColor: ink, color: zoltyBright, fontSize: fs, alignment: "center", lineHeight: 0.95, margin: [1, 4, 1, 4], border: [false, false, false, false] });
+  const body = [[th("Zadanie", "left"), th("Netto", "right", zoltyBright), th("Start", "center", zoltyBright), th("Koniec", "center", zoltyBright), ...miesiace.map(thM)]];
   for (const z of zadania) {
     body.push([
-      c(z.nazwa, { al: "left" }), c(fmtZ(z.kwota)),
-      c(z.start ? fmtPL(z.start) : "—", { al: "center", color: szary }), c(z.koniec ? fmtPL(z.koniec) : "—", { al: "center", color: szary }),
-      ...miesiace.map((mi) => { const v = z.komorki[mi.klucz]; return c(v ? fmtZ(v) : "–", { fill: v ? "#FFF9E6" : undefined }); }),
+      c(z.nazwa, { al: "left", color: "#26251F" }), c(fmtZ(z.kwota), { color: "#26251F" }),
+      c(fmtMY(z.start), { al: "center", color: szary2 }), c(fmtMY(z.koniec), { al: "center", color: szary2 }),
+      ...miesiace.map((mi) => { const v = z.komorki[mi.klucz]; return c(v ? fmtZ(v) : "–", { fill: v ? zoltyJasny : undefined, color: v ? "#26251F" : szary2 }); }),
     ]);
   }
   body.push([c("RAZEM mies.", { al: "left", bold: true, fill: "#F3F0E8" }), c(fmtZ(sumaCalosc), { bold: true, fill: "#F3F0E8" }), c("", { fill: "#F3F0E8" }), c("", { fill: "#F3F0E8" }), ...miesiace.map((mi) => c(fmtZ(sumaMies[mi.klucz]), { bold: true, fill: "#F3F0E8" }))]);
-  body.push([c("Narastająco", { al: "left", bold: true, fill: zolty }), c("", { fill: zolty }), c("", { fill: zolty }), c("", { fill: zolty }), ...miesiace.map((mi) => c(fmtZ(sumaNaras[mi.klucz]), { bold: true, fill: zolty }))]);
-  // Szerokość kolumny miesiąca: wypełnia miejsce po kolumnach stałych, ale z
-  // GÓRNYM limitem — przy małej liczbie miesięcy bez limitu kolumny robiły się
-  // ogromne i tabela wychodziła poza prawy margines strony. Rezerwa 170 pt na
-  // „Zadanie" (*) + Netto/Start/Koniec; nadmiar miejsca chłonie kolumna „*".
-  const monthW = Math.max(13, Math.min(64, Math.floor((PDF_SZER - 180) / nM)));
-  const widths = ["*", 40, 30, 30, ...miesiace.map(() => monthW)];
-  pushSekcjaTabela(content, tytulCash, widths, body, { hLineColor: () => "#D9D6CE", vLineColor: () => "#D9D6CE", hLineWidth: () => 0.4, vLineWidth: () => 0.4 });
+  body.push([c("Narastająco", { al: "left", bold: true, fill: zolty, color: ink }), c("", { fill: zolty }), c("", { fill: zolty }), c("", { fill: zolty }), ...miesiace.map((mi) => c(fmtZ(sumaNaras[mi.klucz]), { bold: true, fill: zolty, color: ink }))]);
+  const widths = [fixZ, fixN, fixS, fixK, ...miesiace.map(() => monthW)];
+  // Overline sekcji na osobnej stronie POZIOMEJ (hairline na pełną szerokość landscape).
+  content.push({ headlineLevel: 1, stack: overlineStack(tytulCash, null, CW_L), margin: [0, 0, 0, 10], pageBreak: "before", pageOrientation: "landscape" });
+  content.push({ table: { headerRows: 1, widths, body }, layout: {
+    hLineColor: () => linia, vLineColor: () => linia, hLineWidth: (i) => (i === 1 ? 0 : 0.4), vLineWidth: () => 0.3,
+    paddingLeft: () => 0, paddingRight: () => 0, paddingTop: () => 0, paddingBottom: () => 0,
+  }, margin: [0, 2, 0, 0] });
 }
 
 // Wysokość obszaru druku A4 po marginesach (~757 pt) i przybliżone wysokości
@@ -3807,6 +3994,13 @@ function pdfCashflow(content, form) {
 const FOTO_USABLE_H = 750;
 const FOTO_HEADER_H = 54;
 const FOTO_CAPTION_H = 22;
+
+// Podpis pod zdjęciem: mono „FOT. NN" (amber) + opcjonalny opis użytkownika.
+function fotoPodpis(nr, opis) {
+  const label = { text: "FOT. " + String(nr).padStart(2, "0"), font: "Mono", fontSize: 8, color: PDF_KOL.zoltyDeep, characterSpacing: 1 };
+  if (!opis) return { ...label, margin: [0, 4, 0, 6] };
+  return { columns: [ { ...label, width: "auto", margin: [0, 1, 0, 0] }, { text: opis, fontSize: 9.5, bold: true, color: "#26251F", width: "*", margin: [8, 0, 0, 0] } ], margin: [0, 4, 0, 6] };
+}
 
 async function pdfZdjecia(content, form) {
   if (!form.zdjecia || form.zdjecia.length === 0) return;
@@ -3820,6 +4014,7 @@ async function pdfZdjecia(content, form) {
   if (bufor.length) strony.push(bufor);
 
   let pierwszaGrupa = true;
+  let fotoNr = 0;
   for (const grupa of strony) {
     // Wczytujemy obrazy z wymiarami (a = proporcja szer./wys.).
     const zdj = [];
@@ -3830,7 +4025,7 @@ async function pdfZdjecia(content, form) {
     if (zdj.length === 0) continue;
 
     const naglowekTu = pierwszaGrupa;
-    const podpisy = zdj.filter((x) => x.z.opis).length;
+    const podpisy = zdj.length; // każde zdjęcie ma teraz podpis „FOT. NN"
     const dostepna = FOTO_USABLE_H - (naglowekTu ? FOTO_HEADER_H : 0) - podpisy * FOTO_CAPTION_H;
 
     const elems = [];
@@ -3844,7 +4039,7 @@ async function pdfZdjecia(content, form) {
       const W = Math.max(120, Math.min(PDF_SZER, Math.floor((dostepna - 24) / sumaOdwrProp)));
       zdj.forEach((x, i) => {
         elems.push({ image: x.im.dataUrl, width: W, alignment: "center", margin: [0, i === 0 ? 6 : 10, 0, 2] });
-        if (x.z.opis) elems.push({ text: x.z.opis, alignment: "center", bold: true, fontSize: 10, margin: [0, 0, 0, 6] });
+        elems.push(fotoPodpis(++fotoNr, x.z.opis));
       });
     } else {
       // Pojedyncze zdjęcie — wyśrodkowane w pionie na stronie.
@@ -3855,12 +4050,13 @@ async function pdfZdjecia(content, form) {
       const wolne = Math.max(0, dostepna - renderH - (x.z.opis ? FOTO_CAPTION_H : 0));
       const gora = Math.min(Math.floor(wolne / 2), 240); // wyśrodkowanie, z limitem bezpieczeństwa
       elems.push({ image: x.im.dataUrl, fit: [PDF_SZER, Math.floor(maxH)], alignment: "center", margin: [0, 6 + gora, 0, 2] });
-      if (x.z.opis) elems.push({ text: x.z.opis, alignment: "center", bold: true, fontSize: 10, margin: [0, 0, 0, 6] });
+      elems.push(fotoPodpis(++fotoNr, x.z.opis));
     }
 
     if (naglowekTu) {
       const nag = pdfNaglowekSekcji("Dokumentacja fotograficzna");
       nag.pageBreak = "before";
+      nag.pageOrientation = "portrait"; // powrót do pionu po poziomym cashflow
       content.push(nag);
       pierwszaGrupa = false;
     } else {
@@ -3872,35 +4068,55 @@ async function pdfZdjecia(content, form) {
 
 // Buduje definicję dokumentu pdfmake z formularza raportu (bez pobierania).
 async function budujDocDefinition(form) {
-  const { czarny, zolty, szary } = PDF_KOL;
+  const { ink, ink2, zolty, zoltyBright, zoltyDeep, szary, szary2, czerwony, zielony } = PDF_KOL;
   const content = [];
 
-  // Nagłówek: logo + kontakt + linia
+  // ——— OKŁADKA (ciemna strona 1, kompozycja wyśrodkowana) ———
+  // Masthead: logo po lewej, kontakt po prawej.
   content.push({ columns: [
-    { text: [{ text: "/", color: zolty }, { text: "Abyard" }], font: "RobotoBlack", fontSize: 18 },
-    { text: "www.abyard.com · biuro@abyard.pl · tel. (12) 431 30 87", alignment: "right", fontSize: 8, color: szary, margin: [0, 6, 0, 0] },
+    { text: [{ text: "/", color: zolty }, { text: "Abyard", color: "#FFFFFF" }], font: "RobotoBlack", fontSize: 20, width: "*" },
+    { text: [{ text: `Kraków, dn. ${fmtPL(form.dataOpracowania) || "—"}\n`, color: szary2 }, { text: "www.abyard.com · biuro@abyard.pl", color: szary2 }], font: "Mono", fontSize: 7.5, alignment: "right", width: "auto", margin: [0, 4, 0, 0] },
   ] });
-  content.push({ canvas: [{ type: "line", x1: 0, y1: 2, x2: PDF_SZER, y2: 2, lineWidth: 2, lineColor: czarny }], margin: [0, 4, 0, 8] });
 
-  content.push({ text: `Kraków, dn. ${fmtPL(form.dataOpracowania) || "—"}`, alignment: "right", italics: true, fontSize: 9, color: szary });
-  content.push({ text: "RAPORT NUMER", alignment: "center", fontSize: 11, bold: true, color: szary, characterSpacing: 3, margin: [0, 8, 0, 0] });
-  content.push({ text: [{ text: "/", color: zolty }, { text: String(form.numer).padStart(3, "0") }], alignment: "center", fontSize: 40, font: "RobotoBlack", margin: [0, 0, 0, 8] });
-  content.push({ table: { widths: ["*"], body: [[{ text: `RAPORT ZA OKRES  ${fmtPL(form.okresOd) || "…"} – ${fmtPL(form.okresDo) || "…"}`, alignment: "center", color: zolty, bold: true, fillColor: czarny, margin: [0, 5, 0, 5], border: [false, false, false, false] }]] }, layout: "noBorders" });
-  content.push({ text: form.projekt || "", alignment: "center", fontSize: 22, font: "RobotoBlack", margin: [0, 14, 0, 2] });
-  if (form.adres) content.push({ text: form.adres, alignment: "center", fontSize: 12, bold: true });
-  if (form.tytulZadania) content.push({ text: `„${form.tytulZadania}”`, alignment: "center", italics: true, fontSize: 10, color: szary, margin: [0, 6, 0, 0] });
+  content.push({ text: "/ RAPORT Z BUDOWY", font: "Mono", fontSize: 9.5, characterSpacing: 2, color: zolty, alignment: "center", margin: [0, 30, 0, 0] });
+  content.push({ text: [{ text: "/", color: zolty }, { text: String(form.numer).padStart(3, "0"), color: "#FFFFFF" }], font: "RobotoBlack", fontSize: 80, lineHeight: 0.9, alignment: "center", margin: [0, 2, 0, 0] });
+  content.push({ text: form.projekt || "", color: "#FFFFFF", font: "RobotoBlack", fontSize: 34, alignment: "center", margin: [0, 6, 0, 0] });
+  if (form.adres) content.push({ text: form.adres, color: zolty, bold: true, fontSize: 12, alignment: "center", margin: [0, 5, 0, 0] });
+  if (form.tytulZadania) content.push({ text: `„${form.tytulZadania}”`, color: "#CBC7BF", italics: true, fontSize: 9, lineHeight: 1.35, alignment: "center", margin: [56, 6, 56, 0] });
 
+  // Ribbon (okres) + badge (status) — wyśrodkowane obok siebie.
+  const st = statusZRaportu({ harmonogram: form.harmonogram, data_opracowania: form.dataOpracowania, podsumowanie: form.podsumowanie });
+  const opozInw = opoznienieInwestycji(form.harmonogram, form.dataOpracowania);
+  const zagrozenie = st.kod === "zagrozenie";
+  const statusTxt = (zagrozenie ? "Zagrożenie terminu" : "Termin niezagrożony") + (opozInw && opozInw.dni > 0 ? ` — ${opozInw.dni} dni` : "");
+  const badgeCell = zagrozenie
+    ? { text: [{ text: "● ", color: czerwony }, { text: statusTxt.toUpperCase(), color: "#F0A79E" }], font: "Mono", fontSize: 8, bold: true, fillColor: "#2A1614", margin: [10, 6, 12, 6], border: [false, false, false, false] }
+    : { text: [{ text: "● ", color: "#57C680" }, { text: statusTxt.toUpperCase(), color: "#7DDBA0" }], font: "Mono", fontSize: 8, bold: true, fillColor: "#142519", margin: [10, 6, 12, 6], border: [false, false, false, false] };
+  content.push({ columns: [
+    { width: "*", text: "" },
+    { width: "auto", table: { body: [[ { text: [{ text: "ZA OKRES   ", color: szary2 }, { text: `${fmtPL(form.okresOd) || "…"} — ${fmtPL(form.okresDo) || "…"}`, color: zoltyBright }], font: "Mono", fontSize: 9, fillColor: ink2, margin: [11, 6, 11, 6], border: [false, false, false, false] } ]] }, layout: "noBorders" },
+    { width: "auto", table: { body: [[ badgeCell ]] }, layout: "noBorders", margin: [10, 0, 0, 0] },
+    { width: "*", text: "" },
+  ], columnGap: 0, margin: [0, 16, 0, 0] });
+
+  // Grafika inwestycji — kadr w ramce (wyśrodkowany) + złota linia.
+  // Brak grafiki → okładka zostaje samą czernią (fallback).
   if (form.grafikaInwestycji && (form.grafikaInwestycji.dataUrl || form.grafikaInwestycji.url)) {
     const g = await przygotujObraz(form.grafikaInwestycji.dataUrl || form.grafikaInwestycji.url);
-    if (g) content.push({ image: g.dataUrl, fit: [PDF_SZER, 300], alignment: "center", margin: [0, 14, 0, 6] });
+    if (g) {
+      content.push({ image: g.dataUrl, fit: [PDF_SZER, 210], alignment: "center", margin: [0, 16, 0, 0] });
+      content.push({ canvas: [{ type: "line", x1: 0, y1: 0, x2: PDF_SZER, y2: 0, lineWidth: 1, lineColor: zolty }], margin: [0, 16, 0, 0] });
+    }
   }
 
-  content.push(pdfNaglowekSekcji("Kluczowe daty"));
-  const linijka = (etk, val) => ({ text: [{ text: etk + " ", bold: true }, { text: val }], fontSize: 11, margin: [0, 1, 0, 1] });
-  content.push(linijka("Rozpoczęcie budowy:", fmtPL(form.rozpoczecie) || "—"));
-  content.push(linijka("Zakończenie robót:", fmtPL(form.zakonczenieRobot) || "—"));
-  content.push(linijka("Pozwolenie na użytkowanie:", form.pnuNieDotyczy ? "Nie dotyczy" : (fmtPL(form.pnu) || "—")));
-  content.push(linijka("Opracował:", form.opracowal || "—"));
+  // Kluczowe daty — wyśrodkowane, 4 kolumny.
+  const dcol = (l, v) => ({ stack: [ { text: String(l).toUpperCase(), font: "Mono", fontSize: 7, color: szary2, alignment: "center" }, { text: v, font: "RobotoBlack", fontSize: 13, color: "#FFFFFF", alignment: "center", margin: [0, 5, 0, 0] } ] });
+  content.push({ columns: [
+    dcol("Rozpoczęcie", fmtPL(form.rozpoczecie) || "—"),
+    dcol("Zakończenie robót", fmtPL(form.zakonczenieRobot) || "—"),
+    dcol("Pozwol. użytkowania", form.pnuNieDotyczy ? "Nie dotyczy" : (fmtPL(form.pnu) || "—")),
+    dcol("Opracował", form.opracowal || "—"),
+  ], columnGap: 12, margin: [0, 16, 0, 0] });
 
   // Strona tytułowa kończy się na kluczowych datach — reszta od nowej strony
   const nagInfo = pdfNaglowekSekcji("Informacje ogólne");
@@ -3908,11 +4124,13 @@ async function budujDocDefinition(form) {
   content.push(nagInfo);
   content.push(htmlBlok(form.infoOgolne));
   if (maTresc(form.opoznienia)) {
-    content.push({ text: "OPÓŹNIENIA I DZIAŁANIA NAPRAWCZE", font: "RobotoBlack", fontSize: 9, characterSpacing: 0.8, margin: [0, 8, 0, 4] });
     content.push({ table: { widths: [3, "*"], body: [[
-      { text: "", fillColor: PDF_KOL.zolty, border: [false, false, false, false] },
-      { ...htmlBlok(form.opoznienia), fillColor: PDF_KOL.zoltyJasny, margin: [10, 6, 10, 6], border: [false, false, false, false] },
-    ]] }, layout: "noBorders" });
+      { text: "", fillColor: zolty, border: [false, false, false, false] },
+      { stack: [
+        { text: "⚠ OPÓŹNIENIA I DZIAŁANIA NAPRAWCZE", font: "Mono", fontSize: 8.5, characterSpacing: 1, color: zoltyDeep, margin: [0, 0, 0, 5] },
+        htmlBlok(form.opoznienia),
+      ], fillColor: "#FFF8EC", margin: [12, 10, 12, 10], border: [false, false, false, false] },
+    ]] }, layout: "noBorders", margin: [0, 12, 0, 0] });
   }
   pdfSekcjaTekst(content, "Wykonawcy prac", form.wykonawcy);
   pdfSekcjaTekst(content, "Przetargi", form.przetargi);
@@ -3921,7 +4139,7 @@ async function budujDocDefinition(form) {
   pdfSekcjaTekst(content, "Teren placu budowy", form.placBudowy);
 
   content.push(pdfNaglowekSekcji("Podsumowanie"));
-  content.push({ table: { widths: [4, "*"], body: [[{ text: "", fillColor: zolty, border: [false, false, false, false] }, { text: form.podsumowanie || "—", bold: true, fontSize: 11, margin: [10, 2, 0, 2], border: [false, false, false, false] }]] }, layout: "noBorders" });
+  content.push({ table: { widths: [4, "*"], body: [[{ text: "", fillColor: zolty, border: [false, false, false, false] }, { text: form.podsumowanie || "—", font: "RobotoBlack", fontSize: 14, lineHeight: 1.3, color: ink, margin: [16, 2, 0, 2], border: [false, false, false, false] }]] }, layout: "noBorders" });
 
   await pdfHarmonogram(content, form);
   pdfCashflow(content, form);
@@ -3933,8 +4151,10 @@ async function budujDocDefinition(form) {
   const MIN_MIEJSCE_NAGL = 80;
   return {
     pageSize: "A4",
-    pageMargins: [40, marginesGora, 40, 45],
-    defaultStyle: { font: "Roboto", fontSize: 10, color: czarny, lineHeight: 1.25 },
+    pageMargins: [40, marginesGora, 40, 40],
+    defaultStyle: { font: "Roboto", fontSize: 10, color: ink, lineHeight: 1.25 },
+    // Strona 1 (okładka) ma ciepłe, prawie-czarne tło jak hero na abyard.com.
+    background: (page) => page === 1 ? { canvas: [{ type: "rect", x: 0, y: 0, w: 595.28, h: 841.89, color: ink }] } : null,
     content,
     // Nagłówek sekcji (headlineLevel:1) nie może zostać sam na dole strony ani
     // rozłamać się (samo tło belki na jednej stronie, tekst na drugiej).
@@ -3948,7 +4168,7 @@ async function budujDocDefinition(form) {
       const pozostaje = (marginesGora + cur.startPosition.pageInnerHeight) - cur.startPosition.top;
       return pozostaje < MIN_MIEJSCE_NAGL;
     },
-    footer: (cur, total) => ({ text: `${cur} / ${total}`, alignment: "center", fontSize: 8, color: szary, margin: [0, 6, 0, 0] }),
+    footer: (cur, total) => cur === 1 ? null : ({ text: `${cur} / ${total}`, alignment: "center", font: "Mono", fontSize: 7.5, color: szary2, margin: [0, 8, 0, 0] }),
   };
 }
 
@@ -3991,8 +4211,13 @@ function PodgladPDF({ form, onBack, nazwaPliku, raportId, publiczny, jestAdmin }
       setPobieranie(false);
     }
   }
+  // Status inwestycji (okładka) — ta sama logika co eksport PDF.
+  const stMeta = statusZRaportu({ harmonogram: form.harmonogram, data_opracowania: form.dataOpracowania, podsumowanie: form.podsumowanie });
+  const opozInw = opoznienieInwestycji(form.harmonogram, form.dataOpracowania);
+  const zagrozenie = stMeta.kod === "zagrozenie";
+  const statusTxt = (zagrozenie ? "Zagrożenie terminu" : "Termin niezagrożony") + (opozInw && opozInw.dni > 0 ? ` — ${opozInw.dni} dni` : "");
   return (
-    <div style={{ background: "#888", minHeight: "100vh", fontFamily: "'Segoe UI', system-ui, sans-serif" }}>
+    <div style={{ background: "#2A2926", minHeight: "100vh", fontFamily: "'Segoe UI', system-ui, sans-serif" }}>
       <style>{printCSS}</style>
       <div className="noprint" style={{ position: "sticky", top: 0, background: C.czarny, padding: "12px 24px", display: "flex", justifyContent: "space-between", alignItems: "center", zIndex: 10, flexWrap: "wrap", gap: 10 }}>
         <span style={{ color: C.bialy, fontSize: 14 }}>Podgląd raportu — <strong>{nazwaPliku}.pdf</strong></span>
@@ -4017,53 +4242,56 @@ function PodgladPDF({ form, onBack, nazwaPliku, raportId, publiczny, jestAdmin }
 
       {pokazLinki && raportId && !publiczny && <PanelLinkow raportId={raportId} jestAdmin={jestAdmin} />}
 
-      <div className="pdf-page" style={{ background: C.bialy, maxWidth: 794, margin: "20px auto", padding: 56, boxShadow: "0 4px 30px rgba(0,0,0,0.3)", color: C.czarny, fontFamily: "'Roboto', 'Segoe UI', system-ui, sans-serif" }}>
-        {/* Logo + kontakt */}
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", borderBottom: `2px solid ${C.czarny}`, paddingBottom: 10, marginBottom: 18 }}>
-          <div><span style={{ color: C.zolty, fontWeight: 800, fontSize: 22 }}>/</span><span style={{ fontWeight: 800, fontSize: 20 }}>Abyard</span></div>
-          <div style={{ fontSize: 10, color: C.szary }}>www.abyard.com · biuro@abyard.pl · tel. (12) 431 30 87</div>
-        </div>
+      <div className="pdf-page" style={{ background: CR.card, maxWidth: 794, margin: "20px auto", boxShadow: "0 4px 30px rgba(0,0,0,0.3)", color: CR.ink, fontFamily: "'Roboto', 'Segoe UI', system-ui, sans-serif", overflow: "hidden" }}>
+        {/* ——— OKŁADKA — ciemny hero (jak strona 1 PDF) ——— */}
+        <div className="pdf-cover" style={{ background: CR.ink, color: "#fff", padding: "40px 56px 44px", textAlign: "center" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", textAlign: "left" }}>
+            <div style={{ fontWeight: 900, fontSize: 22 }}><span style={{ color: CR.gold }}>/</span>Abyard</div>
+            <div style={{ fontFamily: CR.mono, fontSize: 9.5, color: CR.muted2, textAlign: "right", lineHeight: 1.7 }}>Kraków, dn. {fmtPL(form.dataOpracowania) || "—"}<br />www.abyard.com · biuro@abyard.pl</div>
+          </div>
 
-        <div style={{ textAlign: "right", fontSize: 11, color: C.szary, fontStyle: "italic", marginBottom: 4 }}>Kraków, dn. {fmtPL(form.dataOpracowania)}</div>
+          <div style={{ fontFamily: CR.mono, fontSize: 11.5, letterSpacing: "0.2em", color: CR.gold, marginTop: 34 }}>/ RAPORT Z BUDOWY</div>
+          <div className="cover-num" style={{ fontWeight: 900, fontSize: 88, lineHeight: 0.9, marginTop: 4 }}><span style={{ color: CR.gold }}>/</span>{String(form.numer).padStart(3, "0")}</div>
+          <h2 className="cover-proj" style={{ fontWeight: 900, fontSize: 40, margin: "8px 0 0", lineHeight: 1.05, letterSpacing: "-0.01em" }}>{form.projekt}</h2>
+          {form.adres && <p style={{ color: CR.gold, fontWeight: 700, fontSize: 14, margin: "8px 0 0" }}>{form.adres}</p>}
+          {form.tytulZadania && <p style={{ color: "#CBC7BF", fontStyle: "italic", fontSize: 12, margin: "8px auto 0", maxWidth: 560, lineHeight: 1.4 }}>„{form.tytulZadania}”</p>}
 
-        <div style={{ textAlign: "center", marginTop: 8 }}>
-          <div style={{ fontSize: 13, fontWeight: 700, letterSpacing: 3, color: C.szary, textTransform: "uppercase" }}>Raport numer</div>
-          <div style={{ fontSize: 52, fontWeight: 800, lineHeight: 1, margin: "2px 0 10px" }}>
-            <span style={{ color: C.zolty }}>/</span>{String(form.numer).padStart(3, "0")}
+          <div style={{ display: "flex", justifyContent: "center", gap: 10, marginTop: 18, flexWrap: "wrap" }}>
+            <div style={{ fontFamily: CR.mono, fontSize: 11, background: CR.ink2, padding: "8px 14px", letterSpacing: "0.06em" }}><span style={{ color: CR.muted2 }}>ZA OKRES </span><span style={{ color: CR.goldBright }}>{fmtPL(form.okresOd) || "…"} — {fmtPL(form.okresDo) || "…"}</span></div>
+            <div style={{ fontFamily: CR.mono, fontSize: 10.5, fontWeight: 700, letterSpacing: "0.06em", padding: "8px 14px", background: zagrozenie ? "#2A1614" : "#142519", color: zagrozenie ? "#F0A79E" : "#7DDBA0" }}>
+              <span style={{ color: zagrozenie ? CR.danger : "#57C680" }}>● </span>{statusTxt.toUpperCase()}
+            </div>
+          </div>
+
+          {form.grafikaInwestycji && (
+            <>
+              <img className="grafika-okladka" src={form.grafikaInwestycji.dataUrl} alt="" style={{ display: "block", width: "auto", maxWidth: "100%", maxHeight: "88mm", objectFit: "contain", margin: "18px auto 0" }} />
+              <div style={{ height: 1, background: CR.gold, margin: "18px 0 0" }} />
+            </>
+          )}
+
+          <div className="cover-daty" style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12, marginTop: 18 }}>
+            {[["Rozpoczęcie", fmtPL(form.rozpoczecie) || "—"], ["Zakończenie robót", fmtPL(form.zakonczenieRobot) || "—"], ["Pozwol. użytkowania", form.pnuNieDotyczy ? "Nie dotyczy" : (fmtPL(form.pnu) || "—")], ["Opracował", form.opracowal || "—"]].map(([l, v], i) => (
+              <div key={i} style={{ textAlign: "center" }}>
+                <div style={{ fontFamily: CR.mono, fontSize: 8.5, letterSpacing: "0.1em", color: CR.muted2, textTransform: "uppercase" }}>{l}</div>
+                <div style={{ fontWeight: 900, fontSize: 15, marginTop: 5 }}>{v}</div>
+              </div>
+            ))}
           </div>
         </div>
 
-        <div style={{ display: "inline-block", background: C.czarny, color: C.zolty, fontWeight: 700, fontSize: 12, padding: "6px 18px", letterSpacing: 1, width: "100%", textAlign: "center", boxSizing: "border-box" }}>
-          RAPORT ZA OKRES&nbsp;&nbsp;{fmtPL(form.okresOd) || "…"} – {fmtPL(form.okresDo) || "…"}
-        </div>
-
-        <h2 style={{ textAlign: "center", fontSize: 30, margin: "20px 0 4px", fontWeight: 800, letterSpacing: -0.5, lineHeight: 1.1 }}>{form.projekt}</h2>
-        {form.adres && <p style={{ textAlign: "center", margin: "2px 0", color: C.czarny, fontSize: 14, fontWeight: 600 }}>{form.adres}</p>}
-        {form.tytulZadania && <p style={{ textAlign: "center", fontStyle: "italic", margin: "8px auto 0", fontSize: 13, color: C.szary, maxWidth: 600, lineHeight: 1.4 }}>„{form.tytulZadania}”</p>}
-        {form.grafikaInwestycji && (
-          <div style={{ textAlign: "center", margin: "16px 0 10px" }}>
-            <img className="grafika-okladka" src={form.grafikaInwestycji.dataUrl} alt="" style={{ width: "auto", maxWidth: "100%", maxHeight: "108mm", objectFit: "contain", borderRadius: 6, border: `1px solid ${C.linia}` }} />
-          </div>
-        )}
-
-        <div className="klucz-daty" style={{ breakInside: "avoid", pageBreakInside: "avoid" }}>
-          <BlokPDF tytul="Kluczowe daty">
-            <p style={pPDF}><strong>Rozpoczęcie budowy:</strong> {fmtPL(form.rozpoczecie) || "—"}</p>
-            <p style={pPDF}><strong>Zakończenie robót:</strong> {fmtPL(form.zakonczenieRobot) || "—"}</p>
-            <p style={pPDF}><strong>Pozwolenie na użytkowanie:</strong> {form.pnuNieDotyczy ? "Nie dotyczy" : (fmtPL(form.pnu) || "—")}</p>
-            <p style={pPDF}><strong>Opracował:</strong> {form.opracowal || "—"}</p>
-          </BlokPDF>
-        </div>
-
-        {/* Twardy podział strony — strona tytułowa kończy się na kluczowych datach */}
+        {/* Twardy podział strony po okładce (druk) */}
         <div className="lamanie-strony" style={{ breakBefore: "page", pageBreakBefore: "always" }} />
+
+        {/* ——— TREŚĆ (biała) ——— */}
+        <div className="pdf-content" style={{ padding: "10px 56px 56px" }}>
 
         <BlokPDF tytul="Informacje ogólne">
           <Tekst v={form.infoOgolne} />
           {maTresc(form.opoznienia) && (
-            <div style={{ marginTop: 10 }}>
-              <div style={{ fontWeight: 800, fontSize: 11, textTransform: "uppercase", letterSpacing: 0.8, color: C.czarny, marginBottom: 4 }}>Opóźnienia i działania naprawcze</div>
-              <div style={{ background: C.zoltyJasny, borderLeft: `3px solid ${C.zolty}`, padding: "8px 12px", fontSize: 12.5 }}><Tekst v={form.opoznienia} /></div>
+            <div style={{ marginTop: 14, background: CR.callout, borderLeft: `3px solid ${CR.gold}`, padding: "12px 16px", breakInside: "avoid", pageBreakInside: "avoid" }}>
+              <div style={{ fontFamily: CR.mono, fontSize: 10.5, letterSpacing: "0.08em", color: CR.goldDeep, marginBottom: 6 }}>⚠ OPÓŹNIENIA I DZIAŁANIA NAPRAWCZE</div>
+              <Tekst v={form.opoznienia} />
             </div>
           )}
         </BlokPDF>
@@ -4075,7 +4303,7 @@ function PodgladPDF({ form, onBack, nazwaPliku, raportId, publiczny, jestAdmin }
         {maTresc(form.placBudowy) && <BlokPDF tytul="Teren placu budowy"><Tekst v={form.placBudowy} /></BlokPDF>}
 
         <BlokPDF tytul="Podsumowanie">
-          <div style={{ borderLeft: `4px solid ${C.zolty}`, paddingLeft: 12, fontWeight: 700, fontSize: 13 }}>{form.podsumowanie}</div>
+          <div style={{ borderLeft: `4px solid ${CR.gold}`, paddingLeft: 16, fontWeight: 900, fontSize: 18, lineHeight: 1.3, color: CR.ink }}>{form.podsumowanie}</div>
         </BlokPDF>
 
         {(() => {
@@ -4100,49 +4328,55 @@ function PodgladPDF({ form, onBack, nazwaPliku, raportId, publiczny, jestAdmin }
           }
           // Brak obrazów — pokazujemy tabelę ZZK, o ile cokolwiek wypełniono.
           if (wiersze.length === 0) return null;
+          const hth = (al) => ({ background: CR.ink, color: "#fff", fontFamily: CR.mono, fontSize: 8.5, fontWeight: 400, letterSpacing: "0.04em", textTransform: "uppercase", padding: "9px 6px", textAlign: al, whiteSpace: "nowrap" });
+          const htd = { padding: "9px 6px", borderBottom: `1px solid ${CR.line}`, textAlign: "center", fontSize: 10, fontFamily: CR.mono, color: CR.muted2 };
+          const htdRz = { ...htd, background: CR.band, fontWeight: 700, color: CR.ink };
           return (
             <BlokPDF tytul="Harmonogram budowy">
-              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11 }}>
+              <div className="tabela-scroll-own" style={{ overflowX: "auto" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse" }}>
                 <thead>
                   <tr>
-                    <th style={{ ...thHarmPdf, width: 28 }}>#</th>
-                    <th style={thHarmPdf}>Zadanie</th>
-                    <th style={thHarmPdf}>Start (umowa)</th>
-                    <th style={thHarmPdf}>Koniec (umowa)</th>
-                    <th style={thHarmPdf}>Koniec (progn./rzecz.)</th>
-                    <th style={thHarmPdf}>% wyk.</th>
-                    <th style={thHarmPdf}>Opóźnienie</th>
+                    <th style={hth("left")}>#</th>
+                    <th style={hth("left")}>Zadanie</th>
+                    <th style={hth("center")}>Start</th>
+                    <th style={hth("center")}>Koniec um.</th>
+                    <th style={{ ...hth("center"), color: CR.goldBright }}>Progn./rzecz.</th>
+                    <th style={hth("right")}>%</th>
+                    <th style={hth("right")}>Opóźn.</th>
                   </tr>
                 </thead>
                 <tbody>
                   {wiersze.map((r) => {
                     const ef = efektywnyWiersz(r);
                     const op = obliczOpoznienie(ef, form.dataOpracowania);
+                    const pctN = parseInt(ef.proc, 10);
                     const pod = maPodpozycje(r) ? r.pod.filter((p) => p && (p.zadanie || p.start || p.koniec || p.rzecz || p.proc)) : [];
                     return (
                       <React.Fragment key={r.nr}>
-                        {/* Pozycja główna (zadanie) — wyróżniona */}
-                        <tr style={{ background: pod.length ? "#F3F0E8" : "transparent" }}>
-                          <td style={{ ...tdHarmPdf, fontWeight: 800, color: C.czarny }}>{r.nr}</td>
-                          <td style={{ ...tdHarmPdf, textAlign: "left", fontWeight: 700 }}>{r.zadanie}</td>
-                          <td style={tdHarmPdf}>{fmtPL(ef.start) || "—"}</td>
-                          <td style={tdHarmPdf}>{fmtPL(ef.koniec) || "—"}</td>
-                          <td style={{ ...tdHarmPdf, fontWeight: ef.rzecz ? 700 : 400 }}>{fmtPL(ef.rzecz) || "—"}</td>
-                          <td style={{ ...tdHarmPdf, fontWeight: 700 }}>{ef.proc !== "" ? `${ef.proc}%` : "—"}</td>
-                          <td style={{ ...tdHarmPdf, color: op ? "#B22" : C.czarny, fontWeight: op ? 800 : 400 }}>{op || "—"}</td>
+                        {/* Pozycja główna (zadanie) — kropka + pogrubienie */}
+                        <tr>
+                          <td style={{ ...htd, color: CR.ink }}>{r.nr}</td>
+                          <td style={{ ...htd, textAlign: "left", fontFamily: "'Roboto', sans-serif", fontWeight: 700, color: CR.ink }}><span style={{ color: CR.gold, marginRight: 7, fontSize: 8 }}>●</span>{r.zadanie}</td>
+                          <td style={htd}>{fmtPL(ef.start) || "—"}</td>
+                          <td style={htd}>{fmtPL(ef.koniec) || "—"}</td>
+                          <td style={htdRz}>{fmtPL(ef.rzecz) || "—"}</td>
+                          <td style={{ ...htd, textAlign: "right", fontWeight: 700, color: (ef.proc !== "" && pctN >= 100) ? CR.ok : CR.ink }}>{ef.proc !== "" ? `${ef.proc}%` : "—"}</td>
+                          <td style={{ ...htd, textAlign: "right", fontWeight: 700, color: op ? CR.danger : CR.ok }}>{op || "—"}</td>
                         </tr>
-                        {/* Podpozycje — cieńsze, wcięte */}
+                        {/* Podpozycje — cieńsze, wcięte, przygaszone */}
                         {pod.map((p, j) => {
                           const opP = obliczOpoznienie(p, form.dataOpracowania);
+                          const ppN = parseInt(p.proc, 10);
                           return (
                             <tr key={`${r.nr}-${j}`}>
-                              <td style={{ ...tdHarmPdf, color: "#999", fontSize: 10 }}>{r.nr}.{j + 1}</td>
-                              <td style={{ ...tdHarmPdf, textAlign: "left", fontWeight: 400, paddingLeft: 18, color: "#444" }}>{p.zadanie || "—"}</td>
-                              <td style={{ ...tdHarmPdf, fontWeight: 400 }}>{fmtPL(p.start) || "—"}</td>
-                              <td style={{ ...tdHarmPdf, fontWeight: 400 }}>{fmtPL(p.koniec) || "—"}</td>
-                              <td style={{ ...tdHarmPdf, fontWeight: 400 }}>{fmtPL(p.rzecz) || "—"}</td>
-                              <td style={{ ...tdHarmPdf, fontWeight: 400 }}>{p.proc !== "" && p.proc != null ? `${p.proc}%` : "—"}</td>
-                              <td style={{ ...tdHarmPdf, color: opP ? "#B22" : C.czarny, fontWeight: 400 }}>{opP || "—"}</td>
+                              <td style={{ ...htd, color: CR.muted2, fontSize: 9 }}>{r.nr}.{j + 1}</td>
+                              <td style={{ ...htd, textAlign: "left", fontFamily: "'Roboto', sans-serif", paddingLeft: 20, color: CR.muted }}>{p.zadanie || "—"}</td>
+                              <td style={htd}>{fmtPL(p.start) || "—"}</td>
+                              <td style={htd}>{fmtPL(p.koniec) || "—"}</td>
+                              <td style={{ ...htdRz, color: "#6B6552" }}>{fmtPL(p.rzecz) || "—"}</td>
+                              <td style={{ ...htd, textAlign: "right", color: (p.proc !== "" && ppN >= 100) ? CR.ok : CR.muted }}>{p.proc !== "" && p.proc != null ? `${p.proc}%` : "—"}</td>
+                              <td style={{ ...htd, textAlign: "right", color: opP ? CR.danger : CR.ok }}>{opP || "—"}</td>
                             </tr>
                           );
                         })}
@@ -4163,21 +4397,22 @@ function PodgladPDF({ form, onBack, nazwaPliku, raportId, publiczny, jestAdmin }
                   const opoz = opoznienieInwestycji(form.harmonogram, form.dataOpracowania);
                   const sumaKwot = sumaWartosciUmowy(form.harmonogram);
                   const maKwoty = harmonogramMaKwoty(form.harmonogram);
-                  const st = { ...tdHarmPdf, borderTop: `2px solid ${C.czarny}`, background: "#F3F0E8", fontWeight: 800 };
+                  const st = { padding: "10px 6px", background: CR.foot, fontFamily: CR.mono, fontWeight: 700, fontSize: 10, borderTop: `2px solid ${CR.ink}`, textAlign: "center" };
                   return (
                     <tfoot>
                       <tr>
                         <td style={st}>Σ</td>
-                        <td style={{ ...st, textAlign: "left" }}>PODSUMOWANIE{maKwoty ? ` · wartość umowy: ${Math.round(sumaKwot).toLocaleString("pl-PL")} zł` : ""}</td>
+                        <td style={{ ...st, textAlign: "left", fontFamily: "'Roboto', sans-serif" }}>PODSUMOWANIE INWESTYCJI{maKwoty ? ` · ${Math.round(sumaKwot).toLocaleString("pl-PL")} zł` : ""}</td>
                         <td style={{ ...st, fontWeight: 400 }}>{fmtPL(dataMin) || "—"}</td>
                         <td style={{ ...st, fontWeight: 400 }} colSpan={2}>{fmtPL(dataMax) || "—"}</td>
                         <td style={st}></td>
-                        <td style={{ ...st, color: opoz && opoz.dni > 0 ? "#B22" : C.czarny }}>{opoz ? (opoz.dni > 0 ? `${opoz.dni} dni` : "brak") : "—"}</td>
+                        <td style={{ ...st, textAlign: "right", color: opoz && opoz.dni > 0 ? CR.danger : CR.ok }}>{opoz ? (opoz.dni > 0 ? `${opoz.dni} dni` : "brak") : "—"}</td>
                       </tr>
                     </tfoot>
                   );
                 })()}
               </table>
+              </div>
             </BlokPDF>
           );
         })()}
@@ -4192,38 +4427,41 @@ function PodgladPDF({ form, onBack, nazwaPliku, raportId, publiczny, jestAdmin }
           // Im więcej miesięcy, tym mniejsza czcionka/padding; przy bardzo wielu — kwoty w tysiącach.
           const wTys = nM > 10;                       // próg ujednolicony z eksportem PDF (pdfCashflow)
           const fs = nM > 20 ? 6 : nM > 16 ? 6.5 : nM > 12 ? 7.5 : nM > 8 ? 8.5 : 9.5;
-          const pad = nM > 16 ? "1px 2px" : nM > 12 ? "1px 3px" : "3px 5px";
+          const pad = nM > 16 ? "4px 2px" : nM > 12 ? "5px 3px" : "6px 5px";
           const fmtZ = (n) => {
             if (!n) return "";
-            if (wTys) return Math.round(n / 1000).toLocaleString("pl-PL"); // w tysiącach
+            if (wTys) return String(Math.round(n / 1000)); // w tysiącach, bez separatora (nie łamie w wąskich kolumnach)
             return Math.round(n).toLocaleString("pl-PL");
           };
-          const thO = { padding: pad, border: "1px solid #C9C6BE", fontSize: fs, whiteSpace: "nowrap", background: C.czarny, color: C.zolty };
-          const thM = { padding: pad, border: "1px solid #C9C6BE", fontSize: fs, whiteSpace: "nowrap", background: "#3A3A3A", color: "#FFF", textAlign: "right" };
-          const td = { padding: pad, border: "1px solid #D9D6CE", fontSize: fs };
+          const fmtMY = (iso) => { if (!iso) return "—"; const p = String(iso).split("-"); return p.length >= 2 ? `${p[1]}.${p[0].slice(2)}` : (fmtPL(iso) || "—"); };
+          const thO = { padding: pad, fontFamily: CR.mono, fontSize: fs, whiteSpace: "nowrap", background: CR.ink, color: "#fff" };
+          const thM = { padding: pad, fontFamily: CR.mono, fontSize: fs, whiteSpace: "nowrap", background: CR.ink, color: CR.goldBright, textAlign: "center", lineHeight: 1.05 };
+          const td = { padding: pad, borderBottom: `1px solid ${CR.line}`, borderRight: `1px solid ${CR.line}`, fontFamily: CR.mono, fontSize: fs, whiteSpace: "nowrap" };
+          const tdZ = { ...td, whiteSpace: "normal", minWidth: 120, maxWidth: 170 };
           return (
             <div className="strona-cashflow">
             <BlokPDF tytul={`Harmonogram przepływów finansowych — sprzedaż${wTys ? " (kwoty w tys. zł)" : ""}`}>
-              <table style={{ width: "100%", borderCollapse: "collapse", tableLayout: "fixed" }}>
+              <div style={{ overflowX: "auto", maxWidth: "100%" }}>
+              <table style={{ borderCollapse: "collapse", width: "auto" }}>
                 <thead>
                   <tr>
                     <th style={{ ...thO, textAlign: "left" }}>Zadanie</th>
-                    <th style={{ ...thO, textAlign: "right" }}>Kwota netto</th>
-                    <th style={{ ...thO, textAlign: "center" }}>Start</th>
-                    <th style={{ ...thO, textAlign: "center" }}>Koniec</th>
-                    {miesiace.map((m) => <th key={m.klucz} style={thM}>{m.etykieta}</th>)}
+                    <th style={{ ...thO, textAlign: "right", color: CR.goldBright }}>Netto</th>
+                    <th style={{ ...thO, textAlign: "center", color: CR.goldBright }}>Start</th>
+                    <th style={{ ...thO, textAlign: "center", color: CR.goldBright }}>Koniec</th>
+                    {miesiace.map((m) => { const [mm, yy] = String(m.etykieta).split("."); return <th key={m.klucz} style={thM}>{mm}<br />{yy}</th>; })}
                   </tr>
                 </thead>
                 <tbody>
                   {zadania.map((z, i) => (
                     <tr key={i}>
-                      <td style={{ ...td, textAlign: "left" }}>{z.nazwa}</td>
-                      <td style={{ ...td, textAlign: "right" }}>{fmtZ(z.kwota)}</td>
-                      <td style={{ ...td, textAlign: "center", color: C.szary }}>{z.start ? fmtPL(z.start) : "—"}</td>
-                      <td style={{ ...td, textAlign: "center", color: C.szary }}>{z.koniec ? fmtPL(z.koniec) : "—"}</td>
+                      <td style={{ ...tdZ, textAlign: "left", color: "#26251F" }}>{z.nazwa}</td>
+                      <td style={{ ...td, textAlign: "right", color: "#26251F" }}>{fmtZ(z.kwota)}</td>
+                      <td style={{ ...td, textAlign: "center", color: CR.muted2 }}>{fmtMY(z.start)}</td>
+                      <td style={{ ...td, textAlign: "center", color: CR.muted2 }}>{fmtMY(z.koniec)}</td>
                       {miesiace.map((m) => {
                         const v = z.komorki[m.klucz];
-                        return <td key={m.klucz} style={{ ...td, textAlign: "right", background: v ? "#FFF9E6" : "transparent" }}>{v ? fmtZ(v) : "–"}</td>;
+                        return <td key={m.klucz} style={{ ...td, textAlign: "right", background: v ? CR.band : "transparent", color: v ? "#26251F" : CR.muted2 }}>{v ? fmtZ(v) : "–"}</td>;
                       })}
                     </tr>
                   ))}
@@ -4236,12 +4474,13 @@ function PodgladPDF({ form, onBack, nazwaPliku, raportId, publiczny, jestAdmin }
                     {miesiace.map((m) => <td key={m.klucz} style={{ ...td, textAlign: "right", fontWeight: 700, background: "#F3F0E8" }}>{fmtZ(sumaMies[m.klucz])}</td>)}
                   </tr>
                   <tr>
-                    <td style={{ ...td, textAlign: "left", fontWeight: 800, background: C.zolty, color: C.czarny }}>Narastająco</td>
-                    <td colSpan={3} style={{ ...td, background: C.zolty }}></td>
-                    {miesiace.map((m) => <td key={m.klucz} style={{ ...td, textAlign: "right", fontWeight: 700, background: C.zolty, color: C.czarny }}>{fmtZ(sumaNaras[m.klucz])}</td>)}
+                    <td style={{ ...td, textAlign: "left", fontWeight: 800, background: CR.gold, color: CR.ink }}>Narastająco</td>
+                    <td colSpan={3} style={{ ...td, background: CR.gold }}></td>
+                    {miesiace.map((m) => <td key={m.klucz} style={{ ...td, textAlign: "right", fontWeight: 700, background: CR.gold, color: CR.ink }}>{fmtZ(sumaNaras[m.klucz])}</td>)}
                   </tr>
                 </tfoot>
               </table>
+              </div>
             </BlokPDF>
             </div>
           );
@@ -4266,12 +4505,8 @@ function PodgladPDF({ form, onBack, nazwaPliku, raportId, publiczny, jestAdmin }
           }
           if (bufor.length) strony.push(bufor);
 
-          const naglowek = (
-            <div className="blok-pdf" style={{ display: "flex", alignItems: "stretch", marginBottom: 10 }}>
-              <div style={{ width: 6, background: C.zolty, flexShrink: 0 }} />
-              <div style={{ background: C.czarny, color: C.bialy, fontWeight: 800, fontSize: 14, textTransform: "uppercase", letterSpacing: 1.5, padding: "8px 16px", flex: 1 }}>Dokumentacja fotograficzna</div>
-            </div>
-          );
+          let fotoNr = 0;
+          const naglowek = <div style={{ marginBottom: 4, width: "100%" }}><Overline tytul="Dokumentacja fotograficzna" /></div>;
 
           // Strona fotograficzna: kontener flex w pionie wypełniający wysokość druku.
           // pierwszaZNaglowkiem = trochę niższy, bo dzieli miejsce z nagłówkiem sekcji.
@@ -4279,12 +4514,18 @@ function PodgladPDF({ form, onBack, nazwaPliku, raportId, publiczny, jestAdmin }
             <div key={key} className={`foto-strona foto-n${zdj.length}${zNaglowkiem ? "" : " foto-strona-break"}`}
               style={{ display: "flex", flexDirection: "column", gap: 12, justifyContent: "center", alignItems: "center", height: 900, marginBottom: 8 }}>
               {zNaglowkiem && naglowek}
-              {zdj.map((z, k) => (
+              {zdj.map((z, k) => {
+                const nr = ++fotoNr;
+                return (
                 <figure key={k} className="foto-fig" style={{ margin: 0, flex: "1 1 0", minHeight: 0, width: "100%", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
                   <img src={z.dataUrl} alt="" style={{ maxWidth: "100%", maxHeight: "100%", width: "auto", height: "auto", objectFit: "contain", borderRadius: 4, display: "block" }} />
-                  {z.opis && <figcaption style={{ fontSize: 12.5, color: C.czarny, marginTop: 6, textAlign: "center", fontWeight: 600, flexShrink: 0 }}>{z.opis}</figcaption>}
+                  <figcaption style={{ marginTop: 6, textAlign: "left", flexShrink: 0, alignSelf: "flex-start" }}>
+                    <span style={{ fontFamily: CR.mono, fontSize: 9.5, color: CR.goldDeep, letterSpacing: "0.08em" }}>FOT. {String(nr).padStart(2, "0")}</span>
+                    {z.opis && <span style={{ fontWeight: 700, color: "#26251F", marginLeft: 8, fontSize: 12.5 }}>{z.opis}</span>}
+                  </figcaption>
                 </figure>
-              ))}
+                );
+              })}
             </div>
           );
 
@@ -4294,6 +4535,7 @@ function PodgladPDF({ form, onBack, nazwaPliku, raportId, publiczny, jestAdmin }
             </div>
           );
         })()}
+        </div>{/* /pdf-content */}
       </div>
     </div>
   );
@@ -4303,7 +4545,12 @@ function PodgladPDF({ form, onBack, nazwaPliku, raportId, publiczny, jestAdmin }
 function Sekcja({ tytul, children }) {
   return (
     <section style={card}>
-      <div style={secTitle}>{tytul}</div>
+      <div style={{ display: "flex", alignItems: "flex-end", gap: 12, marginBottom: 16 }}>
+        <div style={{ fontFamily: C.mono, fontSize: 12, letterSpacing: "0.13em", textTransform: "uppercase", color: C.zoltyDeep, whiteSpace: "nowrap" }}>
+          <span style={{ color: C.zolty, fontWeight: 700 }}>/ </span>{tytul}
+        </div>
+        <div style={{ flex: 1, height: 1, background: C.linia, marginBottom: 4 }} />
+      </div>
       {children}
     </section>
   );
@@ -4311,14 +4558,11 @@ function Sekcja({ tytul, children }) {
 function Pole({ label, children }) {
   return (<div style={{ marginBottom: 12 }}><label style={lbl}>{label}</label>{children}</div>);
 }
-function BlokPDF({ tytul, children }) {
+function BlokPDF({ tytul, idx, children }) {
   return (
-    <div className="blokpdf" style={{ marginTop: 20 }}>
-      <div className="blokpdf-naglowek" style={{ display: "flex", alignItems: "stretch", marginBottom: 8, breakAfter: "avoid", pageBreakAfter: "avoid", breakInside: "avoid", pageBreakInside: "avoid" }}>
-        <div style={{ width: 6, background: C.zolty, flexShrink: 0 }} />
-        <div style={{ background: C.czarny, color: C.bialy, fontWeight: 800, fontSize: 14, textTransform: "uppercase", letterSpacing: 1.5, padding: "8px 16px", flex: 1 }}>{tytul}</div>
-      </div>
-      <div style={{ padding: "2px 4px" }}>{children}</div>
+    <div className="blokpdf" style={{ marginTop: 26 }}>
+      <Overline tytul={tytul} idx={idx} />
+      <div style={{ padding: "2px 0" }}>{children}</div>
     </div>
   );
 }
@@ -4412,8 +4656,8 @@ function RichEdytor({ value, onChange, placeholder, minHeight = 84 }) {
 
 /* ---------- Style --------------------------------------------------------- */
 const card = { background: C.bialy, border: `1px solid ${C.linia}`, borderRadius: 8, padding: 22, marginBottom: 18, boxShadow: "0 1px 2px rgba(0,0,0,0.03)" };
-const secTitle = { display: "inline-block", fontWeight: 800, fontSize: 13, textTransform: "uppercase", letterSpacing: 1, color: C.bialy, background: C.czarny, padding: "7px 16px 7px 12px", marginBottom: 18, borderLeft: `4px solid ${C.zolty}`, borderRadius: "0 4px 4px 0" };
-const lbl = { display: "block", fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.6, color: C.szary, marginBottom: 5 };
+const secTitle = { display: "inline-block", fontFamily: C.mono, fontWeight: 400, fontSize: 12, textTransform: "uppercase", letterSpacing: "0.13em", color: C.zoltyDeep, marginBottom: 14 };
+const lbl = { display: "block", fontFamily: C.mono, fontSize: 9.5, fontWeight: 400, textTransform: "uppercase", letterSpacing: "0.12em", color: C.szary, marginBottom: 5 };
 const inp = { width: "100%", padding: "9px 11px", border: `1px solid #C9C2B2`, borderRadius: 5, fontSize: 14, boxSizing: "border-box", background: "#FCFBF8", fontFamily: "inherit" };
 const ta = { ...inp, minHeight: 84, resize: "vertical" };
 const taBig = { ...inp, minHeight: 120, resize: "vertical" };
@@ -4424,14 +4668,16 @@ const btnGhost = { background: "transparent", color: C.czarny, border: `1.5px so
 const btnGhostDark = { background: "transparent", color: C.bialy, border: `1.5px solid ${C.bialy}`, padding: "8px 16px", borderRadius: 6, fontWeight: 600, fontSize: 13, cursor: "pointer", fontFamily: "inherit" };
 const miniBtn = { background: C.bialy, border: `1px solid ${C.linia}`, borderRadius: 4, padding: "5px 12px", fontSize: 12, cursor: "pointer", fontFamily: "inherit" };
 // Plakietka wstrzymanej inwestycji — spójna w koordynacji i „Kto co prowadzi".
-const odznakaWstrzymana = { fontSize: 10.5, fontWeight: 700, color: "#B35A00", background: "#FBF0DC", padding: "1px 6px", borderRadius: 4, marginLeft: 6, verticalAlign: "middle" };
+const odznakaWstrzymana = { fontSize: 10.5, fontWeight: 700, color: "#B9791A", background: "#FBF0DC", padding: "1px 6px", borderRadius: 4, marginLeft: 6, verticalAlign: "middle" };
 const pPDF = { margin: "2px 0", fontSize: 12.5 };
-const thHarm = { background: C.czarny, color: C.zolty, fontSize: 11, fontWeight: 700, padding: "8px 6px", textAlign: "center", border: `1px solid ${C.grafit}` };
+const thHarm = { background: C.czarny, color: "#FFFFFF", fontFamily: C.mono, fontSize: 8.5, fontWeight: 400, letterSpacing: "0.05em", textTransform: "uppercase", padding: "8px 6px", textAlign: "center" };
 const tdHarm = { padding: "3px 6px", border: `1px solid ${C.linia}`, textAlign: "center" };
 const cellInp = { border: "none", background: "transparent", fontSize: 13, fontFamily: "inherit", padding: "4px 2px", width: "100%", boxSizing: "border-box" };
 const thHarmPdf = { background: C.czarny, color: C.zolty, fontSize: 9.5, fontWeight: 700, padding: "5px 4px", textAlign: "center", border: `1px solid ${C.grafit}` };
 const tdHarmPdf = { padding: "4px", border: `1px solid ${C.linia}`, textAlign: "center", fontSize: 10.5 };
 const thArch = { color: C.zolty, fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.5, padding: "12px 14px", textAlign: "center" };
+// Nagłówek tabeli admina — mono, dolna kreska w kolorze atramentu (jak .atbl th w mockupie).
+const thAdm = { fontFamily: C.mono, fontSize: 9.5, fontWeight: 400, letterSpacing: "0.1em", textTransform: "uppercase", color: C.szary, textAlign: "left", padding: "10px 12px", borderBottom: `2px solid ${C.czarny}` };
 const tdArch = { padding: "12px 14px", color: C.czarny, verticalAlign: "middle" };
 
 const globalCSS = `
@@ -4441,6 +4687,10 @@ const globalCSS = `
   @media screen and (max-width: 640px) {
     footer > div { flex-direction: column; align-items: stretch !important; }
     footer button { width: 100%; }
+    /* Dolny pasek akcji formularza układa się w kolumnę (przyciski pełnej szerokości),
+       więc jest znacznie wyższy niż na desktopie. Rezerwujemy więcej miejsca na dole
+       formularza, aby ostatnia karta nie chowała się pod przyklejonym paskiem. */
+    .ekran-formularz { padding-bottom: 260px !important; }
     /* Szerokie tabele na telefonie: własne poziome przewijanie zamiast rozpychania strony.
        Tylko ekran (screen) i wąski — laptop oraz druk PDF nietknięte.
        display:block daje przewijanie; width:max-content wymusza, by tabela nie ściskała
@@ -4450,6 +4700,9 @@ const globalCSS = `
        drugiego mechanizmu, bo zagnieżdżone przewijania blokują dojazd do końca. */
     .tabela-scroll-own { overflow-x: auto; -webkit-overflow-scrolling: touch; }
     .tabela-scroll-own table { display: table; width: 100%; }
+    /* Wiersz raportu w archiwum: na telefonie przyciski akcji dostają pełny wiersz
+       i zawijają się od lewej, żeby „Usuń" nie wychodził poza kartę. */
+    .arow-act { width: 100%; justify-content: flex-start !important; }
   }
 `;
 const printCSS = `
@@ -4465,7 +4718,13 @@ const printCSS = `
         (daty się nie łamią), a max-width:100% + overflow-x:auto daje pasek.
      Dotyczy tylko ekranu telefonu — druk PDF (@media print) nietknięty. */
   @media screen and (max-width: 640px) {
-    .pdf-page { padding: 18px !important; }
+    /* Padding jest teraz na okładce/treści (nie na .pdf-page) — zmniejszamy oba. */
+    .pdf-cover { padding: 26px 18px 30px !important; }
+    .pdf-content { padding: 6px 18px 30px !important; }
+    /* Okładka: skalujemy wielkie napisy, żeby nie rozpychały iPhone'a. */
+    .pdf-cover .cover-num { font-size: 60px !important; }
+    .pdf-cover .cover-proj { font-size: 26px !important; }
+    .pdf-cover .cover-daty { grid-template-columns: 1fr 1fr !important; row-gap: 14px !important; }
     .pdf-page table {
       display: block;
       overflow-x: auto;
@@ -4516,3 +4775,4 @@ const printCSS = `
     .grafika-okladka { max-height: 108mm !important; width: auto !important; max-width: 100% !important; }
   }
 `;
+
