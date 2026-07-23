@@ -335,12 +335,20 @@ function harmonogramMaKwoty(harmonogram) {
 // tą samą logiką co sam cashflow (kwotaZadania): pozycja jest kompletna, gdy ma
 // wartość NA SOBIE albo w podpozycjach (główna sumuje podpozycje). Dzięki temu nie
 // blokujemy PM-a, który wpisał kwotę łączną na pozycji nadrzędnej, a podpozycje
-// służą tylko do dat. Puste wiersze (bez nazwy i bez podpozycji) pomijamy.
+// służą tylko do dat.
+//
+// WAŻNE: kwota jest obowiązkowa TYLKO dla zakresu, który realnie występuje w czasie —
+// czyli ma wpisane daty (start i koniec, także wyliczone z podpozycji). Zadanie bez
+// kompletu dat i tak nie wchodzi do rozkładu cashflow (rozlozKalendarzowo wymaga obu
+// dat), a brak dat może oznaczać, że zakres w danym projekcie w ogóle nie występuje —
+// wtedy zmuszanie do kwoty nie ma sensu. Puste wiersze (bez nazwy i podpozycji) pomijamy.
 function brakiCashflowu(harmonogram) {
   const braki = [];
   (harmonogram || []).forEach((w, i) => {
     const istotna = (w.zadanie || "").trim() || maPodpozycje(w);
     if (!istotna) return;
+    const ef = efektywnyWiersz(w);
+    if (!ef.start || !ef.koniec) return; // brak dat = zakres nie występuje → kwota niewymagana
     if (!(kwotaZadania(w) > 0)) braki.push(`${i + 1}. ${w.zadanie || "(pozycja)"}`);
   });
   return braki;
@@ -1302,7 +1310,8 @@ export default function GeneratorRaportowABYARD() {
         const wiecej = braki.length > 12 ? `\n…i ${braki.length - 12} więcej` : "";
         window.alert(
           "Nie można zapisać pierwszego raportu tej inwestycji.\n\n" +
-          "Uzupełnij wartość umowy (cashflow) dla KAŻDEJ pozycji harmonogramu. Brakuje:\n\n" +
+          "Uzupełnij wartość umowy (cashflow) dla każdej pozycji harmonogramu, która ma wpisane daty. " +
+          "Pozycje bez dat (zakres nie występuje) pomijamy. Brakuje:\n\n" +
           `${lista}${wiecej}`
         );
         return;
@@ -1964,7 +1973,7 @@ export default function GeneratorRaportowABYARD() {
                 </label>
                 {pierwszyRaportForm && (
                   <p style={{ fontSize: 12.5, color: C.czerwony, marginTop: 2, marginBottom: 8, lineHeight: 1.5 }}>
-                    To pierwszy raport tej inwestycji — cashflow jest obowiązkowy. Ustanawia bazę finansową dziedziczoną przez kolejne raporty. Bez wartości umowy przy każdej pozycji harmonogramu nie zapiszesz raportu.
+                    To pierwszy raport tej inwestycji — cashflow jest obowiązkowy. Ustanawia bazę finansową dziedziczoną przez kolejne raporty. Wartość umowy trzeba podać przy każdej pozycji harmonogramu, która ma wpisane daty (pozycje bez dat pomijamy).
                   </p>
                 )}
                 <p style={{ fontSize: 12, color: C.szary, marginTop: -2, marginBottom: 10 }}>
