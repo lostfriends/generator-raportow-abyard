@@ -724,6 +724,60 @@ function Overline({ tytul, idx }) {
   );
 }
 
+// Nagłówek ekranu w języku abyard.com: mono eyebrow „/ X", wielki tytuł
+// (Roboto Black) z opcjonalną złotą liczbą, podtytuł. Po prawej opcjonalne akcje.
+function NaglowekEkranu({ eyebrow, tytul, num, sub, akcje }) {
+  return (
+    <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", gap: 16, flexWrap: "wrap", marginBottom: 18 }}>
+      <div style={{ minWidth: 0 }}>
+        <div style={{ fontFamily: C.mono, fontSize: 11, letterSpacing: "0.16em", textTransform: "uppercase", color: C.zoltyDeep }}>
+          <span style={{ color: C.zolty, fontWeight: 700 }}>/</span> {eyebrow}
+        </div>
+        <h1 style={{ fontFamily: "'Roboto', system-ui, sans-serif", fontWeight: 900, fontSize: 30, letterSpacing: "-0.02em", color: C.czarny, margin: "6px 0 0", textWrap: "balance" }}>
+          {tytul}{num != null && <span style={{ color: C.zolty }}> {num}</span>}
+        </h1>
+        {sub && <p style={{ color: C.szary, fontSize: 13.5, margin: "6px 0 0", lineHeight: 1.5 }}>{sub}</p>}
+      </div>
+      {akcje && <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>{akcje}</div>}
+    </div>
+  );
+}
+
+// Status jako chip-pigułka z kropką (mono, uppercase) — spójne z mockupem.
+// wariant: "warn" (zagrożenie, czerwony) | "ok" (zielony) | "hold" (wstrzymana, bursztyn) | "neutral".
+function Chip({ wariant = "neutral", children, title }) {
+  const M = {
+    warn: { kolor: C.czerwony, tlo: "#FBECEA" },
+    ok: { kolor: C.zielony, tlo: "#E6F3EA" },
+    hold: { kolor: "#B9791A", tlo: "#FBF0DC" },
+    neutral: { kolor: C.szary, tlo: C.jasny },
+  }[wariant] || { kolor: C.szary, tlo: C.jasny };
+  return (
+    <span title={title} style={{ display: "inline-flex", alignItems: "center", gap: 7, fontFamily: C.mono, fontSize: 10, letterSpacing: "0.08em", textTransform: "uppercase", fontWeight: 700, padding: "5px 10px", borderRadius: 999, color: M.kolor, background: M.tlo, whiteSpace: "nowrap" }}>
+      <span style={{ width: 7, height: 7, borderRadius: "50%", background: "currentColor", flexShrink: 0 }} />
+      {children}
+    </span>
+  );
+}
+
+// Pasek postępu (zaawansowanie) — cienki, złoty; z opcjonalnym podpisem pod spodem.
+function PasekPostepu({ proc, etykieta, szer = 120 }) {
+  const p = Math.max(0, Math.min(100, Number(proc) || 0));
+  const pelny = p >= 100;
+  return (
+    <div style={{ width: szer }}>
+      <div style={{ height: 6, borderRadius: 3, background: C.linia, overflow: "hidden" }}>
+        <div style={{ height: "100%", width: `${p}%`, background: pelny ? C.zielony : C.zolty }} />
+      </div>
+      {etykieta !== undefined && (
+        <div style={{ fontFamily: C.mono, fontSize: 10, color: C.szary, marginTop: 4, display: "flex", justifyContent: "space-between" }}>
+          <span>{etykieta}</span><span>{proc == null ? "—" : `${p}%`}</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // Wspólny pasek nawigacji — jeden dla wszystkich widoków (formularz, archiwum, panel).
 // aktywny: "form" | "archiwum" | "admin". Zakładka panelu tylko dla admina.
 function PasekNawigacji({ aktywny, jestAdmin, email, onForm, onArchiwum, onKoordynacja, onAdmin, onWyloguj }) {
@@ -2256,22 +2310,26 @@ function PanelAdmina({ pokazToast, email, onForm, onArchiwum, onKoordynacja, onW
       />
 
       <main style={{ maxWidth: 1080, margin: "0 auto", padding: "28px 24px 80px" }}>
-        {/* Zakładki panelu + odśwież */}
-        <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", marginBottom: 22, borderBottom: `2px solid ${C.linia}` }}>
-          <div style={{ display: "flex", gap: 4 }}>
-            {[["zarzadzanie", "Zarządzanie"], ["koordynacja", "Koordynacja PM"], ["inwestycje", "Koordynacja Inwestycji"]].map(([kod, et]) => (
-              <button key={kod} onClick={() => setZakladka(kod)}
-                style={{ border: "none", background: "transparent", padding: "10px 18px", fontSize: 14, fontWeight: 700, cursor: "pointer",
-                  color: zakladka === kod ? C.czarny : C.szary,
-                  borderBottom: zakladka === kod ? `3px solid ${C.zolty}` : "3px solid transparent", marginBottom: -2 }}>
-                {et}
-              </button>
-            ))}
-          </div>
-          <button onClick={async () => { await wczytaj(); pokazToast("Odświeżono dane"); }}
-            style={{ border: `1px solid ${C.linia}`, background: C.bialy, borderRadius: 6, padding: "7px 14px", fontSize: 13, fontWeight: 600, cursor: "pointer", marginBottom: 6, color: C.czarny }}>
-            ↻ Odśwież
-          </button>
+        <NaglowekEkranu
+          eyebrow="Administracja"
+          tytul="Użytkownicy i uprawnienia"
+          akcje={
+            <button onClick={async () => { await wczytaj(); pokazToast("Odświeżono dane"); }}
+              style={{ ...miniBtn, padding: "8px 14px", fontWeight: 600 }}>
+              ↻ Odśwież
+            </button>
+          }
+        />
+        {/* Zakładki panelu */}
+        <div style={{ display: "flex", alignItems: "flex-end", marginBottom: 22, borderBottom: `2px solid ${C.linia}`, gap: 4, flexWrap: "wrap" }}>
+          {[["zarzadzanie", "Zarządzanie"], ["koordynacja", "Koordynacja PM"], ["inwestycje", "Koordynacja Inwestycji"]].map(([kod, et]) => (
+            <button key={kod} onClick={() => setZakladka(kod)}
+              style={{ border: "none", background: "transparent", padding: "10px 16px", fontFamily: C.mono, fontSize: 11, letterSpacing: "0.08em", textTransform: "uppercase", fontWeight: zakladka === kod ? 700 : 400, cursor: "pointer",
+                color: zakladka === kod ? C.czarny : C.szary,
+                borderBottom: zakladka === kod ? `3px solid ${C.zolty}` : "3px solid transparent", marginBottom: -2 }}>
+              {et}
+            </button>
+          ))}
         </div>
         {ladowanie ? (
           <div style={{ textAlign: "center", padding: 40, color: C.szary }}>Wczytywanie…</div>
@@ -2293,44 +2351,42 @@ function PanelAdmina({ pokazToast, email, onForm, onArchiwum, onKoordynacja, onW
           <>
             {/* Użytkownicy i role */}
             <section style={card}>
-              <div style={secTitle}>Użytkownicy i role</div>
-              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13.5 }}>
+              <div style={secTitle}><span style={{ color: C.zolty, fontWeight: 700 }}>/ </span>Użytkownicy i role</div>
+              <div className="tabela-scroll-own" style={{ overflowX: "auto" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13, minWidth: 520 }}>
                 <thead>
-                  <tr style={{ borderBottom: `2px solid ${C.linia}` }}>
-                    <th style={{ textAlign: "left", padding: "8px 10px", color: C.szary, fontSize: 11, textTransform: "uppercase" }}>Imię i nazwisko</th>
-                    <th style={{ textAlign: "left", padding: "8px 10px", color: C.szary, fontSize: 11, textTransform: "uppercase" }}>E-mail</th>
-                    <th style={{ textAlign: "center", padding: "8px 10px", color: C.szary, fontSize: 11, textTransform: "uppercase" }}>Rola</th>
-                    <th style={{ textAlign: "right", padding: "8px 10px" }}></th>
+                  <tr>
+                    <th style={thAdm}>Imię i nazwisko</th>
+                    <th style={thAdm}>E-mail</th>
+                    <th style={{ ...thAdm, textAlign: "center" }}>Rola</th>
                   </tr>
                 </thead>
                 <tbody>
                   {uzytkownicy.map((u) => (
                     <tr key={u.id} style={{ borderBottom: `1px solid ${C.linia}` }}>
-                      <td style={{ padding: "8px 10px" }}>
+                      <td style={{ padding: "10px 12px" }}>
                         <input type="text" defaultValue={u.imie_nazwisko || ""} placeholder="—"
                           onBlur={(e) => zapiszImie(u.id, e.target.value)}
-                          style={{ width: "100%", padding: "6px 8px", border: `1px solid ${C.linia}`, borderRadius: 6, fontSize: 13.5 }} />
+                          style={{ width: "100%", padding: "6px 8px", border: `1px solid ${C.linia}`, borderRadius: 6, fontSize: 13.5, background: "#FCFBF8" }} />
                       </td>
-                      <td style={{ padding: "10px", color: C.szary, fontSize: 12.5 }}>{u.email}</td>
-                      <td style={{ padding: "10px", textAlign: "center" }}>
-                        <span style={{ fontSize: 11, fontWeight: 700, padding: "3px 10px", borderRadius: 12, color: u.rola === "admin" ? C.czarny : C.szary, background: u.rola === "admin" ? C.zolty : C.jasny }}>
-                          {u.rola === "admin" ? "ADMIN" : "PM"}
+                      <td style={{ padding: "10px 12px", color: C.szary, fontFamily: C.mono, fontSize: 11.5 }}>{u.email}</td>
+                      <td style={{ padding: "10px 12px", textAlign: "center" }}>
+                        <span style={{ display: "inline-flex", border: `1px solid ${C.linia}`, borderRadius: 999, overflow: "hidden", fontFamily: C.mono, fontSize: 10, letterSpacing: "0.06em", cursor: "pointer" }}
+                          onClick={() => przelaczRole(u)} title="Kliknij, aby przełączyć rolę">
+                          <span style={{ padding: "5px 12px", background: u.rola === "admin" ? C.czarny : "transparent", color: u.rola === "admin" ? C.zoltyBright : C.szary, fontWeight: u.rola === "admin" ? 700 : 400 }}>Admin</span>
+                          <span style={{ padding: "5px 12px", background: u.rola !== "admin" ? C.czarny : "transparent", color: u.rola !== "admin" ? C.zoltyBright : C.szary, fontWeight: u.rola !== "admin" ? 700 : 400 }}>PM</span>
                         </span>
-                      </td>
-                      <td style={{ padding: "10px", textAlign: "right" }}>
-                        <button style={miniBtn} onClick={() => przelaczRole(u)}>
-                          {u.rola === "admin" ? "Cofnij admina" : "Nadaj admina"}
-                        </button>
                       </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
+              </div>
             </section>
 
             {/* Przypisania PM -> inwestycje */}
             <section style={card}>
-              <div style={secTitle}>Przypisania PM do inwestycji</div>
+              <div style={secTitle}><span style={{ color: C.zolty, fontWeight: 700 }}>/ </span>Przypisania PM do inwestycji</div>
               <p style={{ color: C.szary, fontSize: 13, marginTop: -6, marginBottom: 14 }}>
                 Wybierz użytkownika, a następnie zaznacz budowy, dla których ma móc tworzyć raporty. Administrator ma dostęp do wszystkich budów niezależnie od przypisań.
               </p>
@@ -3081,7 +3137,7 @@ function WidokKtoCoProwadzi({ jestAdmin, email, onForm, onArchiwum, onAdmin, onW
     })();
   }, []);
 
-  const th = { textAlign: "left", padding: "9px 12px", color: C.szary, fontSize: 11, textTransform: "uppercase", letterSpacing: .5, borderBottom: `2px solid ${C.linia}` };
+  const th = { textAlign: "left", padding: "9px 12px", color: C.szary, fontFamily: C.mono, fontSize: 9.5, fontWeight: 400, textTransform: "uppercase", letterSpacing: "0.1em", borderBottom: `2px solid ${C.linia}` };
   const td = { padding: "9px 12px", borderBottom: `1px solid ${C.jasny}`, fontSize: 13.5 };
 
   return (
@@ -3098,24 +3154,24 @@ function WidokKtoCoProwadzi({ jestAdmin, email, onForm, onArchiwum, onAdmin, onW
         onWyloguj={onWyloguj}
       />
       <main style={{ maxWidth: 1080, margin: "0 auto", padding: "28px 24px 80px" }}>
-        <h1 style={{ fontSize: 22, fontWeight: 800, marginBottom: 12 }}>Kto co prowadzi</h1>
-
-        {/* Przełącznik widoku */}
-        <div style={{ display: "flex", border: `1px solid ${C.linia}`, borderRadius: 8, overflow: "hidden", width: "fit-content", marginBottom: 12 }}>
-          {[["pm", "Wg kierownika"], ["inwestycje", "Wg inwestycji"]].map(([kod, et]) => (
-            <button key={kod} onClick={() => setTryb(kod)}
-              style={{ border: "none", background: tryb === kod ? C.czarny : C.bialy, color: tryb === kod ? C.bialy : C.czarny,
-                padding: "8px 18px", fontSize: 13, fontWeight: 600, cursor: "pointer", borderRight: kod === "pm" ? `1px solid ${C.linia}` : "none" }}>
-              {et}
-            </button>
-          ))}
-        </div>
-
-        <p style={{ color: C.szary, fontSize: 13.5, marginBottom: 22 }}>
-          {tryb === "pm"
+        <NaglowekEkranu
+          eyebrow="Koordynacja"
+          tytul="Kto co prowadzi"
+          sub={tryb === "pm"
             ? "Zestawienie kierowników i przypisanych im inwestycji. Data zakończenia pochodzi z harmonogramu (najpóźniejsza z terminów) lub z ręcznego wpisu w panelu koordynacji."
             : "Zestawienie inwestycji i przypisanych do nich kierowników. Data zakończenia pochodzi z harmonogramu (najpóźniejsza z terminów) lub z ręcznego wpisu w panelu koordynacji."}
-        </p>
+          akcje={
+            <div style={{ display: "inline-flex", border: `1px solid ${C.linia}`, borderRadius: 999, overflow: "hidden", fontFamily: C.mono, fontSize: 10.5, letterSpacing: "0.06em", textTransform: "uppercase" }}>
+              {[["pm", "Wg kierownika"], ["inwestycje", "Wg inwestycji"]].map(([kod, et]) => (
+                <button key={kod} onClick={() => setTryb(kod)}
+                  style={{ border: "none", background: tryb === kod ? C.czarny : C.bialy, color: tryb === kod ? C.zoltyBright : C.szary,
+                    fontWeight: tryb === kod ? 700 : 400, padding: "7px 14px", cursor: "pointer", fontFamily: "inherit", letterSpacing: "inherit", textTransform: "inherit" }}>
+                  {et}
+                </button>
+              ))}
+            </div>
+          }
+        />
 
         {ladowanie ? (
           <div style={{ textAlign: "center", padding: 40, color: C.szary }}>Wczytywanie…</div>
@@ -3201,10 +3257,10 @@ function WidokArchiwum({ raporty, ladowanie, filtr, setFiltr, onOdswiez, onOtwor
   // Status na plakietce czyta z pola „Podsumowanie" raportu. Dodatkowo, gdy opóźnienie
   // w harmonogramie realnie opóźnia zakończenie całości projektu, wymuszamy „zagrożenie"
   // (zabezpiecza też starsze raporty zapisane z domyślną opcją „nie powoduje zagrożenia").
-  const ZAGROZENIE = { txt: "Zagrożenie terminu", kolor: "#C0392B", tlo: "#FBECEA" };
-  const NIEZAGROZONY = { txt: "Termin niezagrożony", kolor: "#1B7A3D", tlo: "#E6F3EA" };
+  const ZAGROZENIE = { txt: "Zagrożenie terminu", kolor: "#C0392B", tlo: "#FBECEA", wariant: "warn" };
+  const NIEZAGROZONY = { txt: "Termin niezagrożony", kolor: "#1B7A3D", tlo: "#E6F3EA", wariant: "ok" };
   function statusInwestycji(raport) {
-    if (!raport) return { txt: "—", kolor: C.szary, tlo: "transparent" };
+    if (!raport) return { txt: "—", kolor: C.szary, tlo: "transparent", wariant: "neutral" };
     if (harmonogramWymuszaZagrozenie(raport.harmonogram, raport.data_opracowania)) return ZAGROZENIE;
     const t = (raport.podsumowanie || "").toLowerCase();
     const brakZagrozenia = t.includes("nie powoduje") || t.includes("niezagroż") || t.includes("nie ma zagroż") || t.includes("bez zagroż");
@@ -3231,14 +3287,16 @@ function WidokArchiwum({ raporty, ladowanie, filtr, setFiltr, onOdswiez, onOtwor
         onAdmin={onAdmin}
         onWyloguj={onWyloguj}
       />
-      <div style={{ background: C.grafit, borderBottom: `1px solid ${C.linia}` }}>
-        <div style={{ maxWidth: 1080, margin: "0 auto", padding: "10px 24px", display: "flex", justifyContent: "flex-end", gap: 12, alignItems: "center" }}>
-          <button onClick={onOdswiez} style={btnGhostDark}>Odśwież</button>
-          <button onClick={onNowyRaport} style={{ background: C.zolty, color: C.czarny, border: "none", padding: "8px 18px", borderRadius: 6, fontWeight: 700, fontSize: 13, cursor: "pointer", fontFamily: "inherit" }}>+ Nowy raport</button>
-        </div>
-      </div>
-
       <main style={{ maxWidth: 1080, margin: "0 auto", padding: "28px 24px 80px" }}>
+        <NaglowekEkranu
+          eyebrow="Archiwum"
+          tytul="Raporty z budów"
+          sub="Kliknij kartę budowy, aby zawęzić listę. Otwórz raport, by pobrać PDF lub udostępnić link."
+          akcje={<>
+            <button onClick={onOdswiez} style={{ ...miniBtn, padding: "8px 14px", fontWeight: 600 }}>↻ Odśwież</button>
+            <button onClick={onNowyRaport} style={{ background: C.zolty, color: C.czarny, border: "none", padding: "9px 16px", borderRadius: 6, fontWeight: 700, fontSize: 12.5, cursor: "pointer", fontFamily: "inherit" }}>+ Nowy raport</button>
+          </>}
+        />
         {ladowanie && (
           <div style={{ textAlign: "center", padding: 40, color: C.szary }}>Wczytywanie z bazy…</div>
         )}
@@ -3270,12 +3328,9 @@ function WidokArchiwum({ raporty, ladowanie, filtr, setFiltr, onOdswiez, onOtwor
                       transition: "border-color .15s",
                     }}
                   >
-                    <div style={{ fontWeight: 800, fontSize: 15, marginBottom: 8 }}>{b.nazwa}</div>
-                    <div style={{ fontSize: 13, color: C.szary, marginBottom: 4 }}>
-                      Raportów: <strong style={{ color: C.czarny }}>{b.liczba}</strong> · ostatni: <strong style={{ color: C.czarny }}>nr {b.ostatni?.numer}</strong>
-                    </div>
-                    <div style={{ fontSize: 12, color: C.szary, marginBottom: 10 }}>
-                      {b.ostatni?.data_opracowania ? fmtPL(b.ostatni.data_opracowania) : "—"}
+                    <div style={{ fontWeight: 800, fontSize: 15, marginBottom: 6 }}>{b.nazwa}</div>
+                    <div style={{ fontFamily: C.mono, fontSize: 10, letterSpacing: "0.03em", color: C.szary2, textTransform: "uppercase", marginBottom: 12 }}>
+                      {b.liczba} {b.liczba === 1 ? "raport" : "raportów"} · nr {b.ostatni?.numer} · {b.ostatni?.data_opracowania ? fmtPL(b.ostatni.data_opracowania) : "—"}
                     </div>
                     {(() => {
                       const o = b.ostatni || {};
@@ -3283,13 +3338,13 @@ function WidokArchiwum({ raporty, ladowanie, filtr, setFiltr, onOdswiez, onOtwor
                       const opoz = opoznienieInwestycji(o.harmonogram, o.data_opracowania);
                       const komorka = (etykieta, wartosc, kolor) => (
                         <div style={{ flex: "1 1 calc(50% - 4px)", background: C.jasny, borderRadius: 6, padding: "6px 8px" }}>
-                          <div style={{ fontSize: 9.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.4, color: C.szary }}>{etykieta}</div>
+                          <div style={{ fontFamily: C.mono, fontSize: 9, fontWeight: 400, textTransform: "uppercase", letterSpacing: "0.08em", color: C.szary2 }}>{etykieta}</div>
                           <div style={{ fontSize: 13, fontWeight: 700, color: kolor || C.czarny }}>{wartosc}</div>
                         </div>
                       );
-                      return (
-                        <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 10 }}>
-                          {komorka("Postęp ogólny", postep !== null ? `${postep}%` : "—")}
+                      return (<>
+                        {postep !== null && <div style={{ marginBottom: 10 }}><PasekPostepu proc={postep} etykieta="zaawansowanie" szer="100%" /></div>}
+                        <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 12 }}>
                           {komorka(
                             "Opóźnienie",
                             opoz === null ? "—" : opoz.dni > 0 ? `${opoz.dni} dni` : "brak",
@@ -3302,11 +3357,9 @@ function WidokArchiwum({ raporty, ladowanie, filtr, setFiltr, onOdswiez, onOtwor
                           })())}
                           {komorka("Pozwolenie (PNU)", o.pnu_nie_dotyczy ? "Nie dotyczy" : (o.pnu ? fmtPL(o.pnu) : "—"))}
                         </div>
-                      );
+                      </>);
                     })()}
-                    <span style={{ display: "inline-block", fontSize: 11, fontWeight: 700, padding: "3px 10px", borderRadius: 20, color: st.kolor, background: st.tlo }}>
-                      {st.txt}
-                    </span>
+                    <Chip wariant={st.wariant}>{st.txt}</Chip>
                   </div>
                 );
               })}
@@ -3316,82 +3369,70 @@ function WidokArchiwum({ raporty, ladowanie, filtr, setFiltr, onOdswiez, onOtwor
             {filtr && (
               <div style={{ marginBottom: 14, fontSize: 13, color: C.szary }}>
                 Filtr: <strong style={{ color: C.czarny }}>{filtr}</strong> ·{" "}
-                <span onClick={() => setFiltr("")} style={{ color: "#1668C7", cursor: "pointer", textDecoration: "underline" }}>pokaż wszystkie</span>
+                <span onClick={() => setFiltr("")} style={{ color: C.zoltyDeep, fontWeight: 600, cursor: "pointer", textDecoration: "underline" }}>pokaż wszystkie</span>
               </div>
             )}
 
-            {/* 2) Lista raportów */}
-            <div style={{ background: C.bialy, border: `1px solid ${C.linia}`, borderRadius: 10, overflow: "hidden" }}>
-              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13.5 }}>
-                <thead>
-                  <tr style={{ background: C.czarny }}>
-                    <th style={thArch}>Nr</th>
-                    <th style={{ ...thArch, textAlign: "left" }}>Budowa</th>
-                    <th style={thArch}>Okres</th>
-                    <th style={thArch}>Data</th>
-                    <th style={{ ...thArch, textAlign: "left" }}>Opracował</th>
-                    <th style={thArch}>Status</th>
-                    <th style={thArch}></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {widoczne.map((r) => {
-                    const st = statusInwestycji(r);
-                    return (
-                      <tr key={r.id} style={{ borderTop: `1px solid ${C.linia}` }}>
-                        <td style={{ ...tdArch, fontWeight: 800, textAlign: "center" }}>{r.numer}</td>
-                        <td style={{ ...tdArch, fontWeight: 600 }}>{r.nazwaProjektu}</td>
-                        <td style={{ ...tdArch, textAlign: "center", whiteSpace: "nowrap" }}>
-                          {r.okres_od ? `${fmtPL(r.okres_od)} – ${fmtPL(r.okres_do)}` : "—"}
-                        </td>
-                        <td style={{ ...tdArch, textAlign: "center", whiteSpace: "nowrap" }}>{r.data_opracowania ? fmtPL(r.data_opracowania) : "—"}</td>
-                        <td style={tdArch}>{r.opracowal || "—"}</td>
-                        <td style={{ ...tdArch, textAlign: "center" }}>
-                          <span style={{ display: "inline-block", width: 11, height: 11, borderRadius: "50%", background: st.kolor }} title={st.txt} />
-                        </td>
-                        <td style={{ ...tdArch }}>
-                          <div style={{ display: "flex", flexWrap: "wrap", gap: 6, justifyContent: "flex-end", alignItems: "center" }}>
-                            {mozeEdytowac && mozeEdytowac(r) && (() => {
-                              const h = godzinyDoEdycji && godzinyDoEdycji(r);
-                              return (
-                                <>
-                                  <button onClick={() => onEdytuj(r.id)} style={{ ...miniBtn, background: C.bialy, border: `1px solid ${C.linia}`, fontWeight: 600 }}>Edytuj</button>
-                                  {h != null && (
-                                    <span style={{ fontSize: 11, color: C.szary, whiteSpace: "nowrap" }} title="Czas, przez jaki możesz jeszcze edytować ten raport">zostało ~{h}h</span>
-                                  )}
-                                </>
-                              );
-                            })()}
-                            <button onClick={() => onOtworz(r.id)} title="Podgląd raportu — stamtąd zapiszesz PDF lub wygenerujesz link do raportu" style={{ ...miniBtn, background: C.zolty, border: "none", fontWeight: 700 }}>Otwórz</button>
-                            {jestAdmin && onPozwolEdycje && (() => {
-                              const aktywne = r.edycja_do && new Date(r.edycja_do).getTime() > Date.now();
-                              if (aktywne) {
-                                const h = Math.max(1, Math.ceil((new Date(r.edycja_do).getTime() - Date.now()) / (3600 * 1000)));
-                                return (
-                                  <>
-                                    <span style={{ fontSize: 11, color: "#1B7A3D", whiteSpace: "nowrap" }} title="Edycja odblokowana — autor i przypisani PM mogą edytować">edycja otwarta ~{h}h</span>
-                                    <button onClick={() => onPozwolEdycje(r)} title="Przedłuż okno edycji o kolejne 24h" style={{ ...miniBtn, background: C.bialy, border: `1px solid ${C.linia}`, fontWeight: 600 }}>Przedłuż</button>
-                                    <button onClick={() => onCofnijEdycje(r)} title="Zamknij okno edycji od razu" style={{ ...miniBtn, background: C.bialy, border: `1px solid ${C.linia}`, fontWeight: 600 }}>Cofnij</button>
-                                  </>
-                                );
-                              }
-                              return (
-                                <button onClick={() => onPozwolEdycje(r)} title="Odblokuj edycję tego raportu na 24h — dla autora i PM przypisanych do budowy" style={{ ...miniBtn, background: C.bialy, border: `1px solid ${C.linia}`, fontWeight: 600 }}>Pozwól na edycję</button>
-                              );
-                            })()}
-                            {jestAdmin && onUsun && (
-                              <button onClick={() => onUsun(r)} title="Usuń raport wraz ze zdjęciami (nieodwracalne)"
-                                style={{ ...miniBtn, background: C.bialy, border: `1px solid ${C.czerwony}`, color: C.czerwony, fontWeight: 600 }}>
-                                Usuń
-                              </button>
+            {/* 2) Lista raportów — wiersze w stylu abyard.com (numbadge + meta mono + postęp + chip) */}
+            <div style={{ background: C.bialy, border: `1px solid ${C.linia}`, borderRadius: 10, padding: "4px 20px" }}>
+              {widoczne.map((r, idx) => {
+                const st = statusInwestycji(r);
+                const postep = sredniPostep(r.harmonogram);
+                const meta = [
+                  r.okres_od ? `${fmtPL(r.okres_od)} – ${fmtPL(r.okres_do)}` : null,
+                  r.data_opracowania ? fmtPL(r.data_opracowania) : null,
+                  r.opracowal || null,
+                ].filter(Boolean).join(" · ");
+                return (
+                  <div key={r.id} style={{ display: "flex", alignItems: "center", gap: 16, padding: "15px 4px", borderBottom: idx === widoczne.length - 1 ? "none" : `1px solid ${C.linia}`, flexWrap: "wrap" }}>
+                    <div style={{ fontFamily: "'Roboto', system-ui, sans-serif", fontWeight: 900, fontSize: 22, color: C.czarny, width: 66, flexShrink: 0 }}>
+                      <span style={{ color: C.zolty }}>/</span>{String(r.numer).padStart(3, "0")}
+                    </div>
+                    <div style={{ flex: "1 1 200px", minWidth: 0 }}>
+                      <div style={{ fontWeight: 700, fontSize: 15, color: C.czarny }}>{r.nazwaProjektu}</div>
+                      <div style={{ fontFamily: C.mono, fontSize: 10.5, color: C.szary2, marginTop: 3, letterSpacing: "0.02em", textTransform: "uppercase" }}>{meta || "—"}</div>
+                    </div>
+                    {postep !== null && <PasekPostepu proc={postep} etykieta="zaawansowanie" szer={120} />}
+                    <Chip wariant={st.wariant} title={st.txt}>{st.wariant === "warn" ? "Zagrożenie" : st.wariant === "ok" ? "Niezagrożony" : st.txt}</Chip>
+                    <div className="arow-act" style={{ display: "flex", flexWrap: "wrap", gap: 6, justifyContent: "flex-end", alignItems: "center", flexShrink: 0 }}>
+                      {mozeEdytowac && mozeEdytowac(r) && (() => {
+                        const h = godzinyDoEdycji && godzinyDoEdycji(r);
+                        return (
+                          <>
+                            <button onClick={() => onEdytuj(r.id)} style={{ ...miniBtn, background: C.bialy, border: `1px solid ${C.linia}`, fontWeight: 600 }}>Edytuj</button>
+                            {h != null && (
+                              <span style={{ fontFamily: C.mono, fontSize: 10, color: C.szary, whiteSpace: "nowrap" }} title="Czas, przez jaki możesz jeszcze edytować ten raport">~{h}h</span>
                             )}
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+                          </>
+                        );
+                      })()}
+                      <button onClick={() => onOtworz(r.id)} title="Podgląd raportu — stamtąd zapiszesz PDF lub wygenerujesz link do raportu" style={{ ...miniBtn, background: C.zolty, border: "none", fontWeight: 700 }}>Otwórz</button>
+                      {jestAdmin && onPozwolEdycje && (() => {
+                        const aktywne = r.edycja_do && new Date(r.edycja_do).getTime() > Date.now();
+                        if (aktywne) {
+                          const h = Math.max(1, Math.ceil((new Date(r.edycja_do).getTime() - Date.now()) / (3600 * 1000)));
+                          return (
+                            <>
+                              <span style={{ fontFamily: C.mono, fontSize: 10, color: "#1B7A3D", whiteSpace: "nowrap" }} title="Edycja odblokowana — autor i przypisani PM mogą edytować">otwarta ~{h}h</span>
+                              <button onClick={() => onPozwolEdycje(r)} title="Przedłuż okno edycji o kolejne 24h" style={{ ...miniBtn, background: C.bialy, border: `1px solid ${C.linia}`, fontWeight: 600 }}>Przedłuż</button>
+                              <button onClick={() => onCofnijEdycje(r)} title="Zamknij okno edycji od razu" style={{ ...miniBtn, background: C.bialy, border: `1px solid ${C.linia}`, fontWeight: 600 }}>Cofnij</button>
+                            </>
+                          );
+                        }
+                        return (
+                          <button onClick={() => onPozwolEdycje(r)} title="Odblokuj edycję tego raportu na 24h — dla autora i PM przypisanych do budowy" style={{ ...miniBtn, background: C.bialy, border: `1px solid ${C.linia}`, fontWeight: 600 }}>Pozwól na edycję</button>
+                        );
+                      })()}
+                      {jestAdmin && onUsun && (
+                        <button onClick={() => onUsun(r)} title="Usuń raport wraz ze zdjęciami (nieodwracalne)"
+                          style={{ ...miniBtn, background: C.bialy, border: `1px solid ${C.czerwony}`, color: C.czerwony, fontWeight: 600 }}>
+                          Usuń
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
             </div>
             <div style={{ marginTop: 12, fontSize: 12, color: C.szary, textAlign: "right" }}>
               Raportów w archiwum: {widoczne.length}{filtr ? ` (z ${lista.length})` : ""}
@@ -4561,6 +4602,8 @@ const cellInp = { border: "none", background: "transparent", fontSize: 13, fontF
 const thHarmPdf = { background: C.czarny, color: C.zolty, fontSize: 9.5, fontWeight: 700, padding: "5px 4px", textAlign: "center", border: `1px solid ${C.grafit}` };
 const tdHarmPdf = { padding: "4px", border: `1px solid ${C.linia}`, textAlign: "center", fontSize: 10.5 };
 const thArch = { color: C.zolty, fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.5, padding: "12px 14px", textAlign: "center" };
+// Nagłówek tabeli admina — mono, dolna kreska w kolorze atramentu (jak .atbl th w mockupie).
+const thAdm = { fontFamily: C.mono, fontSize: 9.5, fontWeight: 400, letterSpacing: "0.1em", textTransform: "uppercase", color: C.szary, textAlign: "left", padding: "10px 12px", borderBottom: `2px solid ${C.czarny}` };
 const tdArch = { padding: "12px 14px", color: C.czarny, verticalAlign: "middle" };
 
 const globalCSS = `
@@ -4583,6 +4626,9 @@ const globalCSS = `
        drugiego mechanizmu, bo zagnieżdżone przewijania blokują dojazd do końca. */
     .tabela-scroll-own { overflow-x: auto; -webkit-overflow-scrolling: touch; }
     .tabela-scroll-own table { display: table; width: 100%; }
+    /* Wiersz raportu w archiwum: na telefonie przyciski akcji dostają pełny wiersz
+       i zawijają się od lewej, żeby „Usuń" nie wychodził poza kartę. */
+    .arow-act { width: 100%; justify-content: flex-start !important; }
   }
 `;
 const printCSS = `
@@ -4655,3 +4701,4 @@ const printCSS = `
     .grafika-okladka { max-height: 108mm !important; width: auto !important; max-width: 100% !important; }
   }
 `;
+
