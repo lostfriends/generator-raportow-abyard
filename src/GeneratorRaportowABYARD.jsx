@@ -1313,14 +1313,20 @@ export default function GeneratorRaportowABYARD() {
     // Raport nr 1 ustanawia bazę finansową (wartości umowy pozycji harmonogramu),
     // którą dziedziczą kolejne raporty tej budowy — dlatego musi być kompletny:
     // cashflow włączony i KAŻDA pozycja harmonogramu z wartością umowy > 0.
-    const pierwszyRaport = (parseInt(form.numer, 10) || 0) === 1;
+    // Egzekwujemy TYLKO przy pierwszym utworzeniu raportu nr 1 (jeszcze nie zapisany
+    // w tej sesji ani nie otwarty do edycji z archiwum). Dzięki temu edycja starego
+    // (legacy) raportu nr 1 bez cashflow — np. poprawka literówki — nie jest blokowana.
+    const pierwszyRaport = (parseInt(form.numer, 10) || 0) === 1 && !zapisanyId;
     if (pierwszyRaport) {
-      if (!cashflowWlaczony) {
+      // Cashflow musi realnie istnieć: włączony ORAZ z jakąkolwiek wartością umowy.
+      // Sam warunek `cashflowWlaczony` nie wystarczy — pusty/nietknięty harmonogram
+      // (PUSTY_RAPORT.harmonogram = null) przeszedłby blokadę mimo zera cashflow.
+      if (!cashflowWlaczony || !harmonogramMaKwoty(form.harmonogram)) {
         window.alert(
           "Nie można zapisać pierwszego raportu tej inwestycji bez cashflow.\n\n" +
           "Cashflow (wartości umowy pozycji harmonogramu) jest obowiązkowy dla raportu nr 1 — " +
           "ustanawia bazę finansową dziedziczoną przez kolejne raporty tej budowy.\n\n" +
-          "Włącz cashflow w sekcji harmonogramu i uzupełnij wartości umowy."
+          "Włącz cashflow w sekcji harmonogramu i uzupełnij wartości umowy przy pozycjach."
         );
         return;
       }
@@ -1422,8 +1428,9 @@ export default function GeneratorRaportowABYARD() {
   // Czy można generować raport? Tylko gdy jest zapisany w bazie i nie ma zmian
   // niezapisanych — inaczej PM wygenerowałby raport bez świeżo dodanych zdjęć.
   const mozeGenerowac = !!zapisanyId && !niezapisaneZmiany;
-  // Pierwszy raport inwestycji (nr 1) — dla niego cashflow jest obowiązkowy.
-  const pierwszyRaportForm = (parseInt(form.numer, 10) || 0) === 1;
+  // Pierwszy raport inwestycji (nr 1), świeżo tworzony (nie z edycji archiwum) —
+  // tylko dla niego cashflow jest obowiązkowy (spójne z blokadą zapisu poniżej).
+  const pierwszyRaportForm = (parseInt(form.numer, 10) || 0) === 1 && !zapisanyId;
 
   // Otwiera podgląd raportu — tam użytkownik wybiera: zapis do PDF lub link
   // dla inwestora (druk nie odpala się już automatycznie).
@@ -1589,6 +1596,9 @@ export default function GeneratorRaportowABYARD() {
       f.projekt = w.projekty?.nazwa || "";
       pomijajDirtyRef.current = true;    // to wczytanie to nie zmiana użytkownika
       setForm(f);
+      // Stan cashflow ustaw jawnie wg wczytanego raportu (inaczej mógłby „zawisnąć"
+      // na true z poprzedniej pracy i pokazać pustą kolumnę wartości dla raportu bez kwot).
+      setCashflowWlaczony(harmonogramMaKwoty(f.harmonogram));
       setZapisanyId(id);                 // kolejny zapis nadpisze ten raport
       wczytanaBudowaRef.current = f.projekt; // nie wymuszaj przeładowania budowy
       // załaduj surowe pliki jako już-wgrane URL-e, by nie wgrywać ich ponownie
