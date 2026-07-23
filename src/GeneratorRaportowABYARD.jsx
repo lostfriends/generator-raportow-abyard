@@ -2040,6 +2040,11 @@ export default function GeneratorRaportowABYARD() {
             )}
           </div>
 
+          {/* Harmonogram jako obraz — UKRYTY dla pierwszego raportu nowej inwestycji.
+              Raport nr 1 ustanawia bazę: wymagamy ręcznie wprowadzonego harmonogramu
+              (tabela ZZK + cashflow), więc opcja wgrania obrazu (który zastąpiłby tabelę)
+              nie ma tu sensu i znika. Dla kolejnych raportów sekcja działa jak dotąd. */}
+          {!pierwszyRaportForm && (
           <div style={{ marginTop: 20, paddingTop: 16, borderTop: `1px solid ${C.linia}` }}>
             <label style={lbl}>Harmonogram jako obraz (dla złożonych projektów — np. zrzut z MS Project)</label>
             <p style={{ fontSize: 12, color: C.szary, marginTop: -2, marginBottom: 10 }}>
@@ -2066,6 +2071,7 @@ export default function GeneratorRaportowABYARD() {
               </div>
             )}
           </div>
+          )}
         </Sekcja>
 
         {/* Zdjęcia */}
