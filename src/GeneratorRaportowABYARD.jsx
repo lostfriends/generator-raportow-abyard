@@ -330,6 +330,27 @@ function harmonogramMaKwoty(harmonogram) {
   return (harmonogram || []).some((w) => kwotaZadania(w) > 0);
 }
 
+// Pozycje harmonogramu BEZ uzupełnionej wartości umowy (cashflow) — do egzekwowania
+// obowiązkowego cashflow w 1. raporcie nowej inwestycji. Liczymy „liście":
+//   • pozycja z podpozycjami → każda podpozycja z treścią musi mieć kwotę > 0,
+//   • pozycja bez podpozycji → sama musi mieć kwotę > 0.
+// Puste wiersze (bez nazwy zadania) pomijamy. Zwraca [{etykieta}] braków.
+function brakiCashflowu(harmonogram) {
+  const braki = [];
+  (harmonogram || []).forEach((w, i) => {
+    const maNazwe = (w.zadanie || "").trim();
+    if (maPodpozycje(w)) {
+      (w.pod || []).forEach((p, j) => {
+        const tresc = p && (p.zadanie || p.start || p.koniec || p.rzecz || p.proc);
+        if (tresc && !((parseFloat(p.kwota) || 0) > 0)) braki.push(`${i + 1}.${j + 1} ${p.zadanie || "(podpozycja)"}`);
+      });
+    } else if (maNazwe) {
+      if (!((parseFloat(w.kwota) || 0) > 0)) braki.push(`${i + 1}. ${w.zadanie}`);
+    }
+  });
+  return braki;
+}
+
 // Rozkład kwoty liniowo-kalendarzowo między start a koniec (włącznie).
 // Zwraca mapę { "YYYY-MM": kwota }.
 function rozlozKalendarzowo(start, koniec, kwota) {
@@ -1213,6 +1234,8 @@ export default function GeneratorRaportowABYARD() {
           harmonogramObrazy: [],
         });
         plikiRef.current = { grafika: null, harm: [], zdjecia: [] };
+        // Kolejny raport: cashflow włączony tylko, gdy poprzedni raport miał kwoty.
+        setCashflowWlaczony(harmonogramMaKwoty(bazowy.harmonogram));
         pokazToast(`Wczytano dane z raportu nr ${ost.numer} — do aktualizacji`);
       } else {
         // pierwszy raport tej budowy — czysty formularz (nie zostawiamy danych z poprzedniej budowy)
@@ -1224,6 +1247,9 @@ export default function GeneratorRaportowABYARD() {
           opracowal: nazwaZalogowanego || PUSTY_RAPORT.opracowal,
         });
         plikiRef.current = { grafika: null, harm: [], zdjecia: [] };
+        // Pierwszy raport nowej inwestycji: cashflow domyślnie WŁĄCZONY (można wyłączyć).
+        // To on ustanawia finansową bazę projektu, dziedziczoną przez kolejne raporty.
+        setCashflowWlaczony(true);
         pokazToast(`To pierwszy raport budowy „${nazwa}” — numer 1`);
       }
     } catch (e) {
@@ -1287,6 +1313,33 @@ export default function GeneratorRaportowABYARD() {
         `Nie można zapisać raportu.\n\nNastępujące zadania nie są ukończone (< 100%), a ich termin (prognoza/umowa) już minął. Zaktualizuj prognozowaną datę zakończenia lub ustaw 100%:\n\n${lista}${wiecej}`
       );
       return;
+    }
+    // Egzekwowanie obowiązkowego cashflow dla PIERWSZEGO raportu inwestycji.
+    // Raport nr 1 ustanawia bazę finansową (wartości umowy pozycji harmonogramu),
+    // którą dziedziczą kolejne raporty tej budowy — dlatego musi być kompletny:
+    // cashflow włączony i KAŻDA pozycja harmonogramu z wartością umowy > 0.
+    const pierwszyRaport = (parseInt(form.numer, 10) || 0) === 1;
+    if (pierwszyRaport) {
+      if (!cashflowWlaczony) {
+        window.alert(
+          "Nie można zapisać pierwszego raportu tej inwestycji bez cashflow.\n\n" +
+          "Cashflow (wartości umowy pozycji harmonogramu) jest obowiązkowy dla raportu nr 1 — " +
+          "ustanawia bazę finansową dziedziczoną przez kolejne raporty tej budowy.\n\n" +
+          "Włącz cashflow w sekcji harmonogramu i uzupełnij wartości umowy."
+        );
+        return;
+      }
+      const braki = brakiCashflowu(form.harmonogram);
+      if (braki.length > 0) {
+        const lista = braki.slice(0, 12).join("\n");
+        const wiecej = braki.length > 12 ? `\n…i ${braki.length - 12} więcej` : "";
+        window.alert(
+          "Nie można zapisać pierwszego raportu tej inwestycji.\n\n" +
+          "Uzupełnij wartość umowy (cashflow) dla KAŻDEJ pozycji harmonogramu. Brakuje:\n\n" +
+          `${lista}${wiecej}`
+        );
+        return;
+      }
     }
     // Nadpisanie istniejącego raportu — wymagaj potwierdzenia
     if (zapisanyId) {
@@ -1374,6 +1427,8 @@ export default function GeneratorRaportowABYARD() {
   // Czy można generować raport? Tylko gdy jest zapisany w bazie i nie ma zmian
   // niezapisanych — inaczej PM wygenerowałby raport bez świeżo dodanych zdjęć.
   const mozeGenerowac = !!zapisanyId && !niezapisaneZmiany;
+  // Pierwszy raport inwestycji (nr 1) — dla niego cashflow jest obowiązkowy.
+  const pierwszyRaportForm = (parseInt(form.numer, 10) || 0) === 1;
 
   // Otwiera podgląd raportu — tam użytkownik wybiera: zapis do PDF lub link
   // dla inwestora (druk nie odpala się już automatycznie).
@@ -1933,18 +1988,32 @@ export default function GeneratorRaportowABYARD() {
           <div style={{ marginTop: 20, paddingTop: 16, borderTop: `1px solid ${C.linia}` }}>
             {!cashflowWlaczony ? (
               <>
-                <label style={lbl}>Cashflow sprzedażowy (wartość umowy rozłożona w czasie)</label>
+                <label style={lbl}>Cashflow sprzedażowy (wartość umowy rozłożona w czasie)
+                  {pierwszyRaportForm && <span style={{ marginLeft: 8, fontFamily: C.mono, fontSize: 9, fontWeight: 700, color: C.czerwony, background: "#FBECEA", padding: "2px 7px", borderRadius: 999, letterSpacing: "0.06em" }}>WYMAGANE — RAPORT NR 1</span>}
+                </label>
+                {pierwszyRaportForm && (
+                  <p style={{ fontSize: 12.5, color: C.czerwony, marginTop: 2, marginBottom: 8, lineHeight: 1.5 }}>
+                    To pierwszy raport tej inwestycji — cashflow jest obowiązkowy. Ustanawia bazę finansową dziedziczoną przez kolejne raporty. Bez wartości umowy przy każdej pozycji harmonogramu nie zapiszesz raportu.
+                  </p>
+                )}
                 <p style={{ fontSize: 12, color: C.szary, marginTop: -2, marginBottom: 10 }}>
                   Włącz, aby przy zadaniach harmonogramu pojawiła się kolumna „Wartość umowy". Na jej podstawie oraz dat i procentu zaawansowania powstanie miesięczne zestawienie sprzedaży (narastająco). Kwoty można podać na zadaniu głównym lub podpozycjach.
                 </p>
-                <button style={btnGhost} onClick={() => setCashflowWlaczony(true)}>+ Utwórz cashflow</button>
+                <button style={pierwszyRaportForm ? btnPrimary : btnGhost} onClick={() => setCashflowWlaczony(true)}>+ Utwórz cashflow</button>
               </>
             ) : (
               <>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap", marginBottom: 10 }}>
-                  <label style={{ ...lbl, marginBottom: 0 }}>Cashflow sprzedażowy</label>
+                  <label style={{ ...lbl, marginBottom: 0 }}>Cashflow sprzedażowy
+                    {pierwszyRaportForm && <span style={{ marginLeft: 8, fontFamily: C.mono, fontSize: 9, fontWeight: 700, color: C.czerwony, background: "#FBECEA", padding: "2px 7px", borderRadius: 999, letterSpacing: "0.06em" }}>WYMAGANE — RAPORT NR 1</span>}
+                  </label>
                   <button style={{ ...miniBtn, color: "#C0392B", borderColor: "#E0B4B4" }}
-                    onClick={() => { if (window.confirm("Wyłączyć cashflow? Wpisane wartości umowy zostaną usunięte z tego raportu.")) { wyczyscKwoty(); setCashflowWlaczony(false); } }}>
+                    onClick={() => {
+                      const ostrz = pierwszyRaportForm
+                        ? "Cashflow jest OBOWIĄZKOWY dla pierwszego raportu inwestycji — bez niego nie zapiszesz raportu. Wyłączyć mimo to? Wpisane wartości umowy zostaną usunięte."
+                        : "Wyłączyć cashflow? Wpisane wartości umowy zostaną usunięte z tego raportu.";
+                      if (window.confirm(ostrz)) { wyczyscKwoty(); setCashflowWlaczony(false); }
+                    }}>
                     Usuń cashflow
                   </button>
                 </div>
