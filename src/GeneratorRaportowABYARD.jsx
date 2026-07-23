@@ -35,6 +35,7 @@ import {
   listaZakresow,
   ustawKoordynacjeProjektu,
   ustawPunktyPrzypisania,
+  ustawPunktyZakresu,
   ustawDanePM,
   listaNieaktywnychProjektow,
   terminyZHarmonogramu,
@@ -2531,26 +2532,28 @@ function PanelAdmina({ pokazToast, email, onForm, onArchiwum, onKoordynacja, onW
   );
 }
 
-/* ---------- MACIERZ PUNKTÓW PM (koordynacja PM) ------------------------- */
-// Przejrzysta macierz: wiersze = inwestycje, kolumny = kierownicy, komórka =
-// punkty obciążenia tam, gdzie istnieje przypisanie (edytowalne, zapis on-blur).
-// Wszystko widać naraz — bez rozwijania i szukania po jednej inwestycji.
-// Przypisania PM↔inwestycja ustawia się w zakładce „Zarządzanie".
+/* ---------- KARTY KIEROWNIKÓW — PUNKTY PM (koordynacja PM) ------------- */
+// Grupowanie per kierownik: każdy PM = karta z jego inwestycjami. Wiersz pokazuje
+// nazwę inwestycji, ZAKRES + jego DOMYŚLNĄ punktację oraz edytowalne pole punktów
+// (puste = domyślne z zakresu). Krótkie, czytelne, bez pustych komórek.
+// Przypisania PM↔inwestycja ustawia się w „Zarządzaniu"; zakres i domyślną
+// punktację zakresu — w „Koordynacji Inwestycji".
 function KompaktowaListaInwestycji({ projekty, przypisania, zakresMap, uzytMap, punktyLok, setPunktyLok, zapiszPunkty }) {
-  // Kolumny = kierownicy z co najmniej jednym przypisaniem (stabilne, alfabetycznie).
-  const pmCols = React.useMemo(() => {
-    const ids = [...new Set(przypisania.map((x) => x.uzytkownik))];
-    return ids.map((id) => uzytMap[id]).filter(Boolean).sort((a, b) => nazwaOsoby(a).localeCompare(nazwaOsoby(b), "pl"));
-  }, [przypisania, uzytMap]);
-  // Szybki dostęp do przypisania: klucz "projekt_id|uzytkownik".
-  const mapPrzyp = React.useMemo(() => {
-    const m = {};
-    for (const x of przypisania) m[x.projekt_id + "|" + x.uzytkownik] = x;
-    return m;
-  }, [przypisania]);
+  const projMap = React.useMemo(() => Object.fromEntries((projekty || []).map((p) => [p.id, p])), [projekty]);
+  // Grupy per kierownik — tylko przypisania do WIDOCZNYCH inwestycji (respektuje szukajkę).
+  const grupy = React.useMemo(() => {
+    const wg = {};
+    for (const x of przypisania) {
+      if (!projMap[x.projekt_id]) continue;
+      (wg[x.uzytkownik] ||= []).push(x);
+    }
+    return Object.entries(wg)
+      .map(([uid, przyp]) => ({ u: uzytMap[uid], przyp: przyp.sort((a, b) => (projMap[a.projekt_id]?.nazwa || "").localeCompare(projMap[b.projekt_id]?.nazwa || "", "pl")) }))
+      .filter((g) => g.u)
+      .sort((a, b) => nazwaOsoby(a.u).localeCompare(nazwaOsoby(b.u), "pl"));
+  }, [przypisania, projMap, uzytMap]);
 
-  // Efektywne punkty komórki: wpisane, a gdy puste — domyślne z zakresu inwestycji
-  // (spójnie z analizą obciążenia). Do sum wierszy/kolumn.
+  // Efektywne punkty: wpisane, a gdy puste — domyślne z zakresu inwestycji.
   const efekt = (x, p) => {
     const raw = punktyLok[x.id] !== undefined ? punktyLok[x.id] : x.punkty;
     if (raw === "" || raw == null) { const zk = zakresMap[p.zakres]; return zk ? (Number(zk.punkty) || 0) : 0; }
@@ -2558,63 +2561,52 @@ function KompaktowaListaInwestycji({ projekty, przypisania, zakresMap, uzytMap, 
   };
   const okr = (n) => Math.round(n * 10) / 10;
 
-  if (pmCols.length === 0) {
+  if (grupy.length === 0) {
     return <div style={{ fontSize: 13, color: C.szary, fontStyle: "italic" }}>Brak przypisań PM do inwestycji — dodaj je w zakładce „Zarządzanie".</div>;
   }
-
-  const thMx = { ...thAdm, whiteSpace: "nowrap" };
-  const tdMx = { padding: "7px 8px", borderBottom: `1px solid ${C.jasny}` };
-  const numInp = { width: 56, padding: "6px 4px", border: `1px solid ${C.linia}`, borderRadius: 5, fontSize: 13, textAlign: "center", background: "#FCFBF8" };
+  const numInp = { width: 58, padding: "6px 4px", border: `1px solid ${C.linia}`, borderRadius: 5, fontSize: 13, textAlign: "center", background: "#FCFBF8", fontFamily: "inherit" };
 
   return (
-    <div className="tabela-scroll-own" style={{ overflowX: "auto" }}>
-      <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 300 + pmCols.length * 96 }}>
-        <thead>
-          <tr>
-            <th style={{ ...thMx, textAlign: "left" }}>Inwestycja</th>
-            {pmCols.map((pm) => <th key={pm.id} style={{ ...thMx, textAlign: "center" }}>{nazwaOsoby(pm)}</th>)}
-            <th style={{ ...thMx, textAlign: "center" }}>Σ pkt</th>
-          </tr>
-        </thead>
-        <tbody>
-          {projekty.map((p) => {
-            const zk = zakresMap[p.zakres];
-            const sumaW = pmCols.reduce((s, pm) => { const x = mapPrzyp[p.id + "|" + pm.id]; return s + (x ? efekt(x, p) : 0); }, 0);
-            return (
-              <tr key={p.id} style={{ opacity: p.wstrzymana ? 0.55 : 1 }}>
-                <td style={{ ...tdMx, fontSize: 13, fontWeight: 600, whiteSpace: "nowrap" }}>
-                  {p.nazwa}{p.wstrzymana && <span style={odznakaWstrzymana}>WSTRZYMANA</span>}
-                </td>
-                {pmCols.map((pm) => {
-                  const x = mapPrzyp[p.id + "|" + pm.id];
-                  return (
-                    <td key={pm.id} style={{ ...tdMx, textAlign: "center" }}>
-                      {x ? (
-                        <input type="number" min="0" step="0.5"
-                          value={punktyLok[x.id] !== undefined ? punktyLok[x.id] : (x.punkty ?? "")}
-                          placeholder={zk ? String(zk.punkty) : "—"}
-                          onChange={(e) => setPunktyLok((s) => ({ ...s, [x.id]: e.target.value }))}
-                          onBlur={(e) => zapiszPunkty(x.id, e.target.value)} style={numInp} />
-                      ) : <span style={{ color: "#D9D6CE" }}>·</span>}
-                    </td>
-                  );
-                })}
-                <td style={{ ...tdMx, textAlign: "center", fontFamily: C.mono, fontSize: 12.5, fontWeight: 700 }}>{sumaW ? okr(sumaW) : "—"}</td>
-              </tr>
-            );
-          })}
-        </tbody>
-        <tfoot>
-          <tr>
-            <td style={{ padding: "9px 8px", borderTop: `2px solid ${C.linia}`, fontFamily: C.mono, fontSize: 9.5, textTransform: "uppercase", letterSpacing: "0.08em", color: C.szary2, whiteSpace: "nowrap" }}>Σ na kierownika</td>
-            {pmCols.map((pm) => {
-              const sumaK = projekty.reduce((s, p) => { const x = mapPrzyp[p.id + "|" + pm.id]; return s + (x ? efekt(x, p) : 0); }, 0);
-              return <td key={pm.id} style={{ padding: "9px 8px", borderTop: `2px solid ${C.linia}`, textAlign: "center", fontFamily: C.mono, fontSize: 12.5, fontWeight: 700 }}>{sumaK ? okr(sumaK) : "—"}</td>;
-            })}
-            <td style={{ borderTop: `2px solid ${C.linia}` }} />
-          </tr>
-        </tfoot>
-      </table>
+    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(330px, 1fr))", gap: 16 }}>
+      {grupy.map((g) => {
+        const suma = g.przyp.reduce((s, x) => s + efekt(x, projMap[x.projekt_id]), 0);
+        return (
+          <div key={g.u.id} style={{ border: `1px solid ${C.linia}`, borderRadius: 10, background: C.bialy, padding: "16px 18px 12px" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10 }}>
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontWeight: 700, fontSize: 15, color: C.czarny }}>{nazwaOsoby(g.u)}</div>
+                <div style={{ fontFamily: C.mono, fontSize: 9, letterSpacing: "0.1em", textTransform: "uppercase", color: C.szary2, marginTop: 2 }}>{g.u.rola === "admin" ? "Administrator" : "Kierownik"}</div>
+              </div>
+              <span style={{ fontFamily: C.mono, fontSize: 10.5, fontWeight: 700, color: C.czarny, background: C.jasny, padding: "4px 9px", borderRadius: 999, whiteSpace: "nowrap" }}>Σ {okr(suma)} pkt</span>
+            </div>
+            <div style={{ marginTop: 12, borderTop: `1px solid ${C.linia}`, paddingTop: 4, display: "flex", flexDirection: "column" }}>
+              {g.przyp.map((x, i) => {
+                const p = projMap[x.projekt_id];
+                const zk = zakresMap[p.zakres];
+                const dom = zk ? zk.punkty : null;
+                return (
+                  <div key={x.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, padding: "9px 0", borderBottom: i === g.przyp.length - 1 ? "none" : `1px solid ${C.jasny}`, opacity: p.wstrzymana ? 0.55 : 1 }}>
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ fontSize: 13.5, fontWeight: 600, color: C.czarny }}>{p.nazwa}{p.wstrzymana && <span style={odznakaWstrzymana}>WSTRZ.</span>}</div>
+                      <div style={{ fontFamily: C.mono, fontSize: 9.5, letterSpacing: "0.03em", color: C.szary2, marginTop: 2, textTransform: "uppercase" }}>
+                        {zk ? zk.nazwa : "brak zakresu"}{dom != null ? ` · dom. ${dom} pkt` : ""}
+                      </div>
+                    </div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
+                      <input type="number" min="0" step="0.5"
+                        value={punktyLok[x.id] !== undefined ? punktyLok[x.id] : (x.punkty ?? "")}
+                        placeholder={dom != null ? String(dom) : "—"}
+                        onChange={(e) => setPunktyLok((s) => ({ ...s, [x.id]: e.target.value }))}
+                        onBlur={(e) => zapiszPunkty(x.id, e.target.value)} style={numInp} />
+                      <span style={{ fontFamily: C.mono, fontSize: 10, color: C.szary2 }}>pkt</span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -2766,7 +2758,7 @@ function ZakladkaKoordynacja({ uzytkownicy, projektyAll, przypisania, zakresy, t
             style={{ padding: "7px 11px", border: `1px solid ${C.linia}`, borderRadius: 6, fontSize: 13, width: 220 }} />
         </div>
         <p style={{ fontSize: 12.5, color: C.szary, marginTop: -2, marginBottom: 14, lineHeight: 1.5 }}>
-          Macierz punktów obciążenia: wiersz = inwestycja, kolumna = kierownik. Wpisz punkty w komórce (puste = domyślne z zakresu). „·" oznacza brak przypisania — nadajesz je w zakładce „Zarządzanie". Zakres, termin, wstrzymanie i zakończenie ustawiasz w „Koordynacji Inwestycji".
+          Karta na kierownika z jego inwestycjami. Przy każdej widać zakres i domyślną punktację zakresu; w polu wpisujesz punkty obciążenia (puste = domyślne z zakresu). Przypisania nadajesz w „Zarządzaniu", a zakres i globalną domyślną punktację zakresów — w „Koordynacji Inwestycji".
         </p>
         <KompaktowaListaInwestycji
           projekty={projektyWidoczne} przypisania={przypisania} zakresMap={zakresMap}
@@ -2858,6 +2850,13 @@ function ZakladkaKoordynacjaInwestycji({ projektyAll, przypisania, uzytkownicy, 
   async function przywrocInwestycje(projektId, nazwa) {
     try { await ustawAktywnoscProjektu(projektId, true); odswiez?.(); pokazToast?.(`„${nazwa}" przywrócona`); }
     catch (e) { console.error(e); pokazToast?.("Błąd przywracania inwestycji"); }
+  }
+
+  // Domyślna punktacja zakresów (globalny słownik). Lokalny stan edycji + zapis on-blur.
+  const [zakresLok, setZakresLok] = React.useState({});
+  async function zapiszPunktyZakresu(kod, wartosc) {
+    try { await ustawPunktyZakresu(kod, wartosc); odswiez?.(); }
+    catch (e) { console.error(e); pokazToast?.("Błąd zapisu punktacji zakresu"); }
   }
 
   // Najnowszy raport per projekt (klucz: projekt_id)
@@ -3085,6 +3084,33 @@ function ZakladkaKoordynacjaInwestycji({ projektyAll, przypisania, uzytkownicy, 
                 })}
               </tbody>
             </table>
+          </div>
+        )}
+      </section>
+
+      {/* DOMYŚLNA PUNKTACJA ZAKRESÓW — globalny słownik */}
+      <section style={card}>
+        <TytulSekcji>Domyślna punktacja zakresów</TytulSekcji>
+        <p style={{ fontSize: 12.5, color: C.szary, marginTop: 6, marginBottom: 14, lineHeight: 1.5 }}>
+          Punkty domyślne dla każdego zakresu. Zmiana działa <strong>globalnie</strong> — dotyczy wszystkich inwestycji tego zakresu, dopóki przy konkretnym przypisaniu PM nie wpisano wartości nadpisującej.
+        </p>
+        {(!zakresy || zakresy.length === 0) ? (
+          <div style={{ fontSize: 13, color: C.szary, fontStyle: "italic" }}>Brak zdefiniowanych zakresów.</div>
+        ) : (
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 10 }}>
+            {zakresy.map((z) => (
+              <div key={z.kod} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, padding: "10px 14px", border: `1px solid ${C.linia}`, borderRadius: 8, background: C.bialy }}>
+                <span style={{ fontSize: 13.5, fontWeight: 600, color: C.czarny, minWidth: 0 }}>{z.nazwa}</span>
+                <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
+                  <input type="number" min="0" step="0.5"
+                    value={zakresLok[z.kod] !== undefined ? zakresLok[z.kod] : (z.punkty ?? "")}
+                    onChange={(e) => setZakresLok((s) => ({ ...s, [z.kod]: e.target.value }))}
+                    onBlur={(e) => zapiszPunktyZakresu(z.kod, e.target.value)}
+                    style={{ width: 64, padding: "6px 6px", border: `1px solid ${C.linia}`, borderRadius: 5, fontSize: 13, textAlign: "center", background: "#FCFBF8", fontFamily: "inherit" }} />
+                  <span style={{ fontFamily: C.mono, fontSize: 10, color: C.szary2 }}>pkt</span>
+                </div>
+              </div>
+            ))}
           </div>
         )}
       </section>
@@ -4096,21 +4122,10 @@ async function budujDocDefinition(form) {
   if (form.adres) content.push({ text: String(form.adres).toUpperCase(), color: szary2, font: "Mono", fontSize: 8.5, characterSpacing: 1, margin: [0, 9, 0, 0] });
   if (form.tytulZadania) content.push({ text: `„${form.tytulZadania}”`, color: "#B9B4AA", italics: true, fontSize: 9.5, lineHeight: 1.4, margin: [0, 12, 70, 0] });
 
-  // Kluczowe daty + stopka — przypięte do dołu strony (absolutePosition).
-  content.push({ canvas: [{ type: "line", x1: 0, y1: 0, x2: PW - 80, y2: 0, lineWidth: 1, lineColor: "#3A3A36" }], absolutePosition: { x: 40, y: 724 } });
-  const datyOkl = [
-    ["Rozpoczęcie", fmtPL(form.rozpoczecie) || "—"],
-    ["Zakończenie robót", fmtPL(form.zakonczenieRobot) || "—"],
-    ["Pozwolenie na użytkowanie", form.pnuNieDotyczy ? "Nie dotyczy" : (fmtPL(form.pnu) || "—")],
-  ];
-  datyOkl.forEach(([l, v], i) => {
-    content.push({ stack: [
-      { text: String(l).toUpperCase(), font: "Mono", fontSize: 7.5, characterSpacing: 0.8, color: szary2 },
-      { text: v, font: "RobotoBlack", fontSize: 14, color: "#FFFFFF", margin: [0, 6, 0, 0] },
-    ], width: 170, absolutePosition: { x: 40 + i * 172, y: 740 } });
-  });
-  content.push({ text: `OPRACOWAŁ · ${(form.opracowal || "—").toUpperCase()}`, font: "Mono", fontSize: 8, characterSpacing: 0.6, color: szary2, absolutePosition: { x: 40, y: 802 } });
-  content.push({ text: `DATA · ${fmtPL(form.dataOpracowania) || "—"}`, font: "Mono", fontSize: 8, characterSpacing: 0.6, color: szary2, alignment: "right", width: PW - 80, absolutePosition: { x: 40, y: 802 } });
+  // Kluczowe daty (linia + 3 kolumny) i stopka (opracował / data) są przypięte do
+  // DOŁU strony tytułowej i rysowane w callbacku `background` strony 1 — dzięki temu
+  // NIGDY nie przeskakują na kolejną stronę (absolutePosition w treści potrafił je
+  // zepchnąć na str. 2 przy dłuższym tytule/adresie).
 
   // Strona tytułowa kończy się na kluczowych datach — reszta od nowej strony
   const nagInfo = pdfNaglowekSekcji("Informacje ogólne");
@@ -4167,6 +4182,20 @@ async function budujDocDefinition(form) {
       // Pasek górny nad grafiką: overline + plakietka numeru.
       bg.push({ text: [{ text: "/ ", color: zoltyBright }, { text: "RAPORT Z BUDOWY · ABYARD", color: "#FFFFFF" }], font: "Mono", fontSize: 9, characterSpacing: 1.4, absolutePosition: { x: 40, y: 41 } });
       bg.push({ table: { body: [[{ text: `NR ${String(form.numer).padStart(3, "0")}`, font: "Mono", fontSize: 9, bold: true, color: "#161512", fillColor: zolty, margin: [9, 4, 9, 4], border: [false, false, false, false] }]] }, layout: "noBorders", absolutePosition: { x: 497, y: 34 } });
+      // Dół okładki: złota hairline + kluczowe daty (3 kolumny) + stopka (opracował / data).
+      // W tle strony 1 — zawsze na stronie tytułowej, bez ryzyka przeskoku na str. 2.
+      bg.push({ canvas: [{ type: "line", x1: 0, y1: 0, x2: PW - 80, y2: 0, lineWidth: 1, lineColor: "#3A3A36" }], absolutePosition: { x: 40, y: 724 } });
+      [["Rozpoczęcie", fmtPL(form.rozpoczecie) || "—"],
+       ["Zakończenie robót", fmtPL(form.zakonczenieRobot) || "—"],
+       ["Pozwolenie na użytkowanie", form.pnuNieDotyczy ? "Nie dotyczy" : (fmtPL(form.pnu) || "—")]
+      ].forEach(([l, v], i) => {
+        bg.push({ stack: [
+          { text: String(l).toUpperCase(), font: "Mono", fontSize: 7.5, characterSpacing: 0.8, color: szary2 },
+          { text: v, font: "RobotoBlack", fontSize: 14, color: "#FFFFFF", margin: [0, 6, 0, 0] },
+        ], width: 170, absolutePosition: { x: 40 + i * 172, y: 740 } });
+      });
+      bg.push({ text: `OPRACOWAŁ · ${(form.opracowal || "—").toUpperCase()}`, font: "Mono", fontSize: 8, characterSpacing: 0.6, color: szary2, absolutePosition: { x: 40, y: 802 } });
+      bg.push({ text: `DATA · ${fmtPL(form.dataOpracowania) || "—"}`, font: "Mono", fontSize: 8, characterSpacing: 0.6, color: szary2, alignment: "right", width: PW - 80, absolutePosition: { x: 40, y: 802 } });
       return bg;
     },
     content,
@@ -4794,6 +4823,7 @@ const printCSS = `
     .cover-foto { max-height: 150mm !important; width: 100% !important; object-fit: cover !important; }
   }
 `;
+
 
 
 

@@ -120,6 +120,17 @@ export async function ustawKoordynacjeProjektu(projektId, pola) {
   if (error) throw error;
 }
 
+// Ustaw domyślną punktację danego zakresu — GLOBALNIE (słownik zakresów, admin).
+// Wpływa na domyślne punkty wszystkich inwestycji tego zakresu (dopóki na
+// przypisaniu nie wpisano wartości nadpisującej).
+export async function ustawPunktyZakresu(kod, punkty) {
+  const { error } = await supabase
+    .from("zakresy")
+    .update({ punkty: (punkty === "" || punkty == null) ? null : Number(punkty) })
+    .eq("kod", kod);
+  if (error) throw error;
+}
+
 // Ustaw punkty PM za daną inwestycję (na wierszu przypisania).
 export async function ustawPunktyPrzypisania(przypisanieId, punkty) {
   const { error } = await supabase
