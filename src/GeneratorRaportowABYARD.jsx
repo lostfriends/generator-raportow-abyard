@@ -227,12 +227,12 @@ function dniMiedzy(aISO, bISO) {
 function statusZRaportu(raport) {
   if (!raport) return { kod: "brak", txt: "brak raportu", kolor: "#8A8A8A", tlo: "#EFEFEF" };
   if (harmonogramWymuszaZagrozenie(raport.harmonogram, raport.data_opracowania))
-    return { kod: "zagrozenie", txt: "Zagrożenie terminu", kolor: "#B22", tlo: "#FBE6E6" };
+    return { kod: "zagrozenie", txt: "Zagrożenie terminu", kolor: "#C0392B", tlo: "#FBECEA" };
   const t = (raport.podsumowanie || "").toLowerCase();
   const brakZagrozenia = t.includes("nie powoduje") || t.includes("niezagroż") || t.includes("nie ma zagroż") || t.includes("bez zagroż");
-  if (brakZagrozenia) return { kod: "ok", txt: "Termin niezagrożony", kolor: "#1B7A3D", tlo: "#E4F4E9" };
-  if (t.includes("zagroż") || t.includes("zagroz")) return { kod: "zagrozenie", txt: "Zagrożenie terminu", kolor: "#B22", tlo: "#FBE6E6" };
-  return { kod: "ok", txt: "Termin niezagrożony", kolor: "#1B7A3D", tlo: "#E4F4E9" };
+  if (brakZagrozenia) return { kod: "ok", txt: "Termin niezagrożony", kolor: "#1B7A3D", tlo: "#E6F3EA" };
+  if (t.includes("zagroż") || t.includes("zagroz")) return { kod: "zagrozenie", txt: "Zagrożenie terminu", kolor: "#C0392B", tlo: "#FBECEA" };
+  return { kod: "ok", txt: "Termin niezagrożony", kolor: "#1B7A3D", tlo: "#E6F3EA" };
 }
 
 // Najnowszy raport z listy (po dacie opracowania, przy remisie po numerze).
@@ -522,7 +522,7 @@ function MacierzCashflow({ dane }) {
         </tfoot>
       </table>
       {rozjazd && (
-        <div style={{ marginTop: 8, padding: "8px 12px", background: "#FBE6E6", border: "1px solid #E0B4B4", borderRadius: 6, fontSize: 12, color: "#B22222" }}>
+        <div style={{ marginTop: 8, padding: "8px 12px", background: "#FBECEA", border: "1px solid #E0B4B4", borderRadius: 6, fontSize: 12, color: "#B22222" }}>
           ⚠ Suma wartości umowy ({fmtZ(sumaCalosc)} zł) różni się od sumy narastającej cashflow ({fmtZ(koniecNaras)} zł).
           Prawdopodobnie któreś zadanie ma wpisaną kwotę bez kompletu dat (start/koniec) — taka kwota nie trafia do rozkładu miesięcznego. Uzupełnij daty, aby sumy się zgadzały.
         </div>
@@ -681,16 +681,24 @@ function maDraftTresc(f) {
   return false;
 }
 
+// Globalna paleta aplikacji — ujednolicona z abyard.com i z raportem:
+// ciepła czerń + złocisty amber jako jedyny akcent, mono do etykiet/overline'ów.
 const C = {
-  zolty: "#FBC707",
-  czarny: "#1A1A1A",
-  grafit: "#2C2C2C",
-  szary: "#6B6B6B",
-  jasny: "#F5F3EE",
+  zolty: "#F2A900",
+  zoltyBright: "#FBC441",
+  zoltyDeep: "#C8880B",
+  czarny: "#0F0F0E",
+  ink2: "#191917",
+  grafit: "#232320",
+  szary: "#6E6A62",
+  szary2: "#9A958B",
+  jasny: "#F4F3EF",
   bialy: "#FFFFFF",
-  linia: "#E0DDD4",
-  zoltyJasny: "#FFF6D6",
-  czerwony: "#B22222",
+  linia: "#E4E1D9",
+  zoltyJasny: "#FFF6DF",
+  czerwony: "#C0392B",
+  zielony: "#1B7A3D",
+  mono: "'AbyMono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace",
 };
 
 // Paleta PODGLĄDU RAPORTU (odwzorowuje dokładnie eksport PDF / abyard.com).
@@ -723,9 +731,10 @@ function PasekNawigacji({ aktywny, jestAdmin, email, onForm, onArchiwum, onKoord
     const akt = aktywny === kod;
     return (
       <button onClick={onClick}
-        style={{ background: akt ? C.zolty : "transparent", color: akt ? C.czarny : C.zolty,
-          border: `1.5px solid ${C.zolty}`, padding: "8px 16px", borderRadius: 6, fontWeight: 700, fontSize: 13,
-          cursor: "pointer", fontFamily: "inherit" }}>
+        style={{ background: akt ? C.zolty : "transparent", color: akt ? "#161512" : "#CFCCC5",
+          border: `1px solid ${akt ? C.zolty : "rgba(255,255,255,0.12)"}`, padding: "8px 13px", borderRadius: 4,
+          fontWeight: akt ? 700 : 400, fontSize: 11, letterSpacing: "0.08em", textTransform: "uppercase",
+          fontFamily: C.mono, cursor: "pointer" }}>
         {etykieta}
       </button>
     );
@@ -742,12 +751,12 @@ function PasekNawigacji({ aktywny, jestAdmin, email, onForm, onArchiwum, onKoord
           {zakl("archiwum", "Archiwum raportów", onArchiwum)}
           {onKoordynacja && zakl("koordynacja-pm", "Kto co prowadzi", onKoordynacja)}
           {jestAdmin && zakl("admin", "Panel admina", onAdmin)}
-          <span style={{ color: C.szary, fontSize: 12, display: "flex", alignItems: "center", gap: 8, marginLeft: 4 }}>
+          <span style={{ color: "#8A867E", fontFamily: C.mono, fontSize: 11, display: "flex", alignItems: "center", gap: 8, marginLeft: 4 }}>
             {email}
-            {jestAdmin && <span style={{ background: C.zolty, color: C.czarny, fontWeight: 700, fontSize: 10, padding: "2px 7px", borderRadius: 10 }}>ADMIN</span>}
+            {jestAdmin && <span style={{ background: C.zolty, color: "#161512", fontWeight: 700, fontSize: 9, letterSpacing: "0.06em", padding: "2px 6px", borderRadius: 3 }}>ADMIN</span>}
           </span>
           <button onClick={onWyloguj}
-            style={{ background: "transparent", color: C.szary, border: `1px solid ${C.grafit}`, padding: "7px 14px", borderRadius: 6, fontWeight: 600, fontSize: 12, cursor: "pointer", fontFamily: "inherit" }}>
+            style={{ background: "transparent", color: "#8A867E", fontFamily: C.mono, border: `1px solid rgba(255,255,255,0.12)`, padding: "6px 12px", borderRadius: 4, fontSize: 10.5, cursor: "pointer" }}>
             Wyloguj
           </button>
         </div>
@@ -1673,7 +1682,7 @@ export default function GeneratorRaportowABYARD() {
                 <img src={form.grafikaInwestycji.dataUrl} alt="" style={{ width: 220, maxHeight: 150, objectFit: "contain", borderRadius: 4 }} />
                 <div>
                   <div style={{ fontSize: 13, marginBottom: 8 }}>{form.grafikaInwestycji.nazwa}</div>
-                  <button style={{ ...miniBtn, color: "#B22", borderColor: "#E0B4B4" }} onClick={usunGrafike}>Usuń grafikę</button>
+                  <button style={{ ...miniBtn, color: "#C0392B", borderColor: "#E0B4B4" }} onClick={usunGrafike}>Usuń grafikę</button>
                 </div>
               </div>
             )}
@@ -1772,25 +1781,25 @@ export default function GeneratorRaportowABYARD() {
                       <tr style={{ background: sumaryczny ? "#F3F0E8" : "transparent" }}>
                         <td style={{ ...tdHarm, textAlign: "center", color: C.szary, fontWeight: 700 }}>{i + 1}</td>
                         <td style={{ ...tdHarm, textAlign: "left", fontWeight: 700 }}>
-                          {r.zadanie}
-                          {wymaga && <div style={{ fontSize: 11, color: "#B22", fontWeight: 600, marginTop: 2 }}>⚠ uzupełnij prognozę</div>}
+                          <span style={{ color: C.zolty, marginRight: 6, fontSize: 8, verticalAlign: "middle" }}>●</span>{r.zadanie}
+                          {wymaga && <div style={{ fontSize: 11, color: "#C0392B", fontWeight: 600, marginTop: 2 }}>⚠ uzupełnij prognozę</div>}
                         </td>
                         {sumaryczny ? (
                           <>
                             <td style={{ ...tdHarm, textAlign: "center", fontWeight: 600, color: C.czarny }}>{fmtPL(ef.start) || "—"}</td>
                             <td style={{ ...tdHarm, textAlign: "center", fontWeight: 600, color: C.czarny }}>{fmtPL(ef.koniec) || "—"}</td>
-                            <td style={{ ...tdHarm, textAlign: "center", fontWeight: 600, color: C.czarny }}>{fmtPL(ef.rzecz) || "—"}</td>
+                            <td style={{ ...tdHarm, textAlign: "center", fontWeight: 700, color: C.czarny, background: C.zoltyJasny }}>{fmtPL(ef.rzecz) || "—"}</td>
                             <td style={{ ...tdHarm, textAlign: "center", fontWeight: 700, color: C.czarny }}>{ef.proc !== "" ? `${ef.proc}%` : "—"}</td>
                           </>
                         ) : (
                           <>
                             <td style={tdHarm}><input type="date" style={cellInp} value={r.start} onChange={(e) => updHarm(i, "start", e.target.value)} /></td>
                             <td style={tdHarm}><input type="date" style={cellInp} value={r.koniec} onChange={(e) => updHarm(i, "koniec", e.target.value)} /></td>
-                            <td style={tdHarm}><input type="date" style={{ ...cellInp, ...(wymaga ? { border: "2px solid #B22", outline: "none" } : {}) }} value={r.rzecz} onChange={(e) => updHarm(i, "rzecz", e.target.value)} /></td>
+                            <td style={{ ...tdHarm, background: C.zoltyJasny }}><input type="date" style={{ ...cellInp, background: "transparent", fontWeight: 700, ...(wymaga ? { border: "2px solid #C0392B", outline: "none" } : {}) }} value={r.rzecz} onChange={(e) => updHarm(i, "rzecz", e.target.value)} /></td>
                             <td style={tdHarm}><input type="number" min="0" max="100" style={{ ...cellInp, width: 64, textAlign: "center" }} value={r.proc} onChange={(e) => updHarm(i, "proc", e.target.value)} placeholder="—" /></td>
                           </>
                         )}
-                        <td style={{ ...tdHarm, textAlign: "center", color: op ? "#B22" : C.szary, fontWeight: op ? 700 : 400 }}>{op || "—"}</td>
+                        <td style={{ ...tdHarm, textAlign: "center", color: op ? "#C0392B" : C.szary, fontWeight: op ? 700 : 400 }}>{op || "—"}</td>
                         {cashflowWlaczony && (() => {
                           const podKwoty = sumaryczny && pod.reduce((s, p) => s + (parseFloat(p.kwota) || 0), 0) > 0;
                           if (podKwoty) {
@@ -1813,17 +1822,17 @@ export default function GeneratorRaportowABYARD() {
                           <td style={{ ...tdHarm, textAlign: "right", color: "#A09A88", fontSize: 11 }}>{i + 1}.{j + 1}</td>
                           <td style={{ ...tdHarm, textAlign: "left", paddingLeft: 22 }}>
                             <input type="text" style={{ ...cellInp, fontWeight: 400 }} value={p.zadanie} onChange={(e) => updPodpozycje(i, j, "zadanie", e.target.value)} placeholder="nazwa podpozycji" />
-                            {wymagaP && <div style={{ fontSize: 10, color: "#B22", fontWeight: 600, marginTop: 2 }}>⚠ uzupełnij prognozę</div>}
+                            {wymagaP && <div style={{ fontSize: 10, color: "#C0392B", fontWeight: 600, marginTop: 2 }}>⚠ uzupełnij prognozę</div>}
                           </td>
                           <td style={tdHarm}><input type="date" style={cellInp} value={p.start} onChange={(e) => updPodpozycje(i, j, "start", e.target.value)} /></td>
                           <td style={tdHarm}><input type="date" style={cellInp} value={p.koniec} onChange={(e) => updPodpozycje(i, j, "koniec", e.target.value)} /></td>
                           <td style={tdHarm}><input type="date" style={{ ...cellInp, ...(wymagaP ? { border: "2px solid #B22", outline: "none" } : {}) }} value={p.rzecz} onChange={(e) => updPodpozycje(i, j, "rzecz", e.target.value)} /></td>
                           <td style={tdHarm}><input type="number" min="0" max="100" style={{ ...cellInp, width: 64, textAlign: "center" }} value={p.proc} onChange={(e) => updPodpozycje(i, j, "proc", e.target.value)} placeholder="—" /></td>
-                          <td style={{ ...tdHarm, textAlign: "center", color: obliczOpoznienie(p, form.dataOpracowania) ? "#B22" : C.szary, fontSize: 12 }}>{obliczOpoznienie(p, form.dataOpracowania) || "—"}</td>
+                          <td style={{ ...tdHarm, textAlign: "center", color: obliczOpoznienie(p, form.dataOpracowania) ? "#C0392B" : C.szary, fontSize: 12 }}>{obliczOpoznienie(p, form.dataOpracowania) || "—"}</td>
                           {cashflowWlaczony && <td style={tdHarm}><input type="number" min="0" step="1000" style={{ ...cellInp, width: 110, textAlign: "right" }} value={p.kwota || ""} onChange={(e) => updPodpozycje(i, j, "kwota", e.target.value)} placeholder="—" /></td>}
                           <td style={{ ...tdHarm, textAlign: "center" }}>
                             <button type="button" onClick={() => usunPodpozycje(i, j)} title="Usuń podpozycję"
-                              style={{ border: `1px solid ${C.linia}`, background: C.bialy, borderRadius: 4, cursor: "pointer", fontSize: 14, lineHeight: 1, width: 26, height: 26, color: "#B22" }}>×</button>
+                              style={{ border: `1px solid ${C.linia}`, background: C.bialy, borderRadius: 4, cursor: "pointer", fontSize: 14, lineHeight: 1, width: 26, height: 26, color: "#C0392B" }}>×</button>
                           </td>
                         </tr>
                         );
@@ -1880,7 +1889,7 @@ export default function GeneratorRaportowABYARD() {
               <>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap", marginBottom: 10 }}>
                   <label style={{ ...lbl, marginBottom: 0 }}>Cashflow sprzedażowy</label>
-                  <button style={{ ...miniBtn, color: "#B22", borderColor: "#E0B4B4" }}
+                  <button style={{ ...miniBtn, color: "#C0392B", borderColor: "#E0B4B4" }}
                     onClick={() => { if (window.confirm("Wyłączyć cashflow? Wpisane wartości umowy zostaną usunięte z tego raportu.")) { wyczyscKwoty(); setCashflowWlaczony(false); } }}>
                     Usuń cashflow
                   </button>
@@ -1921,7 +1930,7 @@ export default function GeneratorRaportowABYARD() {
                       <div style={{ display: "flex", gap: 8 }}>
                         <button style={miniBtn} onClick={() => przesunObrazHarm(i, -1)} disabled={i === 0}>↑</button>
                         <button style={miniBtn} onClick={() => przesunObrazHarm(i, 1)} disabled={i === form.harmonogramObrazy.length - 1}>↓</button>
-                        <button style={{ ...miniBtn, color: "#B22", borderColor: "#E0B4B4" }} onClick={() => usunObrazHarm(i)}>Usuń</button>
+                        <button style={{ ...miniBtn, color: "#C0392B", borderColor: "#E0B4B4" }} onClick={() => usunObrazHarm(i)}>Usuń</button>
                       </div>
                     </div>
                   </div>
@@ -1947,7 +1956,7 @@ export default function GeneratorRaportowABYARD() {
                   <div style={{ display: "flex", gap: 8 }}>
                     <button style={miniBtn} onClick={() => przesunZdjecie(i, -1)} disabled={i === 0}>↑</button>
                     <button style={miniBtn} onClick={() => przesunZdjecie(i, 1)} disabled={i === form.zdjecia.length - 1}>↓</button>
-                    <button style={{ ...miniBtn, color: "#B22", borderColor: "#E0B4B4" }} onClick={() => usunZdjecie(i)}>Usuń</button>
+                    <button style={{ ...miniBtn, color: "#C0392B", borderColor: "#E0B4B4" }} onClick={() => usunZdjecie(i)}>Usuń</button>
                   </div>
                 </div>
               </div>
@@ -1983,7 +1992,7 @@ export default function GeneratorRaportowABYARD() {
                   );
                 })}
                 {wymuszone && (
-                  <div style={{ marginTop: 2, fontSize: 12.5, color: "#B22", background: "#FBE6E6", borderLeft: "3px solid #B22", padding: "8px 12px", borderRadius: 4 }}>
+                  <div style={{ marginTop: 2, fontSize: 12.5, color: "#C0392B", background: "#FBECEA", borderLeft: "3px solid #B22", padding: "8px 12px", borderRadius: 4 }}>
                     Opóźnienie w harmonogramie opóźnia zakończenie całości projektu — status „zagrożenie” jest ustawiony automatycznie i zablokowany.
                   </div>
                 )}
@@ -2069,26 +2078,29 @@ function EkranLogowania({ pokazToast }) {
 
   const tytul = tryb === "login" ? "Zaloguj się" : tryb === "rejestracja" ? "Załóż konto" : "Reset hasła";
 
+  const loginInp = { ...inp, background: C.ink2, border: "1px solid rgba(255,255,255,0.12)", color: C.bialy, marginBottom: 0 };
+  const loginLab = { ...lbl, color: C.zoltyDeep };
   return (
-    <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: C.czarny, fontFamily: "'Segoe UI', system-ui, sans-serif", padding: 20 }}>
+    <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: C.czarny, fontFamily: "'Roboto', 'Segoe UI', system-ui, sans-serif", padding: 20 }}>
       <style>{globalCSS}</style>
-      <div style={{ width: "100%", maxWidth: 400, background: C.bialy, borderRadius: 12, padding: 32, boxShadow: "0 8px 40px rgba(0,0,0,0.4)" }}>
-        <div style={{ display: "flex", alignItems: "baseline", gap: 2, marginBottom: 6 }}>
-          <span style={{ color: C.zolty, fontWeight: 800, fontSize: 28 }}>/</span>
-          <span style={{ color: C.czarny, fontWeight: 800, fontSize: 26 }}>Abyard</span>
+      <div style={{ width: "100%", maxWidth: 420 }}>
+        <div style={{ fontWeight: 900, fontSize: 30, color: C.bialy, letterSpacing: "-0.01em" }}>
+          <span style={{ color: C.zolty }}>/</span>Abyard
         </div>
-        <div style={{ color: C.szary, fontSize: 13, marginBottom: 24 }}>Generator raportów z budowy</div>
+        <div style={{ fontFamily: C.mono, fontSize: 10.5, letterSpacing: "0.2em", textTransform: "uppercase", color: C.szary2, marginTop: 6 }}>/ Generator raportów z budowy</div>
 
-        <div style={{ fontWeight: 800, fontSize: 18, marginBottom: 18 }}>{tytul}</div>
+        <h2 style={{ fontWeight: 900, fontSize: 34, color: C.bialy, margin: "30px 0 22px", letterSpacing: "-0.01em" }}>{tytul}</h2>
 
-        <label style={lbl}>E-mail</label>
-        <input style={{ ...inp, marginBottom: 14 }} type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="np. jkowalski@abyard.pl" autoComplete="username" />
+        <div style={{ marginBottom: 16 }}>
+          <label style={loginLab}>Adres e-mail</label>
+          <input style={loginInp} type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="np. jkowalski@abyard.pl" autoComplete="username" />
+        </div>
 
         {tryb !== "reset" && (
-          <>
-            <label style={lbl}>Hasło</label>
+          <div style={{ marginBottom: 16 }}>
+            <label style={loginLab}>Hasło</label>
             <input
-              style={{ ...inp, marginBottom: 14 }}
+              style={loginInp}
               type="password"
               value={haslo}
               onChange={(e) => setHaslo(e.target.value)}
@@ -2096,20 +2108,20 @@ function EkranLogowania({ pokazToast }) {
               autoComplete={tryb === "login" ? "current-password" : "new-password"}
               onKeyDown={(e) => { if (e.key === "Enter") submit(); }}
             />
-          </>
+          </div>
         )}
 
         {info && (
-          <div style={{ fontSize: 13, color: info.includes("błąd") || info.includes("Błędny") || info.includes("Podaj") || info.includes("Hasło musi") ? "#B22" : "#1B7A3D", marginBottom: 14, lineHeight: 1.4 }}>
+          <div style={{ fontSize: 13, color: info.includes("błąd") || info.includes("Błędny") || info.includes("Podaj") || info.includes("Hasło musi") ? "#F0A79E" : "#7DDBA0", marginBottom: 14, lineHeight: 1.4 }}>
             {info}
           </div>
         )}
 
-        <button onClick={submit} disabled={busy} style={{ ...btnPrimary, width: "100%", padding: "12px", marginBottom: 14, opacity: busy ? 0.6 : 1 }}>
-          {busy ? "Proszę czekać…" : tytul}
+        <button onClick={submit} disabled={busy} style={{ ...btnPrimary, width: "100%", padding: "13px", fontSize: 14, marginTop: 4, opacity: busy ? 0.6 : 1 }}>
+          {busy ? "Proszę czekać…" : (tryb === "login" ? "Zaloguj się →" : tytul)}
         </button>
 
-        <div style={{ fontSize: 13, color: C.szary, textAlign: "center", lineHeight: 1.8 }}>
+        <div style={{ fontFamily: C.mono, fontSize: 11, color: C.szary2, textAlign: "center", marginTop: 18, letterSpacing: "0.04em", lineHeight: 1.9 }}>
           {tryb === "login" && (
             <>
               <span onClick={() => { setTryb("rejestracja"); setInfo(""); }} style={linkStyl}>Załóż konto</span>
@@ -2128,7 +2140,7 @@ function EkranLogowania({ pokazToast }) {
     </div>
   );
 }
-const linkStyl = { color: "#1668C7", cursor: "pointer", textDecoration: "underline" };
+const linkStyl = { color: "#FBC441", cursor: "pointer", textDecoration: "none" };
 
 /* ---------- PANEL ADMINISTRATORA ----------------------------------------- */
 function PanelAdmina({ pokazToast, email, onForm, onArchiwum, onKoordynacja, onWyloguj }) {
@@ -2410,8 +2422,8 @@ function KompaktowaListaInwestycji({ projekty, przypisania, zakresy, zakresMap, 
                       : "Inwestycja aktywna — punkty liczą się do obciążenia. Kliknij, aby wstrzymać."}
                     style={{ border: "none", cursor: "pointer", fontFamily: "inherit", fontSize: 11, fontWeight: 700,
                       padding: "3px 10px", borderRadius: 20,
-                      color: p.wstrzymana ? "#B35A00" : "#1B7A3D",
-                      background: p.wstrzymana ? "#FBF0DC" : "#E4F4E9" }}>
+                      color: p.wstrzymana ? "#B9791A" : "#1B7A3D",
+                      background: p.wstrzymana ? "#FBF0DC" : "#E6F3EA" }}>
                     {p.wstrzymana ? "Wstrzymana" : "Aktywna"}
                   </button>
                 </td>
@@ -2513,8 +2525,8 @@ function ZakladkaKoordynacja({ uzytkownicy, projektyAll, przypisania, zakresy, t
   }, [kierownicy, przypisania, projektMap, terminyDomyslne, zakresMap, horyzont]);
 
   const [rozwiniety, setRozwiniety] = React.useState(null); // id kierownika z rozwiniętymi tematami
-  function kolorProc(p) { return p > 100 ? C.czerwony : p >= 80 ? "#D98A00" : "#1B7A3D"; }
-  function stanProc(p) { return p > 100 ? ["przeciążony", C.czerwony, "#FBE6E6"] : p >= 80 ? ["pełne obłożenie", "#D98A00", "#FBF0DC"] : ["ma zapas", "#1B7A3D", "#E4F4E9"]; }
+  function kolorProc(p) { return p > 100 ? C.czerwony : p >= 80 ? "#B9791A" : "#1B7A3D"; }
+  function stanProc(p) { return p > 100 ? ["przeciążony", C.czerwony, "#FBECEA"] : p >= 80 ? ["pełne obłożenie", "#B9791A", "#FBF0DC"] : ["ma zapas", "#1B7A3D", "#E6F3EA"]; }
 
   // Inwestycje przefiltrowane szukajką (do sekcji edycji)
   const projektyWidoczne = React.useMemo(() => {
@@ -2581,7 +2593,7 @@ function ZakladkaKoordynacja({ uzytkownicy, projektyAll, przypisania, zakresy, t
         </div>
         <div style={{ display: "flex", gap: 16, flexWrap: "wrap", fontSize: 12, color: C.szary, marginBottom: 14 }}>
           <span>● <span style={{ color: "#1B7A3D" }}>do 80%</span> zapas</span>
-          <span>● <span style={{ color: "#D98A00" }}>80–100%</span> pełne</span>
+          <span>● <span style={{ color: "#B9791A" }}>80–100%</span> pełne</span>
           <span>● <span style={{ color: C.czerwony }}>ponad 100%</span> przeciążenie</span>
         </div>
         {analiza.length === 0 ? (
@@ -2872,8 +2884,8 @@ function ZakladkaKoordynacjaInwestycji({ projektyAll, przypisania, uzytkownicy, 
   );
   // Etykieta „ostatni raport": ile dni temu + numer, z kolorem wg zalegania
   function ostatniRaportKom(d) {
-    if (d.dniOd === null) return <span style={{ color: "#B22", fontWeight: 700 }}>brak raportu</span>;
-    const kol = d.zalega ? "#B35A00" : C.szary;
+    if (d.dniOd === null) return <span style={{ color: "#C0392B", fontWeight: 700 }}>brak raportu</span>;
+    const kol = d.zalega ? "#B9791A" : C.szary;
     return (
       <span style={{ color: kol }}>
         {d.dniOd === 0 ? "dziś" : `${d.dniOd} dni temu`}
@@ -2888,8 +2900,8 @@ function ZakladkaKoordynacjaInwestycji({ projektyAll, przypisania, uzytkownicy, 
       <section style={{ ...card, display: "flex", flexWrap: "wrap", gap: 10, alignItems: "stretch" }}>
         {[
           ["Inwestycje aktywne", liczby.razem, C.czarny, C.jasny],
-          ["Zagrożony termin", liczby.zagrozone, "#B22", "#FBE6E6"],
-          [`Bez raportu > ${prog} dni`, liczby.zalegle, "#B35A00", "#FBF0DC"],
+          ["Zagrożony termin", liczby.zagrozone, "#C0392B", "#FBECEA"],
+          [`Bez raportu > ${prog} dni`, liczby.zalegle, "#B9791A", "#FBF0DC"],
           ["Wstrzymane", liczby.wstrzymane, C.szary, C.jasny],
         ].map(([et, n, kol, tlo]) => (
           <div key={et} style={{ flex: "1 1 160px", border: `1px solid ${C.linia}`, borderRadius: 8, padding: "12px 16px", background: tlo }}>
@@ -2930,8 +2942,8 @@ function ZakladkaKoordynacjaInwestycji({ projektyAll, przypisania, uzytkownicy, 
                 </div>
                 <div style={{ textAlign: "right" }}>
                   {d.dniOd === null
-                    ? chip("BRAK RAPORTU", "#B22", "#FBE6E6")
-                    : chip(`${d.dniOd} dni od raportu (nr ${d.ost.numer})`, "#B35A00", "#FBF0DC")}
+                    ? chip("BRAK RAPORTU", "#C0392B", "#FBECEA")
+                    : chip(`${d.dniOd} dni od raportu (nr ${d.ost.numer})`, "#B9791A", "#FBF0DC")}
                 </div>
               </div>
             ))}
@@ -2981,12 +2993,12 @@ function ZakladkaKoordynacjaInwestycji({ projektyAll, przypisania, uzytkownicy, 
                     </td>
                     <td style={{ ...td, color: d.pmy.length ? C.czarny : C.szary, fontSize: 12.5 }}>{d.pmy.length ? d.pmy.join(", ") : "—"}</td>
                     <td style={td}>{chip(d.status.txt, d.status.kolor, d.status.tlo)}</td>
-                    <td style={{ ...td, textAlign: "center", color: d.opozDni > 0 ? "#B22" : C.szary, fontWeight: d.opozDni > 0 ? 800 : 400 }}>{d.opozDni > 0 ? `${d.opozDni} dni` : "—"}</td>
+                    <td style={{ ...td, textAlign: "center", color: d.opozDni > 0 ? "#C0392B" : C.szary, fontWeight: d.opozDni > 0 ? 800 : 400 }}>{d.opozDni > 0 ? `${d.opozDni} dni` : "—"}</td>
                     <td style={{ ...td, textAlign: "center", fontWeight: 700 }}>{d.postep != null ? `${d.postep}%` : "—"}</td>
                     <td style={td}>{ostatniRaportKom(d)}</td>
                     <td style={{ ...td, fontSize: 12.5 }}>
                       {d.termin ? (
-                        <span style={{ color: d.dniDoTerminu != null && d.dniDoTerminu < 0 ? "#B22" : (d.dniDoTerminu != null && d.dniDoTerminu <= 60 ? "#B35A00" : C.czarny), fontWeight: 600 }}>
+                        <span style={{ color: d.dniDoTerminu != null && d.dniDoTerminu < 0 ? "#C0392B" : (d.dniDoTerminu != null && d.dniDoTerminu <= 60 ? "#B9791A" : C.czarny), fontWeight: 600 }}>
                           {fmtPL(d.termin)}{d.terminAuto ? " ·auto" : ""}
                         </span>
                       ) : <span style={{ color: C.szary }}>—</span>}
@@ -3108,7 +3120,7 @@ function WidokKtoCoProwadzi({ jestAdmin, email, onForm, onArchiwum, onAdmin, onW
         {ladowanie ? (
           <div style={{ textAlign: "center", padding: 40, color: C.szary }}>Wczytywanie…</div>
         ) : blad ? (
-          <div style={{ color: "#B22", fontSize: 14 }}>{blad}</div>
+          <div style={{ color: "#C0392B", fontSize: 14 }}>{blad}</div>
         ) : tryb === "pm" ? (
           grupy.length === 0 ? (
             <div style={{ color: C.szary, fontSize: 14, fontStyle: "italic" }}>Brak przypisanych inwestycji.</div>
@@ -3159,7 +3171,7 @@ function WidokKtoCoProwadzi({ jestAdmin, email, onForm, onArchiwum, onAdmin, onW
                     </span>
                   </div>
                   {inw.pmowie.length === 0 ? (
-                    <div style={{ padding: "12px 16px", fontSize: 13, color: "#B22", fontStyle: "italic" }}>
+                    <div style={{ padding: "12px 16px", fontSize: 13, color: "#C0392B", fontStyle: "italic" }}>
                       brak przypisanego kierownika
                     </div>
                   ) : (
@@ -3189,8 +3201,8 @@ function WidokArchiwum({ raporty, ladowanie, filtr, setFiltr, onOdswiez, onOtwor
   // Status na plakietce czyta z pola „Podsumowanie" raportu. Dodatkowo, gdy opóźnienie
   // w harmonogramie realnie opóźnia zakończenie całości projektu, wymuszamy „zagrożenie"
   // (zabezpiecza też starsze raporty zapisane z domyślną opcją „nie powoduje zagrożenia").
-  const ZAGROZENIE = { txt: "Zagrożenie terminu", kolor: "#B22", tlo: "#FBE6E6" };
-  const NIEZAGROZONY = { txt: "Termin niezagrożony", kolor: "#1B7A3D", tlo: "#E4F4E9" };
+  const ZAGROZENIE = { txt: "Zagrożenie terminu", kolor: "#C0392B", tlo: "#FBECEA" };
+  const NIEZAGROZONY = { txt: "Termin niezagrożony", kolor: "#1B7A3D", tlo: "#E6F3EA" };
   function statusInwestycji(raport) {
     if (!raport) return { txt: "—", kolor: C.szary, tlo: "transparent" };
     if (harmonogramWymuszaZagrozenie(raport.harmonogram, raport.data_opracowania)) return ZAGROZENIE;
@@ -3281,7 +3293,7 @@ function WidokArchiwum({ raporty, ladowanie, filtr, setFiltr, onOdswiez, onOtwor
                           {komorka(
                             "Opóźnienie",
                             opoz === null ? "—" : opoz.dni > 0 ? `${opoz.dni} dni` : "brak",
-                            opoz && opoz.dni > 0 ? "#B22" : C.czarny
+                            opoz && opoz.dni > 0 ? "#C0392B" : C.czarny
                           )}
                           {komorka("Zakończenie wg umowy", (() => {
                             const zHarm = najpozniejszePlanowaneZakonczenie(o.harmonogram);
@@ -3440,7 +3452,7 @@ function PanelLinkow({ raportId, jestAdmin }) {
 
   const aktywny = (l) => !l.wylaczony;
   const statusLinku = (l) => l.wylaczony
-    ? { txt: "unieważniony", kolor: "#B22" }
+    ? { txt: "unieważniony", kolor: "#C0392B" }
     : { txt: "aktywny", kolor: "#1B7A3D" };
 
   return (
@@ -4418,7 +4430,12 @@ function PodgladPDF({ form, onBack, nazwaPliku, raportId, publiczny, jestAdmin }
 function Sekcja({ tytul, children }) {
   return (
     <section style={card}>
-      <div style={secTitle}>{tytul}</div>
+      <div style={{ display: "flex", alignItems: "flex-end", gap: 12, marginBottom: 16 }}>
+        <div style={{ fontFamily: C.mono, fontSize: 12, letterSpacing: "0.13em", textTransform: "uppercase", color: C.zoltyDeep, whiteSpace: "nowrap" }}>
+          <span style={{ color: C.zolty, fontWeight: 700 }}>/ </span>{tytul}
+        </div>
+        <div style={{ flex: 1, height: 1, background: C.linia, marginBottom: 4 }} />
+      </div>
       {children}
     </section>
   );
@@ -4524,8 +4541,8 @@ function RichEdytor({ value, onChange, placeholder, minHeight = 84 }) {
 
 /* ---------- Style --------------------------------------------------------- */
 const card = { background: C.bialy, border: `1px solid ${C.linia}`, borderRadius: 8, padding: 22, marginBottom: 18, boxShadow: "0 1px 2px rgba(0,0,0,0.03)" };
-const secTitle = { display: "inline-block", fontWeight: 800, fontSize: 13, textTransform: "uppercase", letterSpacing: 1, color: C.bialy, background: C.czarny, padding: "7px 16px 7px 12px", marginBottom: 18, borderLeft: `4px solid ${C.zolty}`, borderRadius: "0 4px 4px 0" };
-const lbl = { display: "block", fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.6, color: C.szary, marginBottom: 5 };
+const secTitle = { display: "inline-block", fontFamily: C.mono, fontWeight: 400, fontSize: 12, textTransform: "uppercase", letterSpacing: "0.13em", color: C.zoltyDeep, marginBottom: 14 };
+const lbl = { display: "block", fontFamily: C.mono, fontSize: 9.5, fontWeight: 400, textTransform: "uppercase", letterSpacing: "0.12em", color: C.szary, marginBottom: 5 };
 const inp = { width: "100%", padding: "9px 11px", border: `1px solid #C9C2B2`, borderRadius: 5, fontSize: 14, boxSizing: "border-box", background: "#FCFBF8", fontFamily: "inherit" };
 const ta = { ...inp, minHeight: 84, resize: "vertical" };
 const taBig = { ...inp, minHeight: 120, resize: "vertical" };
@@ -4536,9 +4553,9 @@ const btnGhost = { background: "transparent", color: C.czarny, border: `1.5px so
 const btnGhostDark = { background: "transparent", color: C.bialy, border: `1.5px solid ${C.bialy}`, padding: "8px 16px", borderRadius: 6, fontWeight: 600, fontSize: 13, cursor: "pointer", fontFamily: "inherit" };
 const miniBtn = { background: C.bialy, border: `1px solid ${C.linia}`, borderRadius: 4, padding: "5px 12px", fontSize: 12, cursor: "pointer", fontFamily: "inherit" };
 // Plakietka wstrzymanej inwestycji — spójna w koordynacji i „Kto co prowadzi".
-const odznakaWstrzymana = { fontSize: 10.5, fontWeight: 700, color: "#B35A00", background: "#FBF0DC", padding: "1px 6px", borderRadius: 4, marginLeft: 6, verticalAlign: "middle" };
+const odznakaWstrzymana = { fontSize: 10.5, fontWeight: 700, color: "#B9791A", background: "#FBF0DC", padding: "1px 6px", borderRadius: 4, marginLeft: 6, verticalAlign: "middle" };
 const pPDF = { margin: "2px 0", fontSize: 12.5 };
-const thHarm = { background: C.czarny, color: C.zolty, fontSize: 11, fontWeight: 700, padding: "8px 6px", textAlign: "center", border: `1px solid ${C.grafit}` };
+const thHarm = { background: C.czarny, color: "#FFFFFF", fontFamily: C.mono, fontSize: 8.5, fontWeight: 400, letterSpacing: "0.05em", textTransform: "uppercase", padding: "8px 6px", textAlign: "center" };
 const tdHarm = { padding: "3px 6px", border: `1px solid ${C.linia}`, textAlign: "center" };
 const cellInp = { border: "none", background: "transparent", fontSize: 13, fontFamily: "inherit", padding: "4px 2px", width: "100%", boxSizing: "border-box" };
 const thHarmPdf = { background: C.czarny, color: C.zolty, fontSize: 9.5, fontWeight: 700, padding: "5px 4px", textAlign: "center", border: `1px solid ${C.grafit}` };
