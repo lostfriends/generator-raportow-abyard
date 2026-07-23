@@ -802,6 +802,32 @@ function PasekPostepu({ proc, etykieta, szer = 120 }) {
   );
 }
 
+// Overline sekcji w panelach (mono „/ TYTUŁ", amber) — spójny z designem abyard.com.
+function TytulSekcji({ children }) {
+  return (
+    <div style={secTitle}><span style={{ color: C.zolty, fontWeight: 700 }}>/ </span>{children}</div>
+  );
+}
+
+// Przełącznik-pigułka (segmentowy) w stylu abyard.com: mono, uppercase, aktywny =
+// ciemne tło + jasnozłoty tekst. opcje: [[wartosc, etykieta], ...].
+function PigulkaPrzelacznik({ opcje, wartosc, onZmiana }) {
+  return (
+    <div style={{ display: "inline-flex", border: `1px solid ${C.linia}`, borderRadius: 999, overflow: "hidden", fontFamily: C.mono, fontSize: 10.5, letterSpacing: "0.06em", textTransform: "uppercase" }}>
+      {opcje.map(([val, et]) => {
+        const akt = wartosc === val;
+        return (
+          <button key={String(val)} onClick={() => onZmiana(val)}
+            style={{ border: "none", background: akt ? C.czarny : C.bialy, color: akt ? C.zoltyBright : C.szary,
+              fontWeight: akt ? 700 : 400, padding: "7px 13px", cursor: "pointer", fontFamily: "inherit", letterSpacing: "inherit", textTransform: "inherit" }}>
+            {et}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 // Wspólny pasek nawigacji — jeden dla wszystkich widoków (formularz, archiwum, panel).
 // aktywny: "form" | "archiwum" | "admin". Zakładka panelu tylko dla admina.
 function PasekNawigacji({ aktywny, jestAdmin, email, onForm, onArchiwum, onKoordynacja, onAdmin, onWyloguj }) {
@@ -1175,7 +1201,13 @@ export default function GeneratorRaportowABYARD() {
     const file = e.target.files?.[0];
     if (!file) return;
     plikiRef.current.grafika = file; // zachowaj oryginał do uploadu przy zapisie
-    kompresujObraz(file).then(({ dataUrl }) =>
+    // Grafika okładki jest teraz HERO na całą szerokość A4 (~210 mm) i jest JEDNYM
+    // plikiem dziedziczonym przez wszystkie raporty danej inwestycji (nie dokłada się
+    // co raport jak dokumentacja fotograficzna), więc kompresujemy ją znacznie LŻEJ niż
+    // zwykłe zdjęcia (te: 1440 px / 0.7). 2600 px > 300 DPI przy pełnej szerokości,
+    // jakość 0.88 minimalizuje artefakty (banding nieba) — podgląd i PDF wyglądają ostro
+    // bez zauważalnego obciążenia bazy. (Zapisany raport i tak używa oryginału z uploadu.)
+    kompresujObraz(file, 2600, 0.88).then(({ dataUrl }) =>
       setForm((f) => ({ ...f, grafikaInwestycji: { nazwa: file.name, dataUrl } }))
     );
     e.target.value = "";
@@ -2419,7 +2451,8 @@ function PanelAdmina({ pokazToast, email, onForm, onArchiwum, onKoordynacja, onW
         ) : zakladka === "inwestycje" ? (
           <ZakladkaKoordynacjaInwestycji
             projektyAll={projektyAll} przypisania={przypisania} uzytkownicy={uzytkownicy} zakresy={zakresy}
-            terminyDomyslne={terminyDomyslne} raporty={raporty}
+            terminyDomyslne={terminyDomyslne} raporty={raporty} nieaktywne={nieaktywne}
+            pokazToast={pokazToast} odswiez={wczytaj}
           />
         ) : (
           <></>
@@ -2499,106 +2532,59 @@ function PanelAdmina({ pokazToast, email, onForm, onArchiwum, onKoordynacja, onW
 }
 
 /* ---------- KOMPAKTOWA LISTA INWESTYCJI (koordynacja) -------------------- */
-function KompaktowaListaInwestycji({ projekty, przypisania, zakresy, zakresMap, uzytMap, terminyDomyslne, punktyLok, setPunktyLok, zapiszPunkty, zapiszZakres, zapiszTermin, zakonczInwestycje, przelaczWstrzymanie }) {
+// Koordynacja PM — UPROSZCZONA lista: tylko przypisywanie punktów obciążenia PM
+// do inwestycji. Zarządzanie samą inwestycją (zakres, termin, wstrzymanie,
+// zakończenie) przeniesione do zakładki „Koordynacja Inwestycji".
+function KompaktowaListaInwestycji({ projekty, przypisania, zakresMap, uzytMap, punktyLok, setPunktyLok, zapiszPunkty }) {
   const [otwarty, setOtwarty] = React.useState(null);
-  const th = { textAlign: "left", padding: "7px 10px", color: C.szary, fontSize: 11, textTransform: "uppercase", letterSpacing: .5, borderBottom: `2px solid ${C.linia}` };
-  const td = { padding: "6px 10px", borderBottom: `1px solid ${C.jasny}`, fontSize: 13 };
   const numInp = { width: 60, padding: "5px 7px", border: `1px solid ${C.linia}`, borderRadius: 5, fontSize: 13, textAlign: "center" };
-
   return (
-    <table style={{ width: "100%", borderCollapse: "collapse" }}>
-      <thead>
-        <tr>
-          <th style={th}>Inwestycja</th>
-          <th style={{ ...th, width: 150 }}>Zakres</th>
-          <th style={{ ...th, width: 150 }}>Termin</th>
-          <th style={{ ...th, width: 70, textAlign: "center" }}>PM</th>
-          <th style={{ ...th, width: 110, textAlign: "center" }}>Status</th>
-          <th style={{ ...th, width: 90 }}></th>
-        </tr>
-      </thead>
-      <tbody>
-        {projekty.map((p) => {
-          const przypP = przypisania.filter((x) => x.projekt_id === p.id);
-          const zk = zakresMap[p.zakres];
-          const auto = terminyDomyslne?.[p.id] || "";
-          const reczny = p.termin_zakonczenia || "";
-          const wartosc = reczny || auto;
-          const zAuto = !reczny && !!auto;
-          const otw = otwarty === p.id;
-          return (
-            <React.Fragment key={p.id}>
-              <tr style={{ background: otw ? C.jasny : "transparent" }}>
-                <td style={{ ...td, fontWeight: 700, cursor: "pointer", opacity: p.wstrzymana ? 0.55 : 1 }} onClick={() => setOtwarty(otw ? null : p.id)}>
-                  <span style={{ color: C.szary, marginRight: 6, fontSize: 11 }}>{otw ? "▼" : "▶"}</span>{p.nazwa}
-                </td>
-                <td style={td}>
-                  <select value={p.zakres || ""} onChange={(e) => zapiszZakres(p.id, e.target.value)}
-                    style={{ padding: "5px 7px", border: `1px solid ${C.linia}`, borderRadius: 5, fontSize: 12.5, width: "100%" }}>
-                    <option value="">— brak —</option>
-                    {zakresy.map((z) => <option key={z.kod} value={z.kod}>{z.nazwa}</option>)}
-                  </select>
-                </td>
-                <td style={td}>
-                  <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
-                    <input type="date" defaultValue={wartosc} onBlur={(e) => zapiszTermin(p.id, e.target.value)}
-                      title={zAuto ? "Termin z harmonogramu — zapisz, by ustawić na stałe" : ""}
-                      style={{ padding: "4px 6px", border: `1px solid ${zAuto ? C.zolty : C.linia}`, borderRadius: 5, fontSize: 12, background: zAuto ? "#FFFDF5" : C.bialy, width: "100%" }} />
-                    {zAuto && <span style={{ fontSize: 9, color: "#B8860B", fontWeight: 700 }}>AUTO</span>}
-                  </span>
-                </td>
-                <td style={{ ...td, textAlign: "center", color: przypP.length ? C.czarny : C.szary }}>{przypP.length || "—"}</td>
-                <td style={{ ...td, textAlign: "center" }}>
-                  <button onClick={() => przelaczWstrzymanie(p)}
-                    title={p.wstrzymana
-                      ? "Inwestycja wstrzymana — punkty nie liczą się do obciążenia. Kliknij, aby wznowić."
-                      : "Inwestycja aktywna — punkty liczą się do obciążenia. Kliknij, aby wstrzymać."}
-                    style={{ border: "none", cursor: "pointer", fontFamily: "inherit", fontSize: 11, fontWeight: 700,
-                      padding: "3px 10px", borderRadius: 20,
-                      color: p.wstrzymana ? "#B9791A" : "#1B7A3D",
-                      background: p.wstrzymana ? "#FBF0DC" : "#E6F3EA" }}>
-                    {p.wstrzymana ? "Wstrzymana" : "Aktywna"}
-                  </button>
-                </td>
-                <td style={{ ...td, textAlign: "right" }}>
-                  <button onClick={() => zakonczInwestycje(p.id, p.nazwa)} title="Oznacz jako zakończoną"
-                    style={{ border: `1px solid ${C.linia}`, background: C.bialy, borderRadius: 5, padding: "4px 8px", fontSize: 11, fontWeight: 600, cursor: "pointer", color: C.szary }}>
-                    ✓ Zakończ
-                  </button>
-                </td>
-              </tr>
-              {otw && (
-                <tr>
-                  <td colSpan={6} style={{ padding: "0 10px 12px 30px", background: C.jasny }}>
-                    {przypP.length === 0 ? (
-                      <div style={{ fontSize: 12, color: C.szary, fontStyle: "italic", padding: "8px 0" }}>
-                        brak przypisanych kierowników — dodaj ich w zakładce „Zarządzanie"
-                      </div>
-                    ) : (
-                      <div style={{ display: "flex", flexDirection: "column", gap: 5, paddingTop: 8 }}>
-                        {przypP.map((x) => {
-                          const u = uzytMap[x.uzytkownik];
-                          const val = punktyLok[x.id] !== undefined ? punktyLok[x.id] : (x.punkty ?? "");
-                          return (
-                            <div key={x.id} style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                              <span style={{ flex: "1 1 auto", fontSize: 13 }}>{nazwaOsoby(u)}</span>
-                              <input type="number" min="0" step="0.5" value={val} placeholder={zk ? String(zk.punkty) : "—"}
-                                onChange={(e) => setPunktyLok((s) => ({ ...s, [x.id]: e.target.value }))}
-                                onBlur={(e) => zapiszPunkty(x.id, e.target.value)} style={numInp} />
-                              <span style={{ fontSize: 11.5, color: C.szary, width: 26 }}>pkt</span>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    )}
-                  </td>
-                </tr>
-              )}
-            </React.Fragment>
-          );
-        })}
-      </tbody>
-    </table>
+    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+      {projekty.map((p) => {
+        const przypP = przypisania.filter((x) => x.projekt_id === p.id);
+        const zk = zakresMap[p.zakres];
+        const otw = otwarty === p.id;
+        return (
+          <div key={p.id} style={{ border: `1px solid ${C.linia}`, borderRadius: 8, background: C.bialy, opacity: p.wstrzymana ? 0.6 : 1 }}>
+            <div onClick={() => setOtwarty(otw ? null : p.id)}
+              style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, padding: "10px 14px", cursor: "pointer" }}>
+              <div style={{ fontWeight: 700, fontSize: 13.5 }}>
+                <span style={{ color: C.szary, marginRight: 6, fontSize: 11 }}>{otw ? "▼" : "▶"}</span>{p.nazwa}
+                {p.wstrzymana && <span style={odznakaWstrzymana}>WSTRZYMANA</span>}
+              </div>
+              <span style={{ fontFamily: C.mono, fontSize: 11, color: C.szary2, textTransform: "uppercase", letterSpacing: "0.04em" }}>
+                {przypP.length ? `${przypP.length} PM` : "brak PM"}
+              </span>
+            </div>
+            {otw && (
+              <div style={{ borderTop: `1px dashed ${C.linia}`, padding: "10px 14px 12px 32px" }}>
+                {przypP.length === 0 ? (
+                  <div style={{ fontSize: 12, color: C.szary, fontStyle: "italic" }}>
+                    brak przypisanych kierowników — dodaj ich w zakładce „Zarządzanie"
+                  </div>
+                ) : (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                    {przypP.map((x) => {
+                      const u = uzytMap[x.uzytkownik];
+                      const val = punktyLok[x.id] !== undefined ? punktyLok[x.id] : (x.punkty ?? "");
+                      return (
+                        <div key={x.id} style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                          <span style={{ flex: "1 1 auto", fontSize: 13 }}>{nazwaOsoby(u)}</span>
+                          <input type="number" min="0" step="0.5" value={val} placeholder={zk ? String(zk.punkty) : "—"}
+                            onChange={(e) => setPunktyLok((s) => ({ ...s, [x.id]: e.target.value }))}
+                            onBlur={(e) => zapiszPunkty(x.id, e.target.value)} style={numInp} />
+                          <span style={{ fontSize: 11.5, color: C.szary, width: 26 }}>pkt</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
   );
 }
 
@@ -2672,39 +2658,11 @@ function ZakladkaKoordynacja({ uzytkownicy, projektyAll, przypisania, zakresy, t
     try { await ustawPunktyPrzypisania(przypisanieId, wartosc); }
     catch (e) { console.error(e); pokazToast("Błąd zapisu punktów"); }
   }
-  async function zapiszZakres(projektId, kod) {
-    try { await ustawKoordynacjeProjektu(projektId, { zakres: kod || null }); odswiez(); }
-    catch (e) { console.error(e); pokazToast("Błąd zapisu zakresu"); }
-  }
-  async function zapiszTermin(projektId, data) {
-    try { await ustawKoordynacjeProjektu(projektId, { termin_zakonczenia: data || null }); }
-    catch (e) { console.error(e); pokazToast("Błąd zapisu terminu"); }
-  }
   async function zapiszPM(uzytkownikId, pola) {
     try { await ustawDanePM(uzytkownikId, pola); }
     catch (e) { console.error(e); pokazToast("Błąd zapisu danych kierownika"); }
   }
-  async function zakonczInwestycje(projektId, nazwa) {
-    if (!window.confirm(`Oznaczyć „${nazwa}" jako zakończoną?\n\nZniknie z listy przypisań i z koordynacji. Możesz ją przywrócić w sekcji „Zakończone".`)) return;
-    try { await ustawAktywnoscProjektu(projektId, false); odswiez(); pokazToast(`„${nazwa}" przeniesiona do zakończonych`); }
-    catch (e) { console.error(e); pokazToast("Błąd archiwizacji inwestycji"); }
-  }
-  // Wstrzymanie/wznowienie inwestycji: zostaje na liście, ale punkty nie liczą
-  // się do obciążenia. Po wznowieniu punkty naliczają się z powrotem.
-  async function przelaczWstrzymanie(p) {
-    const wstrzymac = !p.wstrzymana;
-    try {
-      await ustawKoordynacjeProjektu(p.id, { wstrzymana: wstrzymac });
-      odswiez();
-      pokazToast(wstrzymac ? `„${p.nazwa}" wstrzymana — punkty nie liczą się do obciążenia` : `„${p.nazwa}" aktywna — punkty znów się naliczają`);
-    } catch (e) { console.error(e); pokazToast("Błąd zmiany statusu inwestycji"); }
-  }
-  async function przywrocInwestycje(projektId, nazwa) {
-    try { await ustawAktywnoscProjektu(projektId, true); odswiez(); pokazToast(`„${nazwa}" przywrócona`); }
-    catch (e) { console.error(e); pokazToast("Błąd przywracania inwestycji"); }
-  }
 
-  const th = { textAlign: "left", padding: "8px 10px", color: C.szary, fontSize: 11, textTransform: "uppercase", letterSpacing: .5 };
   const td = { padding: "8px 10px", borderBottom: `1px solid ${C.jasny}`, fontSize: 13.5 };
   const numInp = { width: 70, padding: "6px 8px", border: `1px solid ${C.linia}`, borderRadius: 6, fontSize: 13, textAlign: "center" };
 
@@ -2713,21 +2671,13 @@ function ZakladkaKoordynacja({ uzytkownicy, projektyAll, przypisania, zakresy, t
       {/* SEKCJA ANALIZY — OBCIĄŻENIE ZESPOŁU (na górze) */}
       <section style={card}>
         <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 16 }}>
-          <div style={secTitle}>Obciążenie zespołu</div>
-          <div style={{ display: "flex", border: `1px solid ${C.linia}`, borderRadius: 8, overflow: "hidden" }}>
-            {[[0, "Dziś"], [30, "Za miesiąc"], [60, "Za 2 msc"], [90, "Za 3 msc"]].map(([d, et]) => (
-              <button key={d} onClick={() => setHoryzont(d)}
-                style={{ border: "none", background: horyzont === d ? C.czarny : C.bialy, color: horyzont === d ? C.bialy : C.czarny,
-                  padding: "8px 14px", fontSize: 13, fontWeight: 600, cursor: "pointer", borderRight: `1px solid ${C.linia}` }}>
-                {et}
-              </button>
-            ))}
-          </div>
+          <TytulSekcji>Obciążenie zespołu</TytulSekcji>
+          <PigulkaPrzelacznik opcje={[[0, "Dziś"], [30, "Za miesiąc"], [60, "Za 2 msc"], [90, "Za 3 msc"]]} wartosc={horyzont} onZmiana={setHoryzont} />
         </div>
-        <div style={{ display: "flex", gap: 16, flexWrap: "wrap", fontSize: 12, color: C.szary, marginBottom: 14 }}>
-          <span>● <span style={{ color: "#1B7A3D" }}>do 80%</span> zapas</span>
-          <span>● <span style={{ color: "#B9791A" }}>80–100%</span> pełne</span>
-          <span>● <span style={{ color: C.czerwony }}>ponad 100%</span> przeciążenie</span>
+        <div style={{ display: "flex", gap: 16, flexWrap: "wrap", fontFamily: C.mono, fontSize: 10, color: C.szary2, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 14 }}>
+          <span style={{ color: "#1B7A3D" }}>● <span style={{ color: C.szary2 }}>do 80% — zapas</span></span>
+          <span style={{ color: "#B9791A" }}>● <span style={{ color: C.szary2 }}>80–100% — pełne</span></span>
+          <span style={{ color: C.czerwony }}>● <span style={{ color: C.szary2 }}>ponad 100% — przeciążenie</span></span>
         </div>
         {analiza.length === 0 ? (
           <div style={{ color: C.szary, fontSize: 13, fontStyle: "italic" }}>Brak kierowników z przypisanymi inwestycjami.</div>
@@ -2744,7 +2694,8 @@ function ZakladkaKoordynacja({ uzytkownicy, projektyAll, przypisania, zakresy, t
                     <div>
                       <div style={{ fontWeight: 700, fontSize: 14 }}>{nazwaOsoby(a.u)}</div>
                       <div style={{ fontSize: 11.5, color: C.szary, marginTop: 1 }}>{a.tematy.filter((t) => !t.schodzi && !t.wstrzymana).length} akt. · {a.razem} pkt{a.inne > 0 ? ` (w tym ${a.inne} inne)` : ""}</div>
-                      <span style={{ display: "inline-block", fontSize: 10.5, fontWeight: 700, padding: "1px 7px", borderRadius: 20, marginTop: 3, color: stCol, background: stBg }}>{st}</span>
+                      <span style={{ display: "inline-flex", alignItems: "center", gap: 5, fontFamily: C.mono, fontSize: 9, fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase", padding: "3px 8px", borderRadius: 999, marginTop: 4, color: stCol, background: stBg }}>
+                        <span style={{ width: 5, height: 5, borderRadius: "50%", background: "currentColor" }} />{st}</span>
                     </div>
                     <div style={{ position: "relative", height: 24, background: C.jasny, borderRadius: 6, overflow: "hidden", border: `1px solid ${C.linia}` }}>
                       <div style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: `${Math.max(szer, 2)}%`, background: kolorProc(a.proc) }} />
@@ -2776,117 +2727,35 @@ function ZakladkaKoordynacja({ uzytkownicy, projektyAll, przypisania, zakresy, t
         )}
       </section>
 
-      {/* SEKCJA 1 — INWESTYCJE: zakres, termin, punkty per PM */}
+      {/* SEKCJA 1 — PUNKTY PM: przypisywanie punktów obciążenia PM do inwestycji */}
       <section style={card}>
         <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 8 }}>
-          <div style={secTitle}>Inwestycje — zakres i punkty PM</div>
+          <TytulSekcji>Punkty PM per inwestycja</TytulSekcji>
           <input type="text" value={szukaj} onChange={(e) => setSzukaj(e.target.value)} placeholder="Szukaj inwestycji…"
             style={{ padding: "7px 11px", border: `1px solid ${C.linia}`, borderRadius: 6, fontSize: 13, width: 220 }} />
         </div>
         <p style={{ fontSize: 12.5, color: C.szary, marginTop: -2, marginBottom: 14, lineHeight: 1.5 }}>
-          Kliknij inwestycję, aby rozwinąć punkty kierowników. Termin „auto" pochodzi z harmonogramu.
+          Kliknij inwestycję, aby rozwinąć i przypisać punkty obciążenia kierownikom. Zakres, termin, wstrzymanie i zakończenie ustawiasz w zakładce „Koordynacja Inwestycji".
         </p>
         <KompaktowaListaInwestycji
-          projekty={projektyWidoczne} przypisania={przypisania} zakresy={zakresy} zakresMap={zakresMap}
-          uzytMap={uzytMap} terminyDomyslne={terminyDomyslne} punktyLok={punktyLok} setPunktyLok={setPunktyLok}
-          zapiszPunkty={zapiszPunkty} zapiszZakres={zapiszZakres} zapiszTermin={zapiszTermin} zakonczInwestycje={zakonczInwestycje}
-          przelaczWstrzymanie={przelaczWstrzymanie}
+          projekty={projektyWidoczne} przypisania={przypisania} zakresMap={zakresMap}
+          uzytMap={uzytMap} punktyLok={punktyLok} setPunktyLok={setPunktyLok} zapiszPunkty={zapiszPunkty}
         />
       </section>
 
-      {/* STARY UKŁAD KAFLI — ZASTĄPIONY KOMPAKTOWĄ LISTĄ */}
-      {false && (
-      <section style={card}>
-        <div style={secTitle}>Inwestycje — zakres i punkty PM</div>
-        <p style={{ fontSize: 12.5, color: C.szary, marginTop: -6, marginBottom: 16, lineHeight: 1.5 }}>
-          Ustaw zakres każdej inwestycji (podpowiada punkty) oraz wpisz punkty obciążenia dla każdego przypisanego kierownika.
-          Termin zakończenia decyduje, kiedy inwestycja „schodzi" z obciążenia w analizie.
-        </p>
-        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-          {projektyAll.map((p) => {
-            const przypP = przypisania.filter((x) => x.projekt_id === p.id);
-            const zk = zakresMap[p.zakres];
-            return (
-              <div key={p.id} style={{ border: `1px solid ${C.linia}`, borderRadius: 8, padding: "12px 14px", background: C.bialy }}>
-                <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 12, marginBottom: przypP.length ? 10 : 0 }}>
-                  <div style={{ fontWeight: 700, flex: "1 1 200px" }}>{p.nazwa}</div>
-                  <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                    <label style={{ fontSize: 11, color: C.szary, textTransform: "uppercase" }}>Zakres</label>
-                    <select value={p.zakres || ""} onChange={(e) => zapiszZakres(p.id, e.target.value)}
-                      style={{ padding: "6px 8px", border: `1px solid ${C.linia}`, borderRadius: 6, fontSize: 13 }}>
-                      <option value="">— brak —</option>
-                      {zakresy.map((z) => <option key={z.kod} value={z.kod}>{z.nazwa}</option>)}
-                    </select>
-                  </div>
-                  <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                    <label style={{ fontSize: 11, color: C.szary, textTransform: "uppercase" }}>Termin</label>
-                    {(() => {
-                      const auto = terminyDomyslne?.[p.id] || "";
-                      const reczny = p.termin_zakonczenia || "";
-                      // wartość pola: ręczny ma pierwszeństwo, inaczej auto z harmonogramu
-                      const wartosc = reczny || auto;
-                      const zAuto = !reczny && !!auto;
-                      return (
-                        <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                          <input type="date" defaultValue={wartosc}
-                            onBlur={(e) => zapiszTermin(p.id, e.target.value)}
-                            title={zAuto ? "Termin dociągnięty z harmonogramu — zapisz, by ustawić na stałe, lub zmień ręcznie" : ""}
-                            style={{ padding: "6px 8px", border: `1px solid ${zAuto ? C.zolty : C.linia}`, borderRadius: 6, fontSize: 13,
-                              background: zAuto ? "#FFFDF5" : C.bialy }} />
-                          {zAuto && <span style={{ fontSize: 10, color: "#B8860B", fontWeight: 700, textTransform: "uppercase" }}>auto</span>}
-                        </span>
-                      );
-                    })()}
-                  </div>
-                  <button onClick={() => zakonczInwestycje(p.id, p.nazwa)} title="Oznacz jako zakończoną (przenosi do archiwum)"
-                    style={{ border: `1px solid ${C.linia}`, background: C.bialy, borderRadius: 6, padding: "6px 12px", fontSize: 12, fontWeight: 600, cursor: "pointer", color: C.szary }}>
-                    ✓ Zakończona
-                  </button>
-                </div>
-                {przypP.length > 0 && (
-                  <div style={{ borderTop: `1px dashed ${C.linia}`, paddingTop: 10, display: "flex", flexDirection: "column", gap: 6 }}>
-                    {przypP.map((x) => {
-                      const u = uzytMap[x.uzytkownik];
-                      const val = punktyLok[x.id] !== undefined ? punktyLok[x.id] : (x.punkty ?? "");
-                      return (
-                        <div key={x.id} style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                          <span style={{ flex: "1 1 auto", fontSize: 13.5 }}>{nazwaOsoby(u)}</span>
-                          <input type="number" min="0" step="0.5" value={val}
-                            placeholder={zk ? String(zk.punkty) : "—"}
-                            onChange={(e) => setPunktyLok((s) => ({ ...s, [x.id]: e.target.value }))}
-                            onBlur={(e) => zapiszPunkty(x.id, e.target.value)}
-                            style={numInp} />
-                          <span style={{ fontSize: 12, color: C.szary, width: 30 }}>pkt</span>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-                {przypP.length === 0 && (
-                  <div style={{ fontSize: 12, color: C.szary, fontStyle: "italic", marginTop: 4 }}>
-                    brak przypisanych kierowników — dodaj ich w zakładce „Zarządzanie"
-                  </div>
-                )}
-              </div>
-            );
-          })}
-        </div>
-      </section>
-      )}
-
       {/* SEKCJA 2 — KIEROWNICY: pojemność, inne obowiązki */}
       <section style={card}>
-        <div style={secTitle}>Kierownicy — pojemność i inne obowiązki</div>
-        <p style={{ fontSize: 12.5, color: C.szary, marginTop: -6, marginBottom: 16, lineHeight: 1.5 }}>
+        <TytulSekcji>Kierownicy — pojemność i inne obowiązki</TytulSekcji>
+        <p style={{ fontSize: 12.5, color: C.szary, marginTop: 6, marginBottom: 16, lineHeight: 1.5 }}>
           Pojemność to punkty odpowiadające pełnemu obłożeniu (100%). „Inne obowiązki" to punkty za zadania spoza inwestycji
           (gwarancje, usterki itp.). Widoczni są tylko kierownicy z przypisanymi inwestycjami.
         </p>
         <table style={{ width: "100%", borderCollapse: "collapse" }}>
           <thead>
-            <tr style={{ borderBottom: `2px solid ${C.linia}` }}>
-              <th style={th}>Kierownik</th>
-              <th style={{ ...th, textAlign: "center" }}>Pojemność</th>
-              <th style={{ ...th, textAlign: "center" }}>Inne obowiązki</th>
+            <tr>
+              <th style={thAdm}>Kierownik</th>
+              <th style={{ ...thAdm, textAlign: "center" }}>Pojemność</th>
+              <th style={{ ...thAdm, textAlign: "center" }}>Inne obowiązki</th>
             </tr>
           </thead>
           <tbody>
@@ -2916,27 +2785,6 @@ function ZakladkaKoordynacja({ uzytkownicy, projektyAll, przypisania, zakresy, t
         </table>
       </section>
 
-      {/* SEKCJA 3 — ZAKOŃCZONE (archiwum inwestycji) */}
-      {nieaktywne && nieaktywne.length > 0 && (
-        <section style={card}>
-          <div style={secTitle}>Zakończone inwestycje</div>
-          <p style={{ fontSize: 12.5, color: C.szary, marginTop: -6, marginBottom: 16, lineHeight: 1.5 }}>
-            Inwestycje oznaczone jako zakończone. Nie liczą się do obciążenia i nie pojawiają się w przypisaniach.
-            Możesz je przywrócić.
-          </p>
-          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            {nieaktywne.map((p) => (
-              <div key={p.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "8px 12px", border: `1px solid ${C.linia}`, borderRadius: 6, background: C.jasny }}>
-                <span style={{ fontSize: 13.5, color: C.szary }}>{p.nazwa}</span>
-                <button onClick={() => przywrocInwestycje(p.id, p.nazwa)}
-                  style={{ border: `1px solid ${C.linia}`, background: C.bialy, borderRadius: 6, padding: "5px 12px", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>
-                  ↩ Przywróć
-                </button>
-              </div>
-            ))}
-          </div>
-        </section>
-      )}
     </>
   );
 }
@@ -2945,13 +2793,41 @@ function ZakladkaKoordynacja({ uzytkownicy, projektyAll, przypisania, zakresy, t
 /* Kokpit przekrojowy: wszystkie aktywne inwestycje w jednym miejscu — status
    z najnowszego raportu, opóźnienie, data ostatniego raportu, najbliższy termin
    i PnU, przypisani PM. Plus monitor kompletności: kto nie złożył raportu. */
-function ZakladkaKoordynacjaInwestycji({ projektyAll, przypisania, uzytkownicy, zakresy, terminyDomyslne, raporty }) {
+function ZakladkaKoordynacjaInwestycji({ projektyAll, przypisania, uzytkownicy, zakresy, terminyDomyslne, raporty, nieaktywne, pokazToast, odswiez }) {
   const uzytMap = React.useMemo(() => Object.fromEntries(uzytkownicy.map((u) => [u.id, u])), [uzytkownicy]);
   const zakresMap = React.useMemo(() => Object.fromEntries(zakresy.map((z) => [z.kod, z])), [zakresy]);
   const [filtrStatus, setFiltrStatus] = React.useState("wszystkie"); // wszystkie | zagrozone | bez-raportu
   const [prog, setProg] = React.useState(30);                        // próg dni „bez aktualnego raportu"
   const [szukaj, setSzukaj] = React.useState("");
+  const [otwarty, setOtwarty] = React.useState(null);                // id inwestycji z rozwiniętym panelem zarządzania
   const dzis = dzisISO();
+
+  // --- Zarządzanie inwestycją (zakres, termin, wstrzymanie, zakończenie, przywrócenie) ---
+  async function zapiszZakres(projektId, kod) {
+    try { await ustawKoordynacjeProjektu(projektId, { zakres: kod || null }); odswiez?.(); }
+    catch (e) { console.error(e); pokazToast?.("Błąd zapisu zakresu"); }
+  }
+  async function zapiszTermin(projektId, data) {
+    try { await ustawKoordynacjeProjektu(projektId, { termin_zakonczenia: data || null }); odswiez?.(); }
+    catch (e) { console.error(e); pokazToast?.("Błąd zapisu terminu"); }
+  }
+  async function zakonczInwestycje(projektId, nazwa) {
+    if (!window.confirm(`Oznaczyć „${nazwa}" jako zakończoną?\n\nZniknie z listy aktywnych inwestycji i z przypisań. Możesz ją przywrócić w sekcji „Zakończone".`)) return;
+    try { await ustawAktywnoscProjektu(projektId, false); odswiez?.(); pokazToast?.(`„${nazwa}" przeniesiona do zakończonych`); }
+    catch (e) { console.error(e); pokazToast?.("Błąd archiwizacji inwestycji"); }
+  }
+  async function przelaczWstrzymanie(p) {
+    const wstrzymac = !p.wstrzymana;
+    try {
+      await ustawKoordynacjeProjektu(p.id, { wstrzymana: wstrzymac });
+      odswiez?.();
+      pokazToast?.(wstrzymac ? `„${p.nazwa}" wstrzymana — punkty nie liczą się do obciążenia` : `„${p.nazwa}" aktywna — punkty znów się naliczają`);
+    } catch (e) { console.error(e); pokazToast?.("Błąd zmiany statusu inwestycji"); }
+  }
+  async function przywrocInwestycje(projektId, nazwa) {
+    try { await ustawAktywnoscProjektu(projektId, true); odswiez?.(); pokazToast?.(`„${nazwa}" przywrócona`); }
+    catch (e) { console.error(e); pokazToast?.("Błąd przywracania inwestycji"); }
+  }
 
   // Najnowszy raport per projekt (klucz: projekt_id)
   const raportyProjektu = React.useMemo(() => {
@@ -3010,10 +2886,13 @@ function ZakladkaKoordynacjaInwestycji({ projektyAll, przypisania, uzytkownicy, 
     return [...lista].sort((a, b) => (rank(b) - rank(a)) || (b.opozDni - a.opozDni) || ((b.dniOd || 0) - (a.dniOd || 0)) || a.projekt.nazwa.localeCompare(b.projekt.nazwa, "pl"));
   }, [dane, filtrStatus, szukaj]);
 
-  const th = { textAlign: "left", padding: "8px 10px", color: C.szary, fontSize: 11, textTransform: "uppercase", letterSpacing: .5, borderBottom: `2px solid ${C.linia}` };
+  const th = { textAlign: "left", padding: "9px 10px", color: C.szary, fontFamily: C.mono, fontSize: 9.5, fontWeight: 400, textTransform: "uppercase", letterSpacing: "0.1em", borderBottom: `2px solid ${C.czarny}` };
   const td = { padding: "8px 10px", borderBottom: `1px solid ${C.jasny}`, fontSize: 13, verticalAlign: "top" };
+  // Chip statusu w stylu abyard.com: mono, uppercase, z kropką w kolorze tekstu.
   const chip = (txt, kolor, tlo) => (
-    <span style={{ display: "inline-block", fontSize: 10.5, fontWeight: 700, padding: "2px 8px", borderRadius: 20, color: kolor, background: tlo, whiteSpace: "nowrap" }}>{txt}</span>
+    <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontFamily: C.mono, fontSize: 9.5, fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase", padding: "4px 9px", borderRadius: 999, color: kolor, background: tlo, whiteSpace: "nowrap" }}>
+      <span style={{ width: 6, height: 6, borderRadius: "50%", background: "currentColor", flexShrink: 0 }} />{txt}
+    </span>
   );
   // Etykieta „ostatni raport": ile dni temu + numer, z kolorem wg zalegania
   function ostatniRaportKom(d) {
@@ -3038,8 +2917,8 @@ function ZakladkaKoordynacjaInwestycji({ projektyAll, przypisania, uzytkownicy, 
           ["Wstrzymane", liczby.wstrzymane, C.szary, C.jasny],
         ].map(([et, n, kol, tlo]) => (
           <div key={et} style={{ flex: "1 1 160px", border: `1px solid ${C.linia}`, borderRadius: 8, padding: "12px 16px", background: tlo }}>
-            <div style={{ fontSize: 28, fontWeight: 800, color: kol, lineHeight: 1 }}>{n}</div>
-            <div style={{ fontSize: 11.5, color: C.szary, marginTop: 4, textTransform: "uppercase", letterSpacing: .4 }}>{et}</div>
+            <div style={{ fontFamily: "'Roboto', system-ui, sans-serif", fontSize: 28, fontWeight: 900, color: kol, lineHeight: 1 }}>{n}</div>
+            <div style={{ fontFamily: C.mono, fontSize: 10, color: C.szary, marginTop: 5, textTransform: "uppercase", letterSpacing: "0.1em" }}>{et}</div>
           </div>
         ))}
       </section>
@@ -3047,17 +2926,10 @@ function ZakladkaKoordynacjaInwestycji({ projektyAll, przypisania, uzytkownicy, 
       {/* MONITOR KOMPLETNOŚCI — KTO NIE ZŁOŻYŁ RAPORTU */}
       <section style={card}>
         <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 8 }}>
-          <div style={secTitle}>Do uzupełnienia — brak aktualnego raportu</div>
+          <TytulSekcji>Do uzupełnienia — brak aktualnego raportu</TytulSekcji>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <span style={{ fontSize: 12, color: C.szary }}>Próg</span>
-            <div style={{ display: "flex", border: `1px solid ${C.linia}`, borderRadius: 8, overflow: "hidden" }}>
-              {[30, 45, 60].map((d) => (
-                <button key={d} onClick={() => setProg(d)}
-                  style={{ border: "none", background: prog === d ? C.czarny : C.bialy, color: prog === d ? C.bialy : C.czarny, padding: "6px 12px", fontSize: 12.5, fontWeight: 600, cursor: "pointer", borderRight: `1px solid ${C.linia}` }}>
-                  {d} dni
-                </button>
-              ))}
-            </div>
+            <span style={{ fontFamily: C.mono, fontSize: 10, color: C.szary2, textTransform: "uppercase", letterSpacing: "0.08em" }}>Próg</span>
+            <PigulkaPrzelacznik opcje={[[30, "30 dni"], [45, "45 dni"], [60, "60 dni"]]} wartosc={prog} onZmiana={setProg} />
           </div>
         </div>
         <p style={{ fontSize: 12.5, color: C.szary, marginTop: -2, marginBottom: 14, lineHeight: 1.5 }}>
@@ -3087,16 +2959,9 @@ function ZakladkaKoordynacjaInwestycji({ projektyAll, przypisania, uzytkownicy, 
       {/* KOKPIT — WSZYSTKIE INWESTYCJE */}
       <section style={card}>
         <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 12 }}>
-          <div style={secTitle}>Kokpit inwestycji</div>
+          <TytulSekcji>Kokpit inwestycji</TytulSekcji>
           <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8 }}>
-            <div style={{ display: "flex", border: `1px solid ${C.linia}`, borderRadius: 8, overflow: "hidden" }}>
-              {[["wszystkie", "Wszystkie"], ["zagrozone", "Zagrożone"], ["bez-raportu", "Bez raportu"]].map(([kod, et]) => (
-                <button key={kod} onClick={() => setFiltrStatus(kod)}
-                  style={{ border: "none", background: filtrStatus === kod ? C.czarny : C.bialy, color: filtrStatus === kod ? C.bialy : C.czarny, padding: "6px 12px", fontSize: 12.5, fontWeight: 600, cursor: "pointer", borderRight: `1px solid ${C.linia}` }}>
-                  {et}
-                </button>
-              ))}
-            </div>
+            <PigulkaPrzelacznik opcje={[["wszystkie", "Wszystkie"], ["zagrozone", "Zagrożone"], ["bez-raportu", "Bez raportu"]]} wartosc={filtrStatus} onZmiana={setFiltrStatus} />
             <input type="text" value={szukaj} onChange={(e) => setSzukaj(e.target.value)} placeholder="Szukaj inwestycji…"
               style={{ padding: "7px 11px", border: `1px solid ${C.linia}`, borderRadius: 6, fontSize: 13, width: 200 }} />
           </div>
@@ -3118,10 +2983,19 @@ function ZakladkaKoordynacjaInwestycji({ projektyAll, przypisania, uzytkownicy, 
                 </tr>
               </thead>
               <tbody>
-                {widoczne.map((d) => (
-                  <tr key={d.projekt.id} style={{ opacity: d.wstrzymana ? 0.6 : 1 }}>
-                    <td style={{ ...td, fontWeight: 700 }}>
-                      {d.projekt.nazwa}
+                {widoczne.map((d) => {
+                  const p = d.projekt;
+                  const otw = otwarty === p.id;
+                  const auto = terminyDomyslne?.[p.id] || "";
+                  const reczny = p.termin_zakonczenia || "";
+                  const wartoscT = reczny || auto;
+                  const zAuto = !reczny && !!auto;
+                  return (
+                  <React.Fragment key={p.id}>
+                  <tr style={{ opacity: d.wstrzymana ? 0.6 : 1, background: otw ? C.jasny : "transparent" }}>
+                    <td style={{ ...td, fontWeight: 700, cursor: "pointer" }} onClick={() => setOtwarty(otw ? null : p.id)} title="Kliknij, aby zarządzać inwestycją">
+                      <span style={{ color: C.szary, marginRight: 6, fontSize: 11 }}>{otw ? "▼" : "▶"}</span>
+                      {p.nazwa}
                       {d.wstrzymana && <span style={odznakaWstrzymana}>WSTRZYMANA</span>}
                     </td>
                     <td style={{ ...td, color: d.pmy.length ? C.czarny : C.szary, fontSize: 12.5 }}>{d.pmy.length ? d.pmy.join(", ") : "—"}</td>
@@ -3140,12 +3014,70 @@ function ZakladkaKoordynacjaInwestycji({ projektyAll, przypisania, uzytkownicy, 
                       </div>
                     </td>
                   </tr>
-                ))}
+                  {otw && (
+                    <tr>
+                      <td colSpan={7} style={{ padding: "12px 14px 16px 30px", background: C.jasny, borderBottom: `1px solid ${C.linia}` }}>
+                        <div style={{ display: "flex", flexWrap: "wrap", gap: 18, alignItems: "flex-end" }}>
+                          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                            <label style={lbl}>Zakres</label>
+                            <select value={p.zakres || ""} onChange={(e) => zapiszZakres(p.id, e.target.value)}
+                              style={{ padding: "7px 9px", border: `1px solid ${C.linia}`, borderRadius: 6, fontSize: 13, minWidth: 180, background: C.bialy }}>
+                              <option value="">— brak —</option>
+                              {zakresy.map((z) => <option key={z.kod} value={z.kod}>{z.nazwa}</option>)}
+                            </select>
+                          </div>
+                          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                            <label style={lbl}>Termin zakończenia</label>
+                            <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                              <input type="date" defaultValue={wartoscT} onBlur={(e) => zapiszTermin(p.id, e.target.value)}
+                                title={zAuto ? "Termin dociągnięty z harmonogramu — zapisz, by ustawić na stałe, lub zmień ręcznie" : ""}
+                                style={{ padding: "6px 8px", border: `1px solid ${zAuto ? C.zolty : C.linia}`, borderRadius: 6, fontSize: 13, background: zAuto ? "#FFFDF5" : C.bialy }} />
+                              {zAuto && <span style={{ fontSize: 9.5, color: "#B8860B", fontWeight: 700 }}>AUTO</span>}
+                            </span>
+                          </div>
+                          <button onClick={() => przelaczWstrzymanie(p)}
+                            title={p.wstrzymana ? "Wznów — punkty znów liczą się do obciążenia" : "Wstrzymaj — punkty przestają liczyć się do obciążenia"}
+                            style={{ border: "none", cursor: "pointer", fontFamily: "inherit", fontSize: 12, fontWeight: 700, padding: "8px 14px", borderRadius: 6,
+                              color: p.wstrzymana ? "#1B7A3D" : "#B9791A", background: p.wstrzymana ? "#E6F3EA" : "#FBF0DC" }}>
+                            {p.wstrzymana ? "▶ Wznów inwestycję" : "⏸ Wstrzymaj inwestycję"}
+                          </button>
+                          <button onClick={() => zakonczInwestycje(p.id, p.nazwa)} title="Oznacz jako zakończoną (przenosi do sekcji Zakończone)"
+                            style={{ border: `1px solid ${C.linia}`, background: C.bialy, borderRadius: 6, padding: "8px 14px", fontSize: 12, fontWeight: 600, cursor: "pointer", color: C.szary }}>
+                            ✓ Zakończ inwestycję
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                  </React.Fragment>
+                  );
+                })}
               </tbody>
             </table>
           </div>
         )}
       </section>
+
+      {/* ZAKOŃCZONE INWESTYCJE — przywracanie */}
+      {nieaktywne && nieaktywne.length > 0 && (
+        <section style={card}>
+          <TytulSekcji>Zakończone inwestycje</TytulSekcji>
+          <p style={{ fontSize: 12.5, color: C.szary, marginTop: 6, marginBottom: 14, lineHeight: 1.5 }}>
+            Inwestycje oznaczone jako zakończone. Nie liczą się do obciążenia i nie pojawiają się w przypisaniach. Możesz je przywrócić.
+          </p>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {nieaktywne.map((p) => (
+              <div key={p.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "8px 12px", border: `1px solid ${C.linia}`, borderRadius: 6, background: C.jasny }}>
+                <span style={{ fontSize: 13.5, color: C.szary }}>{p.nazwa}</span>
+                <button onClick={() => przywrocInwestycje(p.id, p.nazwa)}
+                  style={{ border: `1px solid ${C.linia}`, background: C.bialy, borderRadius: 6, padding: "5px 12px", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>
+                  ↩ Przywróć
+                </button>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
     </>
   );
 }
@@ -4083,52 +4015,40 @@ async function budujDocDefinition(form) {
   const { ink, ink2, zolty, zoltyBright, zoltyDeep, szary, szary2, czerwony, zielony } = PDF_KOL;
   const content = [];
 
-  // ——— OKŁADKA (ciemna strona 1, kompozycja wyśrodkowana) ———
-  // Masthead: logo po lewej, kontakt po prawej.
-  content.push({ columns: [
-    { text: [{ text: "/", color: zolty }, { text: "Abyard", color: "#FFFFFF" }], font: "RobotoBlack", fontSize: 20, width: "*" },
-    { text: [{ text: `Kraków, dn. ${fmtPL(form.dataOpracowania) || "—"}\n`, color: szary2 }, { text: "www.abyard.com · biuro@abyard.pl", color: szary2 }], font: "Mono", fontSize: 7.5, alignment: "right", width: "auto", margin: [0, 4, 0, 0] },
-  ] });
-
-  content.push({ text: "/ RAPORT Z BUDOWY", font: "Mono", fontSize: 9.5, characterSpacing: 2, color: zolty, alignment: "center", margin: [0, 30, 0, 0] });
-  content.push({ text: [{ text: "/", color: zolty }, { text: String(form.numer).padStart(3, "0"), color: "#FFFFFF" }], font: "RobotoBlack", fontSize: 80, lineHeight: 0.9, alignment: "center", margin: [0, 2, 0, 0] });
-  content.push({ text: form.projekt || "", color: "#FFFFFF", font: "RobotoBlack", fontSize: 34, alignment: "center", margin: [0, 6, 0, 0] });
-  if (form.adres) content.push({ text: form.adres, color: zolty, bold: true, fontSize: 12, alignment: "center", margin: [0, 5, 0, 0] });
-  if (form.tytulZadania) content.push({ text: `„${form.tytulZadania}”`, color: "#CBC7BF", italics: true, fontSize: 9, lineHeight: 1.35, alignment: "center", margin: [56, 6, 56, 0] });
-
-  // Ribbon (okres) + badge (status) — wyśrodkowane obok siebie.
-  const st = statusZRaportu({ harmonogram: form.harmonogram, data_opracowania: form.dataOpracowania, podsumowanie: form.podsumowanie });
-  const opozInw = opoznienieInwestycji(form.harmonogram, form.dataOpracowania);
-  const zagrozenie = st.kod === "zagrozenie";
-  const statusTxt = (zagrozenie ? "Zagrożenie terminu" : "Termin niezagrożony") + (opozInw && opozInw.dni > 0 ? ` — ${opozInw.dni} dni` : "");
-  const badgeCell = zagrozenie
-    ? { text: [{ text: "● ", color: czerwony }, { text: statusTxt.toUpperCase(), color: "#F0A79E" }], font: "Mono", fontSize: 8, bold: true, fillColor: "#2A1614", margin: [10, 6, 12, 6], border: [false, false, false, false] }
-    : { text: [{ text: "● ", color: "#57C680" }, { text: statusTxt.toUpperCase(), color: "#7DDBA0" }], font: "Mono", fontSize: 8, bold: true, fillColor: "#142519", margin: [10, 6, 12, 6], border: [false, false, false, false] };
-  content.push({ columns: [
-    { width: "*", text: "" },
-    { width: "auto", table: { body: [[ { text: [{ text: "ZA OKRES   ", color: szary2 }, { text: `${fmtPL(form.okresOd) || "…"} — ${fmtPL(form.okresDo) || "…"}`, color: zoltyBright }], font: "Mono", fontSize: 9, fillColor: ink2, margin: [11, 6, 11, 6], border: [false, false, false, false] } ]] }, layout: "noBorders" },
-    { width: "auto", table: { body: [[ badgeCell ]] }, layout: "noBorders", margin: [10, 0, 0, 0] },
-    { width: "*", text: "" },
-  ], columnGap: 0, margin: [0, 16, 0, 0] });
-
-  // Grafika inwestycji — kadr w ramce (wyśrodkowany) + złota linia.
-  // Brak grafiki → okładka zostaje samą czernią (fallback).
+  // ——— OKŁADKA (wariant „magazynowy": grafika inwestycji pełnoklatkowa u góry,
+  //     pod nią wielki numer, projekt i tytuł; kluczowe daty przypięte do dołu) ———
+  const PW = 595.28, PH = 841.89;
+  // Grafika inwestycji → pełna szerokość strony; wysokość z proporcji (maks 58% strony).
+  // Trzymana w domknięciu — rysowana w `background` (bleeduje do krawędzi).
+  let coverImg = null, coverH = 0;
   if (form.grafikaInwestycji && (form.grafikaInwestycji.dataUrl || form.grafikaInwestycji.url)) {
     const g = await przygotujObraz(form.grafikaInwestycji.dataUrl || form.grafikaInwestycji.url);
-    if (g) {
-      content.push({ image: g.dataUrl, fit: [PDF_SZER, 210], alignment: "center", margin: [0, 16, 0, 0] });
-      content.push({ canvas: [{ type: "line", x1: 0, y1: 0, x2: PDF_SZER, y2: 0, lineWidth: 1, lineColor: zolty }], margin: [0, 16, 0, 0] });
-    }
+    if (g && g.w && g.h) { coverImg = g.dataUrl; coverH = Math.min(PH * 0.58, PW * g.h / g.w); }
   }
 
-  // Kluczowe daty — wyśrodkowane, 4 kolumny.
-  const dcol = (l, v) => ({ stack: [ { text: String(l).toUpperCase(), font: "Mono", fontSize: 7, color: szary2, alignment: "center" }, { text: v, font: "RobotoBlack", fontSize: 13, color: "#FFFFFF", alignment: "center", margin: [0, 5, 0, 0] } ] });
-  content.push({ columns: [
-    dcol("Rozpoczęcie", fmtPL(form.rozpoczecie) || "—"),
-    dcol("Zakończenie robót", fmtPL(form.zakonczenieRobot) || "—"),
-    dcol("Pozwol. użytkowania", form.pnuNieDotyczy ? "Nie dotyczy" : (fmtPL(form.pnu) || "—")),
-    dcol("Opracował", form.opracowal || "—"),
-  ], columnGap: 12, margin: [0, 16, 0, 0] });
+  // Treść okładki (flow) zaczyna się tuż pod grafiką (margines uwzględnia margines strony 40).
+  const coverGora = coverImg ? Math.max(18, coverH - 40 + 8) : 62;
+  content.push({ text: [{ text: "/ ", color: zolty }, { text: `OKRES ${fmtPL(form.okresOd) || "…"} — ${fmtPL(form.okresDo) || "…"}`, color: zoltyDeep }], font: "Mono", fontSize: 9, characterSpacing: 1.2, margin: [0, coverGora, 0, 0] });
+  content.push({ text: [{ text: "/", color: zolty }, { text: String(form.numer).padStart(3, "0"), color: "#FFFFFF" }], font: "RobotoBlack", fontSize: 96, lineHeight: 0.85, margin: [-3, 4, 0, 0] });
+  content.push({ text: form.projekt || "", color: "#FFFFFF", font: "RobotoBlack", fontSize: 34, margin: [0, 2, 0, 0] });
+  if (form.adres) content.push({ text: String(form.adres).toUpperCase(), color: szary2, font: "Mono", fontSize: 8.5, characterSpacing: 1, margin: [0, 9, 0, 0] });
+  if (form.tytulZadania) content.push({ text: `„${form.tytulZadania}”`, color: "#B9B4AA", italics: true, fontSize: 9.5, lineHeight: 1.4, margin: [0, 12, 70, 0] });
+
+  // Kluczowe daty + stopka — przypięte do dołu strony (absolutePosition).
+  content.push({ canvas: [{ type: "line", x1: 0, y1: 0, x2: PW - 80, y2: 0, lineWidth: 1, lineColor: "#3A3A36" }], absolutePosition: { x: 40, y: 724 } });
+  const datyOkl = [
+    ["Rozpoczęcie", fmtPL(form.rozpoczecie) || "—"],
+    ["Zakończenie robót", fmtPL(form.zakonczenieRobot) || "—"],
+    ["Pozwolenie na użytkowanie", form.pnuNieDotyczy ? "Nie dotyczy" : (fmtPL(form.pnu) || "—")],
+  ];
+  datyOkl.forEach(([l, v], i) => {
+    content.push({ stack: [
+      { text: String(l).toUpperCase(), font: "Mono", fontSize: 7.5, characterSpacing: 0.8, color: szary2 },
+      { text: v, font: "RobotoBlack", fontSize: 14, color: "#FFFFFF", margin: [0, 6, 0, 0] },
+    ], width: 170, absolutePosition: { x: 40 + i * 172, y: 740 } });
+  });
+  content.push({ text: `OPRACOWAŁ · ${(form.opracowal || "—").toUpperCase()}`, font: "Mono", fontSize: 8, characterSpacing: 0.6, color: szary2, absolutePosition: { x: 40, y: 802 } });
+  content.push({ text: `DATA · ${fmtPL(form.dataOpracowania) || "—"}`, font: "Mono", fontSize: 8, characterSpacing: 0.6, color: szary2, alignment: "right", width: PW - 80, absolutePosition: { x: 40, y: 802 } });
 
   // Strona tytułowa kończy się na kluczowych datach — reszta od nowej strony
   const nagInfo = pdfNaglowekSekcji("Informacje ogólne");
@@ -4165,8 +4085,27 @@ async function budujDocDefinition(form) {
     pageSize: "A4",
     pageMargins: [40, marginesGora, 40, 40],
     defaultStyle: { font: "Roboto", fontSize: 10, color: ink, lineHeight: 1.25 },
-    // Strona 1 (okładka) ma ciepłe, prawie-czarne tło jak hero na abyard.com.
-    background: (page) => page === 1 ? { canvas: [{ type: "rect", x: 0, y: 0, w: 595.28, h: 841.89, color: ink }] } : null,
+    // Strona 1 (okładka „magazynowa"): ciepła czerń + grafika inwestycji
+    // pełnoklatkowa u góry, z gradientami (górny — pod pasek, dolny — wtopienie w czerń).
+    background: (page) => {
+      if (page !== 1) return null;
+      const bg = [{ canvas: [{ type: "rect", x: 0, y: 0, w: PW, h: PH, color: ink }] }];
+      if (coverImg) {
+        bg.push({ image: coverImg, width: PW, absolutePosition: { x: 0, y: 0 } });
+        // Górny gradient — czytelność paska nad jasnym niebem grafiki.
+        const topFade = [], TN = 16, TH = 96;
+        for (let i = 0; i <= TN; i++) topFade.push({ type: "rect", x: 0, y: i * (TH / TN), w: PW, h: TH / TN + 0.8, color: ink, fillOpacity: 0.5 * (1 - i / TN) });
+        bg.push({ canvas: topFade, absolutePosition: { x: 0, y: 0 } });
+        // Dolny gradient — wtopienie dołu grafiki w czerń strony.
+        const botFade = [], BN = 22, BH = 110;
+        for (let i = 0; i <= BN; i++) botFade.push({ type: "rect", x: 0, y: coverH - BH + i * (BH / BN), w: PW, h: BH / BN + 0.8, color: ink, fillOpacity: i / BN });
+        bg.push({ canvas: botFade, absolutePosition: { x: 0, y: 0 } });
+      }
+      // Pasek górny nad grafiką: overline + plakietka numeru.
+      bg.push({ text: [{ text: "/ ", color: zoltyBright }, { text: "RAPORT Z BUDOWY · ABYARD", color: "#FFFFFF" }], font: "Mono", fontSize: 9, characterSpacing: 1.4, absolutePosition: { x: 40, y: 41 } });
+      bg.push({ table: { body: [[{ text: `NR ${String(form.numer).padStart(3, "0")}`, font: "Mono", fontSize: 9, bold: true, color: "#161512", fillColor: zolty, margin: [9, 4, 9, 4], border: [false, false, false, false] }]] }, layout: "noBorders", absolutePosition: { x: 497, y: 34 } });
+      return bg;
+    },
     content,
     // Nagłówek sekcji (headlineLevel:1) nie może zostać sam na dole strony ani
     // rozłamać się (samo tło belki na jednej stronie, tekst na drugiej).
@@ -4223,11 +4162,6 @@ function PodgladPDF({ form, onBack, nazwaPliku, raportId, publiczny, jestAdmin }
       setPobieranie(false);
     }
   }
-  // Status inwestycji (okładka) — ta sama logika co eksport PDF.
-  const stMeta = statusZRaportu({ harmonogram: form.harmonogram, data_opracowania: form.dataOpracowania, podsumowanie: form.podsumowanie });
-  const opozInw = opoznienieInwestycji(form.harmonogram, form.dataOpracowania);
-  const zagrozenie = stMeta.kod === "zagrozenie";
-  const statusTxt = (zagrozenie ? "Zagrożenie terminu" : "Termin niezagrożony") + (opozInw && opozInw.dni > 0 ? ` — ${opozInw.dni} dni` : "");
   return (
     <div style={{ background: "#2A2926", minHeight: "100vh", fontFamily: "'Segoe UI', system-ui, sans-serif" }}>
       <style>{printCSS}</style>
@@ -4255,40 +4189,41 @@ function PodgladPDF({ form, onBack, nazwaPliku, raportId, publiczny, jestAdmin }
       {pokazLinki && raportId && !publiczny && <PanelLinkow raportId={raportId} jestAdmin={jestAdmin} />}
 
       <div className="pdf-page" style={{ background: CR.card, maxWidth: 794, margin: "20px auto", boxShadow: "0 4px 30px rgba(0,0,0,0.3)", color: CR.ink, fontFamily: "'Roboto', 'Segoe UI', system-ui, sans-serif", overflow: "hidden" }}>
-        {/* ——— OKŁADKA — ciemny hero (jak strona 1 PDF) ——— */}
-        <div className="pdf-cover" style={{ background: CR.ink, color: "#fff", padding: "40px 56px 44px", textAlign: "center" }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", textAlign: "left" }}>
-            <div style={{ fontWeight: 900, fontSize: 22 }}><span style={{ color: CR.gold }}>/</span>Abyard</div>
-            <div style={{ fontFamily: CR.mono, fontSize: 9.5, color: CR.muted2, textAlign: "right", lineHeight: 1.7 }}>Kraków, dn. {fmtPL(form.dataOpracowania) || "—"}<br />www.abyard.com · biuro@abyard.pl</div>
-          </div>
-
-          <div style={{ fontFamily: CR.mono, fontSize: 11.5, letterSpacing: "0.2em", color: CR.gold, marginTop: 34 }}>/ RAPORT Z BUDOWY</div>
-          <div className="cover-num" style={{ fontWeight: 900, fontSize: 88, lineHeight: 0.9, marginTop: 4 }}><span style={{ color: CR.gold }}>/</span>{String(form.numer).padStart(3, "0")}</div>
-          <h2 className="cover-proj" style={{ fontWeight: 900, fontSize: 40, margin: "8px 0 0", lineHeight: 1.05, letterSpacing: "-0.01em" }}>{form.projekt}</h2>
-          {form.adres && <p style={{ color: CR.gold, fontWeight: 700, fontSize: 14, margin: "8px 0 0" }}>{form.adres}</p>}
-          {form.tytulZadania && <p style={{ color: "#CBC7BF", fontStyle: "italic", fontSize: 12, margin: "8px auto 0", maxWidth: 560, lineHeight: 1.4 }}>„{form.tytulZadania}”</p>}
-
-          <div style={{ display: "flex", justifyContent: "center", gap: 10, marginTop: 18, flexWrap: "wrap" }}>
-            <div style={{ fontFamily: CR.mono, fontSize: 11, background: CR.ink2, padding: "8px 14px", letterSpacing: "0.06em" }}><span style={{ color: CR.muted2 }}>ZA OKRES </span><span style={{ color: CR.goldBright }}>{fmtPL(form.okresOd) || "…"} — {fmtPL(form.okresDo) || "…"}</span></div>
-            <div style={{ fontFamily: CR.mono, fontSize: 10.5, fontWeight: 700, letterSpacing: "0.06em", padding: "8px 14px", background: zagrozenie ? "#2A1614" : "#142519", color: zagrozenie ? "#F0A79E" : "#7DDBA0" }}>
-              <span style={{ color: zagrozenie ? CR.danger : "#57C680" }}>● </span>{statusTxt.toUpperCase()}
-            </div>
-          </div>
-
+        {/* ——— OKŁADKA — wariant „magazynowy" (jak strona 1 PDF) ——— */}
+        <div className="pdf-cover" style={{ background: CR.ink, color: "#fff", padding: 0, position: "relative" }}>
+          {/* Grafika inwestycji — pełnoklatkowa u góry, z gradientami (górny pod pasek, dolny wtopienie) */}
           {form.grafikaInwestycji && (
-            <>
-              <img className="grafika-okladka" src={form.grafikaInwestycji.dataUrl} alt="" style={{ display: "block", width: "auto", maxWidth: "100%", maxHeight: "88mm", objectFit: "contain", margin: "18px auto 0" }} />
-              <div style={{ height: 1, background: CR.gold, margin: "18px 0 0" }} />
-            </>
+            <div style={{ position: "relative" }}>
+              <img className="cover-foto" src={form.grafikaInwestycji.dataUrl} alt="" style={{ display: "block", width: "100%", maxHeight: "150mm", objectFit: "cover" }} />
+              <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 96, background: "linear-gradient(180deg, rgba(15,15,14,0.55) 0%, rgba(15,15,14,0) 100%)" }} />
+              <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, height: 110, background: `linear-gradient(180deg, rgba(15,15,14,0) 0%, ${CR.ink} 100%)` }} />
+            </div>
           )}
-
-          <div className="cover-daty" style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12, marginTop: 18 }}>
-            {[["Rozpoczęcie", fmtPL(form.rozpoczecie) || "—"], ["Zakończenie robót", fmtPL(form.zakonczenieRobot) || "—"], ["Pozwol. użytkowania", form.pnuNieDotyczy ? "Nie dotyczy" : (fmtPL(form.pnu) || "—")], ["Opracował", form.opracowal || "—"]].map(([l, v], i) => (
-              <div key={i} style={{ textAlign: "center" }}>
-                <div style={{ fontFamily: CR.mono, fontSize: 8.5, letterSpacing: "0.1em", color: CR.muted2, textTransform: "uppercase" }}>{l}</div>
-                <div style={{ fontWeight: 900, fontSize: 15, marginTop: 5 }}>{v}</div>
-              </div>
-            ))}
+          {/* Pasek górny nad grafiką (lub na czerni, gdy brak grafiki) */}
+          <div className="cover-bar" style={{ position: "absolute", top: 0, left: 0, right: 0, display: "flex", justifyContent: "space-between", alignItems: "center", padding: "26px 40px" }}>
+            <span style={{ fontFamily: CR.mono, fontSize: 10.5, letterSpacing: "0.16em", textTransform: "uppercase", color: "#fff" }}><span style={{ color: CR.goldBright }}>/ </span>Raport z budowy · Abyard</span>
+            <span style={{ fontFamily: CR.mono, fontSize: 10.5, fontWeight: 700, letterSpacing: "0.1em", color: "#161512", background: CR.gold, padding: "4px 10px", borderRadius: 3 }}>NR {String(form.numer).padStart(3, "0")}</span>
+          </div>
+          {/* Treść okładki */}
+          <div className="cover-body" style={{ padding: form.grafikaInwestycji ? "6px 40px 34px" : "88px 40px 34px" }}>
+            <div style={{ fontFamily: CR.mono, fontSize: 11, letterSpacing: "0.12em", textTransform: "uppercase", color: CR.goldDeep }}><span style={{ color: CR.gold }}>/ </span>Okres {fmtPL(form.okresOd) || "…"} — {fmtPL(form.okresDo) || "…"}</div>
+            <div className="cover-num" style={{ fontWeight: 900, fontSize: 100, lineHeight: 0.85, marginTop: 6, letterSpacing: "-0.03em" }}><span style={{ color: CR.gold }}>/</span>{String(form.numer).padStart(3, "0")}</div>
+            <h2 className="cover-proj" style={{ fontWeight: 900, fontSize: 38, margin: "4px 0 0", lineHeight: 1.03, letterSpacing: "-0.02em" }}>{form.projekt}</h2>
+            {form.adres && <p style={{ fontFamily: CR.mono, fontSize: 9.5, letterSpacing: "0.08em", textTransform: "uppercase", color: CR.muted, margin: "10px 0 0" }}>{form.adres}</p>}
+            {form.tytulZadania && <p style={{ color: "#B9B4AA", fontStyle: "italic", fontSize: 12, margin: "12px 0 0", maxWidth: 620, lineHeight: 1.42 }}>„{form.tytulZadania}”</p>}
+            <div style={{ height: 1, background: "rgba(255,255,255,0.14)", margin: "36px 0 0" }} />
+            <div className="cover-daty" style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 16, marginTop: 20 }}>
+              {[["Rozpoczęcie", fmtPL(form.rozpoczecie) || "—"], ["Zakończenie robót", fmtPL(form.zakonczenieRobot) || "—"], ["Pozwolenie na użytkowanie", form.pnuNieDotyczy ? "Nie dotyczy" : (fmtPL(form.pnu) || "—")]].map(([l, v], i) => (
+                <div key={i}>
+                  <div style={{ fontFamily: CR.mono, fontSize: 8.5, letterSpacing: "0.12em", color: CR.muted2, textTransform: "uppercase" }}>{l}</div>
+                  <div style={{ fontWeight: 900, fontSize: 16, marginTop: 6 }}>{v}</div>
+                </div>
+              ))}
+            </div>
+            <div style={{ display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: 8, marginTop: 24, fontFamily: CR.mono, fontSize: 9, letterSpacing: "0.06em", textTransform: "uppercase", color: CR.muted }}>
+              <span>Opracował · {form.opracowal || "—"}</span>
+              <span>Data · {fmtPL(form.dataOpracowania) || "—"}</span>
+            </div>
           </div>
         </div>
 
@@ -4730,13 +4665,15 @@ const printCSS = `
         (daty się nie łamią), a max-width:100% + overflow-x:auto daje pasek.
      Dotyczy tylko ekranu telefonu — druk PDF (@media print) nietknięty. */
   @media screen and (max-width: 640px) {
-    /* Padding jest teraz na okładce/treści (nie na .pdf-page) — zmniejszamy oba. */
-    .pdf-cover { padding: 26px 18px 30px !important; }
+    /* Okładka „magazynowa": grafika bleeduje (padding 0), padding jest na .cover-body. */
+    .pdf-cover { padding: 0 !important; }
+    .pdf-cover .cover-body { padding: 4px 18px 26px !important; }
+    .pdf-cover .cover-bar { padding: 18px 18px !important; }
     .pdf-content { padding: 6px 18px 30px !important; }
     /* Okładka: skalujemy wielkie napisy, żeby nie rozpychały iPhone'a. */
-    .pdf-cover .cover-num { font-size: 60px !important; }
+    .pdf-cover .cover-num { font-size: 64px !important; }
     .pdf-cover .cover-proj { font-size: 26px !important; }
-    .pdf-cover .cover-daty { grid-template-columns: 1fr 1fr !important; row-gap: 14px !important; }
+    .pdf-cover .cover-daty { gap: 10px !important; row-gap: 14px !important; }
     .pdf-page table {
       display: block;
       overflow-x: auto;
@@ -4784,7 +4721,10 @@ const printCSS = `
     .strona-cashflow { break-inside: avoid; page-break-inside: avoid; }
     /* Grafika okładki w druku — duża, ale z zapasem, by grafika + kluczowe daty
        zmieściły się razem na stronie tytułowej (obszar druku A4 ≈ 269 mm). */
-    .grafika-okladka { max-height: 108mm !important; width: auto !important; max-width: 100% !important; }
+    .cover-foto { max-height: 150mm !important; width: 100% !important; object-fit: cover !important; }
   }
 `;
+
+
+
 
