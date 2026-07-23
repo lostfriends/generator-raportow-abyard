@@ -3677,6 +3677,34 @@ async function przygotujObraz(url) {
   } catch { return null; }
 }
 
+// Wpieka PRAWDZIWE (gładkie) gradienty w grafikę okładki: górny (ciemnienie pod
+// pasek nagłówka) i dolny (wtopienie w czerń strony #0F0F0E). Robimy to na canvasie,
+// bo pdfmake nie ma pionowego gradientu — a rysowanie go stosem półprzezroczystych
+// prostokątów dawało widoczne poziome pasy na jednolitym niebie. Zwraca dataURL JPEG.
+async function komponujOkladke(dataUrl) {
+  if (typeof document === "undefined") return dataUrl; // Node/SSR — bez kompozycji
+  try {
+    const img = await wczytajObrazek(dataUrl);
+    if (!img) return dataUrl;
+    const w = img.naturalWidth, h = img.naturalHeight;
+    const cv = document.createElement("canvas");
+    cv.width = w; cv.height = h;
+    const ctx = cv.getContext("2d");
+    ctx.drawImage(img, 0, 0, w, h);
+    // Górny gradient — czytelność białego paska nad jasnym niebem.
+    const gt = ctx.createLinearGradient(0, 0, 0, h * 0.20);
+    gt.addColorStop(0, "rgba(15,15,14,0.55)");
+    gt.addColorStop(1, "rgba(15,15,14,0)");
+    ctx.fillStyle = gt; ctx.fillRect(0, 0, w, Math.ceil(h * 0.20));
+    // Dolny gradient — bezszwowe wtopienie dołu grafiki w czerń strony.
+    const gb = ctx.createLinearGradient(0, h * 0.70, 0, h);
+    gb.addColorStop(0, "rgba(15,15,14,0)");
+    gb.addColorStop(1, "#0F0F0E");
+    ctx.fillStyle = gb; ctx.fillRect(0, Math.floor(h * 0.70), w, Math.ceil(h * 0.30));
+    return cv.toDataURL("image/jpeg", 0.92);
+  } catch { return dataUrl; }
+}
+
 // HTML z edytora (b/i/u/span/listy/br/div/p) -> tablica „runs" dla pdfmake.
 // Pogrubienia, kursywę i podkreślenia wykrywamy zarówno ze znaczników
 // (b/strong, i/em, u/s), jak i ze STYLI INLINE (font-weight/style/text-decoration) —
@@ -3979,24 +4007,27 @@ function fotoPodpis(nr, opis) {
 
 async function pdfZdjecia(content, form) {
   if (!form.zdjecia || form.zdjecia.length === 0) return;
-  // Grupowanie jak w podglądzie: pionowe (lub bez orientacji) 1/str., poziome 2/str.
-  const strony = []; let bufor = [];
+  // Wczytujemy wszystkie zdjęcia z wymiarami. Orientację bierzemy z RZECZYWISTEJ
+  // proporcji obrazu (a = szer./wys.), a NIE z zapisanego flagu `pion` — dzięki temu
+  // dwa faktycznie poziome zdjęcia zawsze łączą się 2/str., niezależnie od (bywa
+  // błędnego) flagu. Poziome (a ≥ 1) po 2 na stronę; pionowe 1 na stronę.
+  const items = [];
   for (const z of form.zdjecia) {
-    const poziome = z.pion === false;
-    if (!poziome) { if (bufor.length) { strony.push(bufor); bufor = []; } strony.push([z]); }
-    else { bufor.push(z); if (bufor.length === 2) { strony.push(bufor); bufor = []; } }
+    const im = await przygotujObraz(z.dataUrl || z.url);
+    if (im) items.push({ z, im, a: im.w / im.h });
+  }
+  if (items.length === 0) return;
+  const strony = []; let bufor = [];
+  for (const it of items) {
+    const poziome = it.a >= 1;
+    if (!poziome) { if (bufor.length) { strony.push(bufor); bufor = []; } strony.push([it]); }
+    else { bufor.push(it); if (bufor.length === 2) { strony.push(bufor); bufor = []; } }
   }
   if (bufor.length) strony.push(bufor);
 
   let pierwszaGrupa = true;
   let fotoNr = 0;
-  for (const grupa of strony) {
-    // Wczytujemy obrazy z wymiarami (a = proporcja szer./wys.).
-    const zdj = [];
-    for (const z of grupa) {
-      const im = await przygotujObraz(z.dataUrl || z.url);
-      if (im) zdj.push({ z, im, a: im.w / im.h });
-    }
+  for (const zdj of strony) {
     if (zdj.length === 0) continue;
 
     const naglowekTu = pierwszaGrupa;
@@ -4054,7 +4085,7 @@ async function budujDocDefinition(form) {
   let coverImg = null, coverH = 0;
   if (form.grafikaInwestycji && (form.grafikaInwestycji.dataUrl || form.grafikaInwestycji.url)) {
     const g = await przygotujObraz(form.grafikaInwestycji.dataUrl || form.grafikaInwestycji.url);
-    if (g && g.w && g.h) { coverImg = g.dataUrl; coverH = Math.min(PH * 0.58, PW * g.h / g.w); }
+    if (g && g.w && g.h) { coverImg = await komponujOkladke(g.dataUrl); coverH = Math.min(PH * 0.58, PW * g.h / g.w); }
   }
 
   // Treść okładki (flow) zaczyna się tuż pod grafiką (margines uwzględnia margines strony 40).
@@ -4101,8 +4132,16 @@ async function budujDocDefinition(form) {
   pdfSekcjaTekst(content, "Sprawy dotyczące Inwestora", form.sprawyInwestora);
   pdfSekcjaTekst(content, "Teren placu budowy", form.placBudowy);
 
+  // Podsumowanie = werdykt raportu. Wyróżnione, ale gustownie: miękki kafelek w tonie
+  // statusu + cienki pasek w kolorze (czerwony = zagrożenie, zielony = niezagrożony),
+  // tekst 11.5 pt bold (nie ciężkie RobotoBlack 14 pt).
+  const stPods = statusZRaportu({ harmonogram: form.harmonogram, data_opracowania: form.dataOpracowania, podsumowanie: form.podsumowanie });
+  const zagrPods = stPods.kod === "zagrozenie";
   content.push(pdfNaglowekSekcji("Podsumowanie"));
-  content.push({ table: { widths: [4, "*"], body: [[{ text: "", fillColor: zolty, border: [false, false, false, false] }, { text: form.podsumowanie || "—", font: "RobotoBlack", fontSize: 14, lineHeight: 1.3, color: ink, margin: [16, 2, 0, 2], border: [false, false, false, false] }]] }, layout: "noBorders" });
+  content.push({ table: { widths: [3, "*"], body: [[
+    { text: "", fillColor: zagrPods ? czerwony : zielony, border: [false, false, false, false] },
+    { text: form.podsumowanie || "—", fontSize: 11.5, bold: true, lineHeight: 1.4, color: ink, fillColor: zagrPods ? "#FBECEA" : "#E9F4EC", margin: [13, 11, 14, 11], border: [false, false, false, false] },
+  ]] }, layout: "noBorders", margin: [0, 4, 0, 0] });
 
   await pdfHarmonogram(content, form);
   pdfCashflow(content, form);
@@ -4122,15 +4161,8 @@ async function budujDocDefinition(form) {
       if (page !== 1) return null;
       const bg = [{ canvas: [{ type: "rect", x: 0, y: 0, w: PW, h: PH, color: ink }] }];
       if (coverImg) {
+        // Grafika ma już wpieczone gładkie gradienty (komponujOkladke) — bez pasków.
         bg.push({ image: coverImg, width: PW, absolutePosition: { x: 0, y: 0 } });
-        // Górny gradient — czytelność paska nad jasnym niebem grafiki.
-        const topFade = [], TN = 16, TH = 96;
-        for (let i = 0; i <= TN; i++) topFade.push({ type: "rect", x: 0, y: i * (TH / TN), w: PW, h: TH / TN + 0.8, color: ink, fillOpacity: 0.5 * (1 - i / TN) });
-        bg.push({ canvas: topFade, absolutePosition: { x: 0, y: 0 } });
-        // Dolny gradient — wtopienie dołu grafiki w czerń strony.
-        const botFade = [], BN = 22, BH = 110;
-        for (let i = 0; i <= BN; i++) botFade.push({ type: "rect", x: 0, y: coverH - BH + i * (BH / BN), w: PW, h: BH / BN + 0.8, color: ink, fillOpacity: i / BN });
-        bg.push({ canvas: botFade, absolutePosition: { x: 0, y: 0 } });
       }
       // Pasek górny nad grafiką: overline + plakietka numeru.
       bg.push({ text: [{ text: "/ ", color: zoltyBright }, { text: "RAPORT Z BUDOWY · ABYARD", color: "#FFFFFF" }], font: "Mono", fontSize: 9, characterSpacing: 1.4, absolutePosition: { x: 40, y: 41 } });
@@ -4281,7 +4313,14 @@ function PodgladPDF({ form, onBack, nazwaPliku, raportId, publiczny, jestAdmin }
         {maTresc(form.placBudowy) && <BlokPDF tytul="Teren placu budowy"><Tekst v={form.placBudowy} /></BlokPDF>}
 
         <BlokPDF tytul="Podsumowanie">
-          <div style={{ borderLeft: `4px solid ${CR.gold}`, paddingLeft: 16, fontWeight: 900, fontSize: 18, lineHeight: 1.3, color: CR.ink }}>{form.podsumowanie}</div>
+          {(() => {
+            const zagr = statusZRaportu({ harmonogram: form.harmonogram, data_opracowania: form.dataOpracowania, podsumowanie: form.podsumowanie }).kod === "zagrozenie";
+            return (
+              <div style={{ background: zagr ? "#FBECEA" : "#E9F4EC", borderLeft: `3px solid ${zagr ? CR.danger : CR.ok}`, padding: "13px 16px" }}>
+                <div style={{ fontWeight: 700, fontSize: 13.5, lineHeight: 1.45, color: CR.ink }}>{form.podsumowanie}</div>
+              </div>
+            );
+          })()}
         </BlokPDF>
 
         {(() => {
