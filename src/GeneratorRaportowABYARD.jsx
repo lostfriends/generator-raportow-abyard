@@ -4009,52 +4009,40 @@ async function budujDocDefinition(form) {
   const { ink, ink2, zolty, zoltyBright, zoltyDeep, szary, szary2, czerwony, zielony } = PDF_KOL;
   const content = [];
 
-  // ——— OKŁADKA (ciemna strona 1, kompozycja wyśrodkowana) ———
-  // Masthead: logo po lewej, kontakt po prawej.
-  content.push({ columns: [
-    { text: [{ text: "/", color: zolty }, { text: "Abyard", color: "#FFFFFF" }], font: "RobotoBlack", fontSize: 20, width: "*" },
-    { text: [{ text: `Kraków, dn. ${fmtPL(form.dataOpracowania) || "—"}\n`, color: szary2 }, { text: "www.abyard.com · biuro@abyard.pl", color: szary2 }], font: "Mono", fontSize: 7.5, alignment: "right", width: "auto", margin: [0, 4, 0, 0] },
-  ] });
-
-  content.push({ text: "/ RAPORT Z BUDOWY", font: "Mono", fontSize: 9.5, characterSpacing: 2, color: zolty, alignment: "center", margin: [0, 30, 0, 0] });
-  content.push({ text: [{ text: "/", color: zolty }, { text: String(form.numer).padStart(3, "0"), color: "#FFFFFF" }], font: "RobotoBlack", fontSize: 80, lineHeight: 0.9, alignment: "center", margin: [0, 2, 0, 0] });
-  content.push({ text: form.projekt || "", color: "#FFFFFF", font: "RobotoBlack", fontSize: 34, alignment: "center", margin: [0, 6, 0, 0] });
-  if (form.adres) content.push({ text: form.adres, color: zolty, bold: true, fontSize: 12, alignment: "center", margin: [0, 5, 0, 0] });
-  if (form.tytulZadania) content.push({ text: `„${form.tytulZadania}”`, color: "#CBC7BF", italics: true, fontSize: 9, lineHeight: 1.35, alignment: "center", margin: [56, 6, 56, 0] });
-
-  // Ribbon (okres) + badge (status) — wyśrodkowane obok siebie.
-  const st = statusZRaportu({ harmonogram: form.harmonogram, data_opracowania: form.dataOpracowania, podsumowanie: form.podsumowanie });
-  const opozInw = opoznienieInwestycji(form.harmonogram, form.dataOpracowania);
-  const zagrozenie = st.kod === "zagrozenie";
-  const statusTxt = (zagrozenie ? "Zagrożenie terminu" : "Termin niezagrożony") + (opozInw && opozInw.dni > 0 ? ` — ${opozInw.dni} dni` : "");
-  const badgeCell = zagrozenie
-    ? { text: [{ text: "● ", color: czerwony }, { text: statusTxt.toUpperCase(), color: "#F0A79E" }], font: "Mono", fontSize: 8, bold: true, fillColor: "#2A1614", margin: [10, 6, 12, 6], border: [false, false, false, false] }
-    : { text: [{ text: "● ", color: "#57C680" }, { text: statusTxt.toUpperCase(), color: "#7DDBA0" }], font: "Mono", fontSize: 8, bold: true, fillColor: "#142519", margin: [10, 6, 12, 6], border: [false, false, false, false] };
-  content.push({ columns: [
-    { width: "*", text: "" },
-    { width: "auto", table: { body: [[ { text: [{ text: "ZA OKRES   ", color: szary2 }, { text: `${fmtPL(form.okresOd) || "…"} — ${fmtPL(form.okresDo) || "…"}`, color: zoltyBright }], font: "Mono", fontSize: 9, fillColor: ink2, margin: [11, 6, 11, 6], border: [false, false, false, false] } ]] }, layout: "noBorders" },
-    { width: "auto", table: { body: [[ badgeCell ]] }, layout: "noBorders", margin: [10, 0, 0, 0] },
-    { width: "*", text: "" },
-  ], columnGap: 0, margin: [0, 16, 0, 0] });
-
-  // Grafika inwestycji — kadr w ramce (wyśrodkowany) + złota linia.
-  // Brak grafiki → okładka zostaje samą czernią (fallback).
+  // ——— OKŁADKA (wariant „magazynowy": grafika inwestycji pełnoklatkowa u góry,
+  //     pod nią wielki numer, projekt i tytuł; kluczowe daty przypięte do dołu) ———
+  const PW = 595.28, PH = 841.89;
+  // Grafika inwestycji → pełna szerokość strony; wysokość z proporcji (maks 58% strony).
+  // Trzymana w domknięciu — rysowana w `background` (bleeduje do krawędzi).
+  let coverImg = null, coverH = 0;
   if (form.grafikaInwestycji && (form.grafikaInwestycji.dataUrl || form.grafikaInwestycji.url)) {
     const g = await przygotujObraz(form.grafikaInwestycji.dataUrl || form.grafikaInwestycji.url);
-    if (g) {
-      content.push({ image: g.dataUrl, fit: [PDF_SZER, 210], alignment: "center", margin: [0, 16, 0, 0] });
-      content.push({ canvas: [{ type: "line", x1: 0, y1: 0, x2: PDF_SZER, y2: 0, lineWidth: 1, lineColor: zolty }], margin: [0, 16, 0, 0] });
-    }
+    if (g && g.w && g.h) { coverImg = g.dataUrl; coverH = Math.min(PH * 0.58, PW * g.h / g.w); }
   }
 
-  // Kluczowe daty — wyśrodkowane, 4 kolumny.
-  const dcol = (l, v) => ({ stack: [ { text: String(l).toUpperCase(), font: "Mono", fontSize: 7, color: szary2, alignment: "center" }, { text: v, font: "RobotoBlack", fontSize: 13, color: "#FFFFFF", alignment: "center", margin: [0, 5, 0, 0] } ] });
-  content.push({ columns: [
-    dcol("Rozpoczęcie", fmtPL(form.rozpoczecie) || "—"),
-    dcol("Zakończenie robót", fmtPL(form.zakonczenieRobot) || "—"),
-    dcol("Pozwol. użytkowania", form.pnuNieDotyczy ? "Nie dotyczy" : (fmtPL(form.pnu) || "—")),
-    dcol("Opracował", form.opracowal || "—"),
-  ], columnGap: 12, margin: [0, 16, 0, 0] });
+  // Treść okładki (flow) zaczyna się tuż pod grafiką (margines uwzględnia margines strony 40).
+  const coverGora = coverImg ? Math.max(18, coverH - 40 + 8) : 62;
+  content.push({ text: [{ text: "/ ", color: zolty }, { text: `OKRES ${fmtPL(form.okresOd) || "…"} — ${fmtPL(form.okresDo) || "…"}`, color: zoltyDeep }], font: "Mono", fontSize: 9, characterSpacing: 1.2, margin: [0, coverGora, 0, 0] });
+  content.push({ text: [{ text: "/", color: zolty }, { text: String(form.numer).padStart(3, "0"), color: "#FFFFFF" }], font: "RobotoBlack", fontSize: 96, lineHeight: 0.85, margin: [-3, 4, 0, 0] });
+  content.push({ text: form.projekt || "", color: "#FFFFFF", font: "RobotoBlack", fontSize: 34, margin: [0, 2, 0, 0] });
+  if (form.adres) content.push({ text: String(form.adres).toUpperCase(), color: szary2, font: "Mono", fontSize: 8.5, characterSpacing: 1, margin: [0, 9, 0, 0] });
+  if (form.tytulZadania) content.push({ text: `„${form.tytulZadania}”`, color: "#B9B4AA", italics: true, fontSize: 9.5, lineHeight: 1.4, margin: [0, 12, 70, 0] });
+
+  // Kluczowe daty + stopka — przypięte do dołu strony (absolutePosition).
+  content.push({ canvas: [{ type: "line", x1: 0, y1: 0, x2: PW - 80, y2: 0, lineWidth: 1, lineColor: "#3A3A36" }], absolutePosition: { x: 40, y: 724 } });
+  const datyOkl = [
+    ["Rozpoczęcie", fmtPL(form.rozpoczecie) || "—"],
+    ["Zakończenie robót", fmtPL(form.zakonczenieRobot) || "—"],
+    ["Pozwolenie na użytkowanie", form.pnuNieDotyczy ? "Nie dotyczy" : (fmtPL(form.pnu) || "—")],
+  ];
+  datyOkl.forEach(([l, v], i) => {
+    content.push({ stack: [
+      { text: String(l).toUpperCase(), font: "Mono", fontSize: 7.5, characterSpacing: 0.8, color: szary2 },
+      { text: v, font: "RobotoBlack", fontSize: 14, color: "#FFFFFF", margin: [0, 6, 0, 0] },
+    ], width: 170, absolutePosition: { x: 40 + i * 172, y: 740 } });
+  });
+  content.push({ text: `OPRACOWAŁ · ${(form.opracowal || "—").toUpperCase()}`, font: "Mono", fontSize: 8, characterSpacing: 0.6, color: szary2, absolutePosition: { x: 40, y: 802 } });
+  content.push({ text: `DATA · ${fmtPL(form.dataOpracowania) || "—"}`, font: "Mono", fontSize: 8, characterSpacing: 0.6, color: szary2, alignment: "right", width: PW - 80, absolutePosition: { x: 40, y: 802 } });
 
   // Strona tytułowa kończy się na kluczowych datach — reszta od nowej strony
   const nagInfo = pdfNaglowekSekcji("Informacje ogólne");
@@ -4091,8 +4079,27 @@ async function budujDocDefinition(form) {
     pageSize: "A4",
     pageMargins: [40, marginesGora, 40, 40],
     defaultStyle: { font: "Roboto", fontSize: 10, color: ink, lineHeight: 1.25 },
-    // Strona 1 (okładka) ma ciepłe, prawie-czarne tło jak hero na abyard.com.
-    background: (page) => page === 1 ? { canvas: [{ type: "rect", x: 0, y: 0, w: 595.28, h: 841.89, color: ink }] } : null,
+    // Strona 1 (okładka „magazynowa"): ciepła czerń + grafika inwestycji
+    // pełnoklatkowa u góry, z gradientami (górny — pod pasek, dolny — wtopienie w czerń).
+    background: (page) => {
+      if (page !== 1) return null;
+      const bg = [{ canvas: [{ type: "rect", x: 0, y: 0, w: PW, h: PH, color: ink }] }];
+      if (coverImg) {
+        bg.push({ image: coverImg, width: PW, absolutePosition: { x: 0, y: 0 } });
+        // Górny gradient — czytelność paska nad jasnym niebem grafiki.
+        const topFade = [], TN = 16, TH = 96;
+        for (let i = 0; i <= TN; i++) topFade.push({ type: "rect", x: 0, y: i * (TH / TN), w: PW, h: TH / TN + 0.8, color: ink, fillOpacity: 0.5 * (1 - i / TN) });
+        bg.push({ canvas: topFade, absolutePosition: { x: 0, y: 0 } });
+        // Dolny gradient — wtopienie dołu grafiki w czerń strony.
+        const botFade = [], BN = 22, BH = 110;
+        for (let i = 0; i <= BN; i++) botFade.push({ type: "rect", x: 0, y: coverH - BH + i * (BH / BN), w: PW, h: BH / BN + 0.8, color: ink, fillOpacity: i / BN });
+        bg.push({ canvas: botFade, absolutePosition: { x: 0, y: 0 } });
+      }
+      // Pasek górny nad grafiką: overline + plakietka numeru.
+      bg.push({ text: [{ text: "/ ", color: zoltyBright }, { text: "RAPORT Z BUDOWY · ABYARD", color: "#FFFFFF" }], font: "Mono", fontSize: 9, characterSpacing: 1.4, absolutePosition: { x: 40, y: 41 } });
+      bg.push({ table: { body: [[{ text: `NR ${String(form.numer).padStart(3, "0")}`, font: "Mono", fontSize: 9, bold: true, color: "#161512", fillColor: zolty, margin: [9, 4, 9, 4], border: [false, false, false, false] }]] }, layout: "noBorders", absolutePosition: { x: 497, y: 34 } });
+      return bg;
+    },
     content,
     // Nagłówek sekcji (headlineLevel:1) nie może zostać sam na dole strony ani
     // rozłamać się (samo tło belki na jednej stronie, tekst na drugiej).
@@ -4149,11 +4156,6 @@ function PodgladPDF({ form, onBack, nazwaPliku, raportId, publiczny, jestAdmin }
       setPobieranie(false);
     }
   }
-  // Status inwestycji (okładka) — ta sama logika co eksport PDF.
-  const stMeta = statusZRaportu({ harmonogram: form.harmonogram, data_opracowania: form.dataOpracowania, podsumowanie: form.podsumowanie });
-  const opozInw = opoznienieInwestycji(form.harmonogram, form.dataOpracowania);
-  const zagrozenie = stMeta.kod === "zagrozenie";
-  const statusTxt = (zagrozenie ? "Zagrożenie terminu" : "Termin niezagrożony") + (opozInw && opozInw.dni > 0 ? ` — ${opozInw.dni} dni` : "");
   return (
     <div style={{ background: "#2A2926", minHeight: "100vh", fontFamily: "'Segoe UI', system-ui, sans-serif" }}>
       <style>{printCSS}</style>
@@ -4181,40 +4183,41 @@ function PodgladPDF({ form, onBack, nazwaPliku, raportId, publiczny, jestAdmin }
       {pokazLinki && raportId && !publiczny && <PanelLinkow raportId={raportId} jestAdmin={jestAdmin} />}
 
       <div className="pdf-page" style={{ background: CR.card, maxWidth: 794, margin: "20px auto", boxShadow: "0 4px 30px rgba(0,0,0,0.3)", color: CR.ink, fontFamily: "'Roboto', 'Segoe UI', system-ui, sans-serif", overflow: "hidden" }}>
-        {/* ——— OKŁADKA — ciemny hero (jak strona 1 PDF) ——— */}
-        <div className="pdf-cover" style={{ background: CR.ink, color: "#fff", padding: "40px 56px 44px", textAlign: "center" }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", textAlign: "left" }}>
-            <div style={{ fontWeight: 900, fontSize: 22 }}><span style={{ color: CR.gold }}>/</span>Abyard</div>
-            <div style={{ fontFamily: CR.mono, fontSize: 9.5, color: CR.muted2, textAlign: "right", lineHeight: 1.7 }}>Kraków, dn. {fmtPL(form.dataOpracowania) || "—"}<br />www.abyard.com · biuro@abyard.pl</div>
-          </div>
-
-          <div style={{ fontFamily: CR.mono, fontSize: 11.5, letterSpacing: "0.2em", color: CR.gold, marginTop: 34 }}>/ RAPORT Z BUDOWY</div>
-          <div className="cover-num" style={{ fontWeight: 900, fontSize: 88, lineHeight: 0.9, marginTop: 4 }}><span style={{ color: CR.gold }}>/</span>{String(form.numer).padStart(3, "0")}</div>
-          <h2 className="cover-proj" style={{ fontWeight: 900, fontSize: 40, margin: "8px 0 0", lineHeight: 1.05, letterSpacing: "-0.01em" }}>{form.projekt}</h2>
-          {form.adres && <p style={{ color: CR.gold, fontWeight: 700, fontSize: 14, margin: "8px 0 0" }}>{form.adres}</p>}
-          {form.tytulZadania && <p style={{ color: "#CBC7BF", fontStyle: "italic", fontSize: 12, margin: "8px auto 0", maxWidth: 560, lineHeight: 1.4 }}>„{form.tytulZadania}”</p>}
-
-          <div style={{ display: "flex", justifyContent: "center", gap: 10, marginTop: 18, flexWrap: "wrap" }}>
-            <div style={{ fontFamily: CR.mono, fontSize: 11, background: CR.ink2, padding: "8px 14px", letterSpacing: "0.06em" }}><span style={{ color: CR.muted2 }}>ZA OKRES </span><span style={{ color: CR.goldBright }}>{fmtPL(form.okresOd) || "…"} — {fmtPL(form.okresDo) || "…"}</span></div>
-            <div style={{ fontFamily: CR.mono, fontSize: 10.5, fontWeight: 700, letterSpacing: "0.06em", padding: "8px 14px", background: zagrozenie ? "#2A1614" : "#142519", color: zagrozenie ? "#F0A79E" : "#7DDBA0" }}>
-              <span style={{ color: zagrozenie ? CR.danger : "#57C680" }}>● </span>{statusTxt.toUpperCase()}
-            </div>
-          </div>
-
+        {/* ——— OKŁADKA — wariant „magazynowy" (jak strona 1 PDF) ——— */}
+        <div className="pdf-cover" style={{ background: CR.ink, color: "#fff", padding: 0, position: "relative" }}>
+          {/* Grafika inwestycji — pełnoklatkowa u góry, z gradientami (górny pod pasek, dolny wtopienie) */}
           {form.grafikaInwestycji && (
-            <>
-              <img className="grafika-okladka" src={form.grafikaInwestycji.dataUrl} alt="" style={{ display: "block", width: "auto", maxWidth: "100%", maxHeight: "88mm", objectFit: "contain", margin: "18px auto 0" }} />
-              <div style={{ height: 1, background: CR.gold, margin: "18px 0 0" }} />
-            </>
+            <div style={{ position: "relative" }}>
+              <img className="cover-foto" src={form.grafikaInwestycji.dataUrl} alt="" style={{ display: "block", width: "100%", maxHeight: "150mm", objectFit: "cover" }} />
+              <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 96, background: "linear-gradient(180deg, rgba(15,15,14,0.55) 0%, rgba(15,15,14,0) 100%)" }} />
+              <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, height: 110, background: `linear-gradient(180deg, rgba(15,15,14,0) 0%, ${CR.ink} 100%)` }} />
+            </div>
           )}
-
-          <div className="cover-daty" style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12, marginTop: 18 }}>
-            {[["Rozpoczęcie", fmtPL(form.rozpoczecie) || "—"], ["Zakończenie robót", fmtPL(form.zakonczenieRobot) || "—"], ["Pozwol. użytkowania", form.pnuNieDotyczy ? "Nie dotyczy" : (fmtPL(form.pnu) || "—")], ["Opracował", form.opracowal || "—"]].map(([l, v], i) => (
-              <div key={i} style={{ textAlign: "center" }}>
-                <div style={{ fontFamily: CR.mono, fontSize: 8.5, letterSpacing: "0.1em", color: CR.muted2, textTransform: "uppercase" }}>{l}</div>
-                <div style={{ fontWeight: 900, fontSize: 15, marginTop: 5 }}>{v}</div>
-              </div>
-            ))}
+          {/* Pasek górny nad grafiką (lub na czerni, gdy brak grafiki) */}
+          <div className="cover-bar" style={{ position: "absolute", top: 0, left: 0, right: 0, display: "flex", justifyContent: "space-between", alignItems: "center", padding: "26px 40px" }}>
+            <span style={{ fontFamily: CR.mono, fontSize: 10.5, letterSpacing: "0.16em", textTransform: "uppercase", color: "#fff" }}><span style={{ color: CR.goldBright }}>/ </span>Raport z budowy · Abyard</span>
+            <span style={{ fontFamily: CR.mono, fontSize: 10.5, fontWeight: 700, letterSpacing: "0.1em", color: "#161512", background: CR.gold, padding: "4px 10px", borderRadius: 3 }}>NR {String(form.numer).padStart(3, "0")}</span>
+          </div>
+          {/* Treść okładki */}
+          <div className="cover-body" style={{ padding: form.grafikaInwestycji ? "6px 40px 34px" : "88px 40px 34px" }}>
+            <div style={{ fontFamily: CR.mono, fontSize: 11, letterSpacing: "0.12em", textTransform: "uppercase", color: CR.goldDeep }}><span style={{ color: CR.gold }}>/ </span>Okres {fmtPL(form.okresOd) || "…"} — {fmtPL(form.okresDo) || "…"}</div>
+            <div className="cover-num" style={{ fontWeight: 900, fontSize: 100, lineHeight: 0.85, marginTop: 6, letterSpacing: "-0.03em" }}><span style={{ color: CR.gold }}>/</span>{String(form.numer).padStart(3, "0")}</div>
+            <h2 className="cover-proj" style={{ fontWeight: 900, fontSize: 38, margin: "4px 0 0", lineHeight: 1.03, letterSpacing: "-0.02em" }}>{form.projekt}</h2>
+            {form.adres && <p style={{ fontFamily: CR.mono, fontSize: 9.5, letterSpacing: "0.08em", textTransform: "uppercase", color: CR.muted, margin: "10px 0 0" }}>{form.adres}</p>}
+            {form.tytulZadania && <p style={{ color: "#B9B4AA", fontStyle: "italic", fontSize: 12, margin: "12px 0 0", maxWidth: 620, lineHeight: 1.42 }}>„{form.tytulZadania}”</p>}
+            <div style={{ height: 1, background: "rgba(255,255,255,0.14)", margin: "36px 0 0" }} />
+            <div className="cover-daty" style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 16, marginTop: 20 }}>
+              {[["Rozpoczęcie", fmtPL(form.rozpoczecie) || "—"], ["Zakończenie robót", fmtPL(form.zakonczenieRobot) || "—"], ["Pozwolenie na użytkowanie", form.pnuNieDotyczy ? "Nie dotyczy" : (fmtPL(form.pnu) || "—")]].map(([l, v], i) => (
+                <div key={i}>
+                  <div style={{ fontFamily: CR.mono, fontSize: 8.5, letterSpacing: "0.12em", color: CR.muted2, textTransform: "uppercase" }}>{l}</div>
+                  <div style={{ fontWeight: 900, fontSize: 16, marginTop: 6 }}>{v}</div>
+                </div>
+              ))}
+            </div>
+            <div style={{ display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: 8, marginTop: 24, fontFamily: CR.mono, fontSize: 9, letterSpacing: "0.06em", textTransform: "uppercase", color: CR.muted }}>
+              <span>Opracował · {form.opracowal || "—"}</span>
+              <span>Data · {fmtPL(form.dataOpracowania) || "—"}</span>
+            </div>
           </div>
         </div>
 
@@ -4656,13 +4659,15 @@ const printCSS = `
         (daty się nie łamią), a max-width:100% + overflow-x:auto daje pasek.
      Dotyczy tylko ekranu telefonu — druk PDF (@media print) nietknięty. */
   @media screen and (max-width: 640px) {
-    /* Padding jest teraz na okładce/treści (nie na .pdf-page) — zmniejszamy oba. */
-    .pdf-cover { padding: 26px 18px 30px !important; }
+    /* Okładka „magazynowa": grafika bleeduje (padding 0), padding jest na .cover-body. */
+    .pdf-cover { padding: 0 !important; }
+    .pdf-cover .cover-body { padding: 4px 18px 26px !important; }
+    .pdf-cover .cover-bar { padding: 18px 18px !important; }
     .pdf-content { padding: 6px 18px 30px !important; }
     /* Okładka: skalujemy wielkie napisy, żeby nie rozpychały iPhone'a. */
-    .pdf-cover .cover-num { font-size: 60px !important; }
+    .pdf-cover .cover-num { font-size: 64px !important; }
     .pdf-cover .cover-proj { font-size: 26px !important; }
-    .pdf-cover .cover-daty { grid-template-columns: 1fr 1fr !important; row-gap: 14px !important; }
+    .pdf-cover .cover-daty { gap: 10px !important; row-gap: 14px !important; }
     .pdf-page table {
       display: block;
       overflow-x: auto;
@@ -4710,9 +4715,10 @@ const printCSS = `
     .strona-cashflow { break-inside: avoid; page-break-inside: avoid; }
     /* Grafika okładki w druku — duża, ale z zapasem, by grafika + kluczowe daty
        zmieściły się razem na stronie tytułowej (obszar druku A4 ≈ 269 mm). */
-    .grafika-okladka { max-height: 108mm !important; width: auto !important; max-width: 100% !important; }
+    .cover-foto { max-height: 150mm !important; width: 100% !important; object-fit: cover !important; }
   }
 `;
+
 
 
 
