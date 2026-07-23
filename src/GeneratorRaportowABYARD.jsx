@@ -4136,8 +4136,8 @@ function PodgladPDF({ form, onBack, nazwaPliku, raportId, publiczny, jestAdmin }
           </div>
 
           <div style={{ fontFamily: CR.mono, fontSize: 11.5, letterSpacing: "0.2em", color: CR.gold, marginTop: 34 }}>/ RAPORT Z BUDOWY</div>
-          <div style={{ fontWeight: 900, fontSize: 88, lineHeight: 0.9, marginTop: 4 }}><span style={{ color: CR.gold }}>/</span>{String(form.numer).padStart(3, "0")}</div>
-          <h2 style={{ fontWeight: 900, fontSize: 40, margin: "8px 0 0", lineHeight: 1.05, letterSpacing: "-0.01em" }}>{form.projekt}</h2>
+          <div className="cover-num" style={{ fontWeight: 900, fontSize: 88, lineHeight: 0.9, marginTop: 4 }}><span style={{ color: CR.gold }}>/</span>{String(form.numer).padStart(3, "0")}</div>
+          <h2 className="cover-proj" style={{ fontWeight: 900, fontSize: 40, margin: "8px 0 0", lineHeight: 1.05, letterSpacing: "-0.01em" }}>{form.projekt}</h2>
           {form.adres && <p style={{ color: CR.gold, fontWeight: 700, fontSize: 14, margin: "8px 0 0" }}>{form.adres}</p>}
           {form.tytulZadania && <p style={{ color: "#CBC7BF", fontStyle: "italic", fontSize: 12, margin: "8px auto 0", maxWidth: 560, lineHeight: 1.4 }}>„{form.tytulZadania}”</p>}
 
@@ -4155,7 +4155,7 @@ function PodgladPDF({ form, onBack, nazwaPliku, raportId, publiczny, jestAdmin }
             </>
           )}
 
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12, marginTop: 18 }}>
+          <div className="cover-daty" style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12, marginTop: 18 }}>
             {[["Rozpoczęcie", fmtPL(form.rozpoczecie) || "—"], ["Zakończenie robót", fmtPL(form.zakonczenieRobot) || "—"], ["Pozwol. użytkowania", form.pnuNieDotyczy ? "Nie dotyczy" : (fmtPL(form.pnu) || "—")], ["Opracował", form.opracowal || "—"]].map(([l, v], i) => (
               <div key={i} style={{ textAlign: "center" }}>
                 <div style={{ fontFamily: CR.mono, fontSize: 8.5, letterSpacing: "0.1em", color: CR.muted2, textTransform: "uppercase" }}>{l}</div>
@@ -4594,7 +4594,13 @@ const printCSS = `
         (daty się nie łamią), a max-width:100% + overflow-x:auto daje pasek.
      Dotyczy tylko ekranu telefonu — druk PDF (@media print) nietknięty. */
   @media screen and (max-width: 640px) {
-    .pdf-page { padding: 18px !important; }
+    /* Padding jest teraz na okładce/treści (nie na .pdf-page) — zmniejszamy oba. */
+    .pdf-cover { padding: 26px 18px 30px !important; }
+    .pdf-content { padding: 6px 18px 30px !important; }
+    /* Okładka: skalujemy wielkie napisy, żeby nie rozpychały iPhone'a. */
+    .pdf-cover .cover-num { font-size: 60px !important; }
+    .pdf-cover .cover-proj { font-size: 26px !important; }
+    .pdf-cover .cover-daty { grid-template-columns: 1fr 1fr !important; row-gap: 14px !important; }
     .pdf-page table {
       display: block;
       overflow-x: auto;
