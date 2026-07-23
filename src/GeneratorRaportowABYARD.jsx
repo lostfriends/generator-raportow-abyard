@@ -2531,59 +2531,90 @@ function PanelAdmina({ pokazToast, email, onForm, onArchiwum, onKoordynacja, onW
   );
 }
 
-/* ---------- KOMPAKTOWA LISTA INWESTYCJI (koordynacja) -------------------- */
-// Koordynacja PM — UPROSZCZONA lista: tylko przypisywanie punktów obciążenia PM
-// do inwestycji. Zarządzanie samą inwestycją (zakres, termin, wstrzymanie,
-// zakończenie) przeniesione do zakładki „Koordynacja Inwestycji".
+/* ---------- MACIERZ PUNKTÓW PM (koordynacja PM) ------------------------- */
+// Przejrzysta macierz: wiersze = inwestycje, kolumny = kierownicy, komórka =
+// punkty obciążenia tam, gdzie istnieje przypisanie (edytowalne, zapis on-blur).
+// Wszystko widać naraz — bez rozwijania i szukania po jednej inwestycji.
+// Przypisania PM↔inwestycja ustawia się w zakładce „Zarządzanie".
 function KompaktowaListaInwestycji({ projekty, przypisania, zakresMap, uzytMap, punktyLok, setPunktyLok, zapiszPunkty }) {
-  const [otwarty, setOtwarty] = React.useState(null);
-  const numInp = { width: 60, padding: "5px 7px", border: `1px solid ${C.linia}`, borderRadius: 5, fontSize: 13, textAlign: "center" };
+  // Kolumny = kierownicy z co najmniej jednym przypisaniem (stabilne, alfabetycznie).
+  const pmCols = React.useMemo(() => {
+    const ids = [...new Set(przypisania.map((x) => x.uzytkownik))];
+    return ids.map((id) => uzytMap[id]).filter(Boolean).sort((a, b) => nazwaOsoby(a).localeCompare(nazwaOsoby(b), "pl"));
+  }, [przypisania, uzytMap]);
+  // Szybki dostęp do przypisania: klucz "projekt_id|uzytkownik".
+  const mapPrzyp = React.useMemo(() => {
+    const m = {};
+    for (const x of przypisania) m[x.projekt_id + "|" + x.uzytkownik] = x;
+    return m;
+  }, [przypisania]);
+
+  // Efektywne punkty komórki: wpisane, a gdy puste — domyślne z zakresu inwestycji
+  // (spójnie z analizą obciążenia). Do sum wierszy/kolumn.
+  const efekt = (x, p) => {
+    const raw = punktyLok[x.id] !== undefined ? punktyLok[x.id] : x.punkty;
+    if (raw === "" || raw == null) { const zk = zakresMap[p.zakres]; return zk ? (Number(zk.punkty) || 0) : 0; }
+    const n = parseFloat(raw); return isNaN(n) ? 0 : n;
+  };
+  const okr = (n) => Math.round(n * 10) / 10;
+
+  if (pmCols.length === 0) {
+    return <div style={{ fontSize: 13, color: C.szary, fontStyle: "italic" }}>Brak przypisań PM do inwestycji — dodaj je w zakładce „Zarządzanie".</div>;
+  }
+
+  const thMx = { ...thAdm, whiteSpace: "nowrap" };
+  const tdMx = { padding: "7px 8px", borderBottom: `1px solid ${C.jasny}` };
+  const numInp = { width: 56, padding: "6px 4px", border: `1px solid ${C.linia}`, borderRadius: 5, fontSize: 13, textAlign: "center", background: "#FCFBF8" };
+
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-      {projekty.map((p) => {
-        const przypP = przypisania.filter((x) => x.projekt_id === p.id);
-        const zk = zakresMap[p.zakres];
-        const otw = otwarty === p.id;
-        return (
-          <div key={p.id} style={{ border: `1px solid ${C.linia}`, borderRadius: 8, background: C.bialy, opacity: p.wstrzymana ? 0.6 : 1 }}>
-            <div onClick={() => setOtwarty(otw ? null : p.id)}
-              style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, padding: "10px 14px", cursor: "pointer" }}>
-              <div style={{ fontWeight: 700, fontSize: 13.5 }}>
-                <span style={{ color: C.szary, marginRight: 6, fontSize: 11 }}>{otw ? "▼" : "▶"}</span>{p.nazwa}
-                {p.wstrzymana && <span style={odznakaWstrzymana}>WSTRZYMANA</span>}
-              </div>
-              <span style={{ fontFamily: C.mono, fontSize: 11, color: C.szary2, textTransform: "uppercase", letterSpacing: "0.04em" }}>
-                {przypP.length ? `${przypP.length} PM` : "brak PM"}
-              </span>
-            </div>
-            {otw && (
-              <div style={{ borderTop: `1px dashed ${C.linia}`, padding: "10px 14px 12px 32px" }}>
-                {przypP.length === 0 ? (
-                  <div style={{ fontSize: 12, color: C.szary, fontStyle: "italic" }}>
-                    brak przypisanych kierowników — dodaj ich w zakładce „Zarządzanie"
-                  </div>
-                ) : (
-                  <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                    {przypP.map((x) => {
-                      const u = uzytMap[x.uzytkownik];
-                      const val = punktyLok[x.id] !== undefined ? punktyLok[x.id] : (x.punkty ?? "");
-                      return (
-                        <div key={x.id} style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                          <span style={{ flex: "1 1 auto", fontSize: 13 }}>{nazwaOsoby(u)}</span>
-                          <input type="number" min="0" step="0.5" value={val} placeholder={zk ? String(zk.punkty) : "—"}
-                            onChange={(e) => setPunktyLok((s) => ({ ...s, [x.id]: e.target.value }))}
-                            onBlur={(e) => zapiszPunkty(x.id, e.target.value)} style={numInp} />
-                          <span style={{ fontSize: 11.5, color: C.szary, width: 26 }}>pkt</span>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-        );
-      })}
+    <div className="tabela-scroll-own" style={{ overflowX: "auto" }}>
+      <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 300 + pmCols.length * 96 }}>
+        <thead>
+          <tr>
+            <th style={{ ...thMx, textAlign: "left" }}>Inwestycja</th>
+            {pmCols.map((pm) => <th key={pm.id} style={{ ...thMx, textAlign: "center" }}>{nazwaOsoby(pm)}</th>)}
+            <th style={{ ...thMx, textAlign: "center" }}>Σ pkt</th>
+          </tr>
+        </thead>
+        <tbody>
+          {projekty.map((p) => {
+            const zk = zakresMap[p.zakres];
+            const sumaW = pmCols.reduce((s, pm) => { const x = mapPrzyp[p.id + "|" + pm.id]; return s + (x ? efekt(x, p) : 0); }, 0);
+            return (
+              <tr key={p.id} style={{ opacity: p.wstrzymana ? 0.55 : 1 }}>
+                <td style={{ ...tdMx, fontSize: 13, fontWeight: 600, whiteSpace: "nowrap" }}>
+                  {p.nazwa}{p.wstrzymana && <span style={odznakaWstrzymana}>WSTRZYMANA</span>}
+                </td>
+                {pmCols.map((pm) => {
+                  const x = mapPrzyp[p.id + "|" + pm.id];
+                  return (
+                    <td key={pm.id} style={{ ...tdMx, textAlign: "center" }}>
+                      {x ? (
+                        <input type="number" min="0" step="0.5"
+                          value={punktyLok[x.id] !== undefined ? punktyLok[x.id] : (x.punkty ?? "")}
+                          placeholder={zk ? String(zk.punkty) : "—"}
+                          onChange={(e) => setPunktyLok((s) => ({ ...s, [x.id]: e.target.value }))}
+                          onBlur={(e) => zapiszPunkty(x.id, e.target.value)} style={numInp} />
+                      ) : <span style={{ color: "#D9D6CE" }}>·</span>}
+                    </td>
+                  );
+                })}
+                <td style={{ ...tdMx, textAlign: "center", fontFamily: C.mono, fontSize: 12.5, fontWeight: 700 }}>{sumaW ? okr(sumaW) : "—"}</td>
+              </tr>
+            );
+          })}
+        </tbody>
+        <tfoot>
+          <tr>
+            <td style={{ padding: "9px 8px", borderTop: `2px solid ${C.linia}`, fontFamily: C.mono, fontSize: 9.5, textTransform: "uppercase", letterSpacing: "0.08em", color: C.szary2, whiteSpace: "nowrap" }}>Σ na kierownika</td>
+            {pmCols.map((pm) => {
+              const sumaK = projekty.reduce((s, p) => { const x = mapPrzyp[p.id + "|" + pm.id]; return s + (x ? efekt(x, p) : 0); }, 0);
+              return <td key={pm.id} style={{ padding: "9px 8px", borderTop: `2px solid ${C.linia}`, textAlign: "center", fontFamily: C.mono, fontSize: 12.5, fontWeight: 700 }}>{sumaK ? okr(sumaK) : "—"}</td>;
+            })}
+            <td style={{ borderTop: `2px solid ${C.linia}` }} />
+          </tr>
+        </tfoot>
+      </table>
     </div>
   );
 }
@@ -2735,7 +2766,7 @@ function ZakladkaKoordynacja({ uzytkownicy, projektyAll, przypisania, zakresy, t
             style={{ padding: "7px 11px", border: `1px solid ${C.linia}`, borderRadius: 6, fontSize: 13, width: 220 }} />
         </div>
         <p style={{ fontSize: 12.5, color: C.szary, marginTop: -2, marginBottom: 14, lineHeight: 1.5 }}>
-          Kliknij inwestycję, aby rozwinąć i przypisać punkty obciążenia kierownikom. Zakres, termin, wstrzymanie i zakończenie ustawiasz w zakładce „Koordynacja Inwestycji".
+          Macierz punktów obciążenia: wiersz = inwestycja, kolumna = kierownik. Wpisz punkty w komórce (puste = domyślne z zakresu). „·" oznacza brak przypisania — nadajesz je w zakładce „Zarządzanie". Zakres, termin, wstrzymanie i zakończenie ustawiasz w „Koordynacji Inwestycji".
         </p>
         <KompaktowaListaInwestycji
           projekty={projektyWidoczne} przypisania={przypisania} zakresMap={zakresMap}
@@ -4724,6 +4755,7 @@ const printCSS = `
     .cover-foto { max-height: 150mm !important; width: 100% !important; object-fit: cover !important; }
   }
 `;
+
 
 
 
