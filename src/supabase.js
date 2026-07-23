@@ -492,14 +492,47 @@ export async function pobierzObiektStorage(sciezka) {
   return data; // Blob
 }
 
-// Nadpisz TEN SAM obiekt (upsert) — publiczne URL-e w bazie pozostają ważne.
+// Nadpisz TEN SAM obiekt — publiczne URL-e w bazie pozostają ważne.
+// Najpierw upsert (UPDATE). Część polityk RLS pozwala tylko na INSERT/DELETE
+// (a nie UPDATE); gdy upsert zawiedzie, awaryjnie: usuń stary obiekt i wgraj na
+// nowo (INSERT).
+//
+// BEZPIECZEŃSTWO: usuwamy oryginał TYLKO wtedy, gdy najpierw upewnimy się, że
+// mamy prawo wgrać nowy plik. Robimy próbny INSERT skompresowanego pliku pod
+// ścieżką tymczasową (obok, ten sam folder → ta sama polityka). Dopiero gdy się
+// uda, usuwamy oryginał i wgrywamy plik pod właściwą ścieżką, a próbkę kasujemy.
+// Jeśli próbny INSERT się nie powiedzie — NIC nie usuwamy (brak ryzyka utraty).
 export async function nadpiszObiektStorage(sciezka, plik) {
   const { error } = await supabase.storage.from(BUCKET).upload(sciezka, plik, {
     contentType: "image/jpeg",
     upsert: true,
     cacheControl: "3600",
   });
-  if (error) throw error;
+  if (!error) return;
+
+  const proba = sciezka.replace(/([^/]+)$/, "._tmp_$1");
+  const { error: ePr } = await supabase.storage.from(BUCKET).upload(proba, plik, {
+    contentType: "image/jpeg",
+    upsert: true,
+    cacheControl: "3600",
+  });
+  if (ePr) {
+    // Nie mamy prawa wgrać — zgłoś oryginalny błąd upsert (nic nie usunięto).
+    throw new Error(`nadpisanie odrzucone: ${error.message || error}`);
+  }
+  // Mamy prawo INSERT → bezpiecznie podmieniamy właściwy obiekt.
+  await supabase.storage.from(BUCKET).remove([sciezka]);
+  const { error: eIns } = await supabase.storage.from(BUCKET).upload(sciezka, plik, {
+    contentType: "image/jpeg",
+    upsert: false,
+    cacheControl: "3600",
+  });
+  if (eIns) {
+    // Skrajnie mało prawdopodobne (INSERT właśnie się udał pod próbą). Zostawiamy
+    // kopię `proba` jako ratunek zamiast ją kasować — nic nie ginie bezpowrotnie.
+    throw new Error(`podmiana nieudana; kopia zachowana: ${proba} (${eIns.message || eIns})`);
+  }
+  await supabase.storage.from(BUCKET).remove([proba]); // sukces → sprzątamy próbkę
 }
 
 /* ---------------------------------------------------------------------------

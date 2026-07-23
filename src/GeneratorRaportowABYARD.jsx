@@ -2392,32 +2392,36 @@ function PanelAdmina({ pokazToast, email, onForm, onArchiwum, onKoordynacja, onW
   async function uruchomKompresje() {
     if (kompresja?.trwa) return;
     if (!window.confirm("Skompresować istniejące zdjęcia w bazie?\n\nOperacja nadpisuje pliki w Storage (linki i raporty pozostają bez zmian) i może chwilę potrwać. Można ją bezpiecznie powtórzyć.")) return;
-    setKompresja({ trwa: true, i: 0, n: 0, przed: 0, po: 0, zmienione: 0, pominiete: 0, blad: 0 });
+    setKompresja({ trwa: true, i: 0, n: 0, przed: 0, po: 0, zmienione: 0, pominiete: 0, blad: 0, bledy: [] });
     try {
       const sciezki = await listaObrazowStorage();
+      // przed/po liczymy TYLKO dla plików realnie przetworzonych (pominięte + skompresowane).
+      // Błędy NIE wliczają się do bilansu — inaczej „oszczędność" była fałszywa.
       let przed = 0, po = 0, zmienione = 0, pominiete = 0, blad = 0;
+      const bledy = []; // do 5 pierwszych komunikatów, do diagnozy
       for (let idx = 0; idx < sciezki.length; idx++) {
         const s = sciezki[idx];
         setKompresja((k) => ({ ...k, i: idx + 1, n: sciezki.length }));
         try {
           const blob = await pobierzObiektStorage(s);
           const oryg = blob.size || 0;
-          przed += oryg;
-          if (oryg < 400 * 1024) { po += oryg; pominiete++; continue; } // już małe
+          if (oryg < 400 * 1024) { przed += oryg; po += oryg; pominiete++; continue; } // już małe
           const { max, jakosc } = paramyKompresji(s);
           const file = new File([blob], (s.split("/").pop() || "obraz"), { type: blob.type || "image/jpeg" });
           const { plik } = await kompresujObraz(file, max, jakosc);
-          if (!plik || plik.size >= oryg * 0.85) { po += oryg; pominiete++; continue; } // brak realnego zysku
+          if (!plik || plik.size >= oryg * 0.85) { przed += oryg; po += oryg; pominiete++; continue; } // brak realnego zysku
           await nadpiszObiektStorage(s, plik);
-          po += plik.size; zmienione++;
+          przed += oryg; po += plik.size; zmienione++;
         } catch (e) {
           console.error("Kompresja pliku", s, e);
           blad++;
+          const msg = String(e?.message || e?.error || e?.statusCode || e || "nieznany");
+          if (bledy.length < 5 && !bledy.includes(msg)) bledy.push(msg);
         }
-        setKompresja((k) => ({ ...k, przed, po, zmienione, pominiete, blad }));
+        setKompresja((k) => ({ ...k, przed, po, zmienione, pominiete, blad, bledy: [...bledy] }));
       }
-      setKompresja({ trwa: false, gotowe: true, i: sciezki.length, n: sciezki.length, przed, po, zmienione, pominiete, blad });
-      pokazToast(`Kompresja zakończona — zaoszczędzono ${((przed - po) / 1024 / 1024).toFixed(1)} MB`);
+      setKompresja({ trwa: false, gotowe: true, i: sciezki.length, n: sciezki.length, przed, po, zmienione, pominiete, blad, bledy });
+      pokazToast(blad ? `Kompresja: ${zmienione} zmienione, ${blad} błędów` : `Kompresja zakończona — zaoszczędzono ${((przed - po) / 1024 / 1024).toFixed(1)} MB`);
     } catch (e) {
       console.error(e);
       setKompresja((k) => ({ ...(k || {}), trwa: false, fatal: String(e?.message || e) }));
@@ -2610,7 +2614,15 @@ function PanelAdmina({ pokazToast, email, onForm, onArchiwum, onKoordynacja, onW
                       {kompresja.przed > 0 && <> · {(kompresja.przed / 1024 / 1024).toFixed(1)} MB → {(kompresja.po / 1024 / 1024).toFixed(1)} MB (−{Math.max(0, Math.round((1 - kompresja.po / kompresja.przed) * 100))}%)</>}
                     </div>
                   )}
-                  {kompresja.gotowe && <div style={{ color: "#2E7D32", marginTop: 8, fontWeight: 700, fontSize: 13 }}>✓ Gotowe</div>}
+                  {kompresja.gotowe && !kompresja.blad && <div style={{ color: "#2E7D32", marginTop: 8, fontWeight: 700, fontSize: 13 }}>✓ Gotowe</div>}
+                  {kompresja.bledy && kompresja.bledy.length > 0 && (
+                    <div style={{ marginTop: 10, padding: "10px 12px", background: "#FDECEA", border: "1px solid #F3C7C1", borderRadius: 6, fontSize: 12.5, color: "#8A2018" }}>
+                      <div style={{ fontWeight: 700, marginBottom: 4 }}>Komunikaty błędów (do diagnozy):</div>
+                      {kompresja.bledy.map((b, bi) => (
+                        <div key={bi} style={{ fontFamily: C.mono, fontSize: 11.5, marginTop: 2 }}>• {b}</div>
+                      ))}
+                    </div>
+                  )}
                   {kompresja.fatal && <div style={{ color: "#B3261E", marginTop: 8, fontSize: 13 }}>Błąd: {kompresja.fatal}</div>}
                 </div>
               )}
