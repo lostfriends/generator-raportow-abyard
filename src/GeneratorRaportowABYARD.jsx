@@ -2419,7 +2419,8 @@ function PanelAdmina({ pokazToast, email, onForm, onArchiwum, onKoordynacja, onW
         ) : zakladka === "inwestycje" ? (
           <ZakladkaKoordynacjaInwestycji
             projektyAll={projektyAll} przypisania={przypisania} uzytkownicy={uzytkownicy} zakresy={zakresy}
-            terminyDomyslne={terminyDomyslne} raporty={raporty}
+            terminyDomyslne={terminyDomyslne} raporty={raporty} nieaktywne={nieaktywne}
+            pokazToast={pokazToast} odswiez={wczytaj}
           />
         ) : (
           <></>
@@ -2499,106 +2500,59 @@ function PanelAdmina({ pokazToast, email, onForm, onArchiwum, onKoordynacja, onW
 }
 
 /* ---------- KOMPAKTOWA LISTA INWESTYCJI (koordynacja) -------------------- */
-function KompaktowaListaInwestycji({ projekty, przypisania, zakresy, zakresMap, uzytMap, terminyDomyslne, punktyLok, setPunktyLok, zapiszPunkty, zapiszZakres, zapiszTermin, zakonczInwestycje, przelaczWstrzymanie }) {
+// Koordynacja PM — UPROSZCZONA lista: tylko przypisywanie punktów obciążenia PM
+// do inwestycji. Zarządzanie samą inwestycją (zakres, termin, wstrzymanie,
+// zakończenie) przeniesione do zakładki „Koordynacja Inwestycji".
+function KompaktowaListaInwestycji({ projekty, przypisania, zakresMap, uzytMap, punktyLok, setPunktyLok, zapiszPunkty }) {
   const [otwarty, setOtwarty] = React.useState(null);
-  const th = { textAlign: "left", padding: "7px 10px", color: C.szary, fontSize: 11, textTransform: "uppercase", letterSpacing: .5, borderBottom: `2px solid ${C.linia}` };
-  const td = { padding: "6px 10px", borderBottom: `1px solid ${C.jasny}`, fontSize: 13 };
   const numInp = { width: 60, padding: "5px 7px", border: `1px solid ${C.linia}`, borderRadius: 5, fontSize: 13, textAlign: "center" };
-
   return (
-    <table style={{ width: "100%", borderCollapse: "collapse" }}>
-      <thead>
-        <tr>
-          <th style={th}>Inwestycja</th>
-          <th style={{ ...th, width: 150 }}>Zakres</th>
-          <th style={{ ...th, width: 150 }}>Termin</th>
-          <th style={{ ...th, width: 70, textAlign: "center" }}>PM</th>
-          <th style={{ ...th, width: 110, textAlign: "center" }}>Status</th>
-          <th style={{ ...th, width: 90 }}></th>
-        </tr>
-      </thead>
-      <tbody>
-        {projekty.map((p) => {
-          const przypP = przypisania.filter((x) => x.projekt_id === p.id);
-          const zk = zakresMap[p.zakres];
-          const auto = terminyDomyslne?.[p.id] || "";
-          const reczny = p.termin_zakonczenia || "";
-          const wartosc = reczny || auto;
-          const zAuto = !reczny && !!auto;
-          const otw = otwarty === p.id;
-          return (
-            <React.Fragment key={p.id}>
-              <tr style={{ background: otw ? C.jasny : "transparent" }}>
-                <td style={{ ...td, fontWeight: 700, cursor: "pointer", opacity: p.wstrzymana ? 0.55 : 1 }} onClick={() => setOtwarty(otw ? null : p.id)}>
-                  <span style={{ color: C.szary, marginRight: 6, fontSize: 11 }}>{otw ? "▼" : "▶"}</span>{p.nazwa}
-                </td>
-                <td style={td}>
-                  <select value={p.zakres || ""} onChange={(e) => zapiszZakres(p.id, e.target.value)}
-                    style={{ padding: "5px 7px", border: `1px solid ${C.linia}`, borderRadius: 5, fontSize: 12.5, width: "100%" }}>
-                    <option value="">— brak —</option>
-                    {zakresy.map((z) => <option key={z.kod} value={z.kod}>{z.nazwa}</option>)}
-                  </select>
-                </td>
-                <td style={td}>
-                  <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
-                    <input type="date" defaultValue={wartosc} onBlur={(e) => zapiszTermin(p.id, e.target.value)}
-                      title={zAuto ? "Termin z harmonogramu — zapisz, by ustawić na stałe" : ""}
-                      style={{ padding: "4px 6px", border: `1px solid ${zAuto ? C.zolty : C.linia}`, borderRadius: 5, fontSize: 12, background: zAuto ? "#FFFDF5" : C.bialy, width: "100%" }} />
-                    {zAuto && <span style={{ fontSize: 9, color: "#B8860B", fontWeight: 700 }}>AUTO</span>}
-                  </span>
-                </td>
-                <td style={{ ...td, textAlign: "center", color: przypP.length ? C.czarny : C.szary }}>{przypP.length || "—"}</td>
-                <td style={{ ...td, textAlign: "center" }}>
-                  <button onClick={() => przelaczWstrzymanie(p)}
-                    title={p.wstrzymana
-                      ? "Inwestycja wstrzymana — punkty nie liczą się do obciążenia. Kliknij, aby wznowić."
-                      : "Inwestycja aktywna — punkty liczą się do obciążenia. Kliknij, aby wstrzymać."}
-                    style={{ border: "none", cursor: "pointer", fontFamily: "inherit", fontSize: 11, fontWeight: 700,
-                      padding: "3px 10px", borderRadius: 20,
-                      color: p.wstrzymana ? "#B9791A" : "#1B7A3D",
-                      background: p.wstrzymana ? "#FBF0DC" : "#E6F3EA" }}>
-                    {p.wstrzymana ? "Wstrzymana" : "Aktywna"}
-                  </button>
-                </td>
-                <td style={{ ...td, textAlign: "right" }}>
-                  <button onClick={() => zakonczInwestycje(p.id, p.nazwa)} title="Oznacz jako zakończoną"
-                    style={{ border: `1px solid ${C.linia}`, background: C.bialy, borderRadius: 5, padding: "4px 8px", fontSize: 11, fontWeight: 600, cursor: "pointer", color: C.szary }}>
-                    ✓ Zakończ
-                  </button>
-                </td>
-              </tr>
-              {otw && (
-                <tr>
-                  <td colSpan={6} style={{ padding: "0 10px 12px 30px", background: C.jasny }}>
-                    {przypP.length === 0 ? (
-                      <div style={{ fontSize: 12, color: C.szary, fontStyle: "italic", padding: "8px 0" }}>
-                        brak przypisanych kierowników — dodaj ich w zakładce „Zarządzanie"
-                      </div>
-                    ) : (
-                      <div style={{ display: "flex", flexDirection: "column", gap: 5, paddingTop: 8 }}>
-                        {przypP.map((x) => {
-                          const u = uzytMap[x.uzytkownik];
-                          const val = punktyLok[x.id] !== undefined ? punktyLok[x.id] : (x.punkty ?? "");
-                          return (
-                            <div key={x.id} style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                              <span style={{ flex: "1 1 auto", fontSize: 13 }}>{nazwaOsoby(u)}</span>
-                              <input type="number" min="0" step="0.5" value={val} placeholder={zk ? String(zk.punkty) : "—"}
-                                onChange={(e) => setPunktyLok((s) => ({ ...s, [x.id]: e.target.value }))}
-                                onBlur={(e) => zapiszPunkty(x.id, e.target.value)} style={numInp} />
-                              <span style={{ fontSize: 11.5, color: C.szary, width: 26 }}>pkt</span>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    )}
-                  </td>
-                </tr>
-              )}
-            </React.Fragment>
-          );
-        })}
-      </tbody>
-    </table>
+    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+      {projekty.map((p) => {
+        const przypP = przypisania.filter((x) => x.projekt_id === p.id);
+        const zk = zakresMap[p.zakres];
+        const otw = otwarty === p.id;
+        return (
+          <div key={p.id} style={{ border: `1px solid ${C.linia}`, borderRadius: 8, background: C.bialy, opacity: p.wstrzymana ? 0.6 : 1 }}>
+            <div onClick={() => setOtwarty(otw ? null : p.id)}
+              style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, padding: "10px 14px", cursor: "pointer" }}>
+              <div style={{ fontWeight: 700, fontSize: 13.5 }}>
+                <span style={{ color: C.szary, marginRight: 6, fontSize: 11 }}>{otw ? "▼" : "▶"}</span>{p.nazwa}
+                {p.wstrzymana && <span style={odznakaWstrzymana}>WSTRZYMANA</span>}
+              </div>
+              <span style={{ fontFamily: C.mono, fontSize: 11, color: C.szary2, textTransform: "uppercase", letterSpacing: "0.04em" }}>
+                {przypP.length ? `${przypP.length} PM` : "brak PM"}
+              </span>
+            </div>
+            {otw && (
+              <div style={{ borderTop: `1px dashed ${C.linia}`, padding: "10px 14px 12px 32px" }}>
+                {przypP.length === 0 ? (
+                  <div style={{ fontSize: 12, color: C.szary, fontStyle: "italic" }}>
+                    brak przypisanych kierowników — dodaj ich w zakładce „Zarządzanie"
+                  </div>
+                ) : (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                    {przypP.map((x) => {
+                      const u = uzytMap[x.uzytkownik];
+                      const val = punktyLok[x.id] !== undefined ? punktyLok[x.id] : (x.punkty ?? "");
+                      return (
+                        <div key={x.id} style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                          <span style={{ flex: "1 1 auto", fontSize: 13 }}>{nazwaOsoby(u)}</span>
+                          <input type="number" min="0" step="0.5" value={val} placeholder={zk ? String(zk.punkty) : "—"}
+                            onChange={(e) => setPunktyLok((s) => ({ ...s, [x.id]: e.target.value }))}
+                            onBlur={(e) => zapiszPunkty(x.id, e.target.value)} style={numInp} />
+                          <span style={{ fontSize: 11.5, color: C.szary, width: 26 }}>pkt</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
   );
 }
 
@@ -2672,36 +2626,9 @@ function ZakladkaKoordynacja({ uzytkownicy, projektyAll, przypisania, zakresy, t
     try { await ustawPunktyPrzypisania(przypisanieId, wartosc); }
     catch (e) { console.error(e); pokazToast("Błąd zapisu punktów"); }
   }
-  async function zapiszZakres(projektId, kod) {
-    try { await ustawKoordynacjeProjektu(projektId, { zakres: kod || null }); odswiez(); }
-    catch (e) { console.error(e); pokazToast("Błąd zapisu zakresu"); }
-  }
-  async function zapiszTermin(projektId, data) {
-    try { await ustawKoordynacjeProjektu(projektId, { termin_zakonczenia: data || null }); }
-    catch (e) { console.error(e); pokazToast("Błąd zapisu terminu"); }
-  }
   async function zapiszPM(uzytkownikId, pola) {
     try { await ustawDanePM(uzytkownikId, pola); }
     catch (e) { console.error(e); pokazToast("Błąd zapisu danych kierownika"); }
-  }
-  async function zakonczInwestycje(projektId, nazwa) {
-    if (!window.confirm(`Oznaczyć „${nazwa}" jako zakończoną?\n\nZniknie z listy przypisań i z koordynacji. Możesz ją przywrócić w sekcji „Zakończone".`)) return;
-    try { await ustawAktywnoscProjektu(projektId, false); odswiez(); pokazToast(`„${nazwa}" przeniesiona do zakończonych`); }
-    catch (e) { console.error(e); pokazToast("Błąd archiwizacji inwestycji"); }
-  }
-  // Wstrzymanie/wznowienie inwestycji: zostaje na liście, ale punkty nie liczą
-  // się do obciążenia. Po wznowieniu punkty naliczają się z powrotem.
-  async function przelaczWstrzymanie(p) {
-    const wstrzymac = !p.wstrzymana;
-    try {
-      await ustawKoordynacjeProjektu(p.id, { wstrzymana: wstrzymac });
-      odswiez();
-      pokazToast(wstrzymac ? `„${p.nazwa}" wstrzymana — punkty nie liczą się do obciążenia` : `„${p.nazwa}" aktywna — punkty znów się naliczają`);
-    } catch (e) { console.error(e); pokazToast("Błąd zmiany statusu inwestycji"); }
-  }
-  async function przywrocInwestycje(projektId, nazwa) {
-    try { await ustawAktywnoscProjektu(projektId, true); odswiez(); pokazToast(`„${nazwa}" przywrócona`); }
-    catch (e) { console.error(e); pokazToast("Błąd przywracania inwestycji"); }
   }
 
   const th = { textAlign: "left", padding: "8px 10px", color: C.szary, fontSize: 11, textTransform: "uppercase", letterSpacing: .5 };
@@ -2776,103 +2703,21 @@ function ZakladkaKoordynacja({ uzytkownicy, projektyAll, przypisania, zakresy, t
         )}
       </section>
 
-      {/* SEKCJA 1 — INWESTYCJE: zakres, termin, punkty per PM */}
+      {/* SEKCJA 1 — PUNKTY PM: przypisywanie punktów obciążenia PM do inwestycji */}
       <section style={card}>
         <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 8 }}>
-          <div style={secTitle}>Inwestycje — zakres i punkty PM</div>
+          <div style={secTitle}>Punkty PM per inwestycja</div>
           <input type="text" value={szukaj} onChange={(e) => setSzukaj(e.target.value)} placeholder="Szukaj inwestycji…"
             style={{ padding: "7px 11px", border: `1px solid ${C.linia}`, borderRadius: 6, fontSize: 13, width: 220 }} />
         </div>
         <p style={{ fontSize: 12.5, color: C.szary, marginTop: -2, marginBottom: 14, lineHeight: 1.5 }}>
-          Kliknij inwestycję, aby rozwinąć punkty kierowników. Termin „auto" pochodzi z harmonogramu.
+          Kliknij inwestycję, aby rozwinąć i przypisać punkty obciążenia kierownikom. Zakres, termin, wstrzymanie i zakończenie ustawiasz w zakładce „Koordynacja Inwestycji".
         </p>
         <KompaktowaListaInwestycji
-          projekty={projektyWidoczne} przypisania={przypisania} zakresy={zakresy} zakresMap={zakresMap}
-          uzytMap={uzytMap} terminyDomyslne={terminyDomyslne} punktyLok={punktyLok} setPunktyLok={setPunktyLok}
-          zapiszPunkty={zapiszPunkty} zapiszZakres={zapiszZakres} zapiszTermin={zapiszTermin} zakonczInwestycje={zakonczInwestycje}
-          przelaczWstrzymanie={przelaczWstrzymanie}
+          projekty={projektyWidoczne} przypisania={przypisania} zakresMap={zakresMap}
+          uzytMap={uzytMap} punktyLok={punktyLok} setPunktyLok={setPunktyLok} zapiszPunkty={zapiszPunkty}
         />
       </section>
-
-      {/* STARY UKŁAD KAFLI — ZASTĄPIONY KOMPAKTOWĄ LISTĄ */}
-      {false && (
-      <section style={card}>
-        <div style={secTitle}>Inwestycje — zakres i punkty PM</div>
-        <p style={{ fontSize: 12.5, color: C.szary, marginTop: -6, marginBottom: 16, lineHeight: 1.5 }}>
-          Ustaw zakres każdej inwestycji (podpowiada punkty) oraz wpisz punkty obciążenia dla każdego przypisanego kierownika.
-          Termin zakończenia decyduje, kiedy inwestycja „schodzi" z obciążenia w analizie.
-        </p>
-        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-          {projektyAll.map((p) => {
-            const przypP = przypisania.filter((x) => x.projekt_id === p.id);
-            const zk = zakresMap[p.zakres];
-            return (
-              <div key={p.id} style={{ border: `1px solid ${C.linia}`, borderRadius: 8, padding: "12px 14px", background: C.bialy }}>
-                <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 12, marginBottom: przypP.length ? 10 : 0 }}>
-                  <div style={{ fontWeight: 700, flex: "1 1 200px" }}>{p.nazwa}</div>
-                  <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                    <label style={{ fontSize: 11, color: C.szary, textTransform: "uppercase" }}>Zakres</label>
-                    <select value={p.zakres || ""} onChange={(e) => zapiszZakres(p.id, e.target.value)}
-                      style={{ padding: "6px 8px", border: `1px solid ${C.linia}`, borderRadius: 6, fontSize: 13 }}>
-                      <option value="">— brak —</option>
-                      {zakresy.map((z) => <option key={z.kod} value={z.kod}>{z.nazwa}</option>)}
-                    </select>
-                  </div>
-                  <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                    <label style={{ fontSize: 11, color: C.szary, textTransform: "uppercase" }}>Termin</label>
-                    {(() => {
-                      const auto = terminyDomyslne?.[p.id] || "";
-                      const reczny = p.termin_zakonczenia || "";
-                      // wartość pola: ręczny ma pierwszeństwo, inaczej auto z harmonogramu
-                      const wartosc = reczny || auto;
-                      const zAuto = !reczny && !!auto;
-                      return (
-                        <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                          <input type="date" defaultValue={wartosc}
-                            onBlur={(e) => zapiszTermin(p.id, e.target.value)}
-                            title={zAuto ? "Termin dociągnięty z harmonogramu — zapisz, by ustawić na stałe, lub zmień ręcznie" : ""}
-                            style={{ padding: "6px 8px", border: `1px solid ${zAuto ? C.zolty : C.linia}`, borderRadius: 6, fontSize: 13,
-                              background: zAuto ? "#FFFDF5" : C.bialy }} />
-                          {zAuto && <span style={{ fontSize: 10, color: "#B8860B", fontWeight: 700, textTransform: "uppercase" }}>auto</span>}
-                        </span>
-                      );
-                    })()}
-                  </div>
-                  <button onClick={() => zakonczInwestycje(p.id, p.nazwa)} title="Oznacz jako zakończoną (przenosi do archiwum)"
-                    style={{ border: `1px solid ${C.linia}`, background: C.bialy, borderRadius: 6, padding: "6px 12px", fontSize: 12, fontWeight: 600, cursor: "pointer", color: C.szary }}>
-                    ✓ Zakończona
-                  </button>
-                </div>
-                {przypP.length > 0 && (
-                  <div style={{ borderTop: `1px dashed ${C.linia}`, paddingTop: 10, display: "flex", flexDirection: "column", gap: 6 }}>
-                    {przypP.map((x) => {
-                      const u = uzytMap[x.uzytkownik];
-                      const val = punktyLok[x.id] !== undefined ? punktyLok[x.id] : (x.punkty ?? "");
-                      return (
-                        <div key={x.id} style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                          <span style={{ flex: "1 1 auto", fontSize: 13.5 }}>{nazwaOsoby(u)}</span>
-                          <input type="number" min="0" step="0.5" value={val}
-                            placeholder={zk ? String(zk.punkty) : "—"}
-                            onChange={(e) => setPunktyLok((s) => ({ ...s, [x.id]: e.target.value }))}
-                            onBlur={(e) => zapiszPunkty(x.id, e.target.value)}
-                            style={numInp} />
-                          <span style={{ fontSize: 12, color: C.szary, width: 30 }}>pkt</span>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-                {przypP.length === 0 && (
-                  <div style={{ fontSize: 12, color: C.szary, fontStyle: "italic", marginTop: 4 }}>
-                    brak przypisanych kierowników — dodaj ich w zakładce „Zarządzanie"
-                  </div>
-                )}
-              </div>
-            );
-          })}
-        </div>
-      </section>
-      )}
 
       {/* SEKCJA 2 — KIEROWNICY: pojemność, inne obowiązki */}
       <section style={card}>
@@ -2916,27 +2761,6 @@ function ZakladkaKoordynacja({ uzytkownicy, projektyAll, przypisania, zakresy, t
         </table>
       </section>
 
-      {/* SEKCJA 3 — ZAKOŃCZONE (archiwum inwestycji) */}
-      {nieaktywne && nieaktywne.length > 0 && (
-        <section style={card}>
-          <div style={secTitle}>Zakończone inwestycje</div>
-          <p style={{ fontSize: 12.5, color: C.szary, marginTop: -6, marginBottom: 16, lineHeight: 1.5 }}>
-            Inwestycje oznaczone jako zakończone. Nie liczą się do obciążenia i nie pojawiają się w przypisaniach.
-            Możesz je przywrócić.
-          </p>
-          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            {nieaktywne.map((p) => (
-              <div key={p.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "8px 12px", border: `1px solid ${C.linia}`, borderRadius: 6, background: C.jasny }}>
-                <span style={{ fontSize: 13.5, color: C.szary }}>{p.nazwa}</span>
-                <button onClick={() => przywrocInwestycje(p.id, p.nazwa)}
-                  style={{ border: `1px solid ${C.linia}`, background: C.bialy, borderRadius: 6, padding: "5px 12px", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>
-                  ↩ Przywróć
-                </button>
-              </div>
-            ))}
-          </div>
-        </section>
-      )}
     </>
   );
 }
@@ -2945,13 +2769,41 @@ function ZakladkaKoordynacja({ uzytkownicy, projektyAll, przypisania, zakresy, t
 /* Kokpit przekrojowy: wszystkie aktywne inwestycje w jednym miejscu — status
    z najnowszego raportu, opóźnienie, data ostatniego raportu, najbliższy termin
    i PnU, przypisani PM. Plus monitor kompletności: kto nie złożył raportu. */
-function ZakladkaKoordynacjaInwestycji({ projektyAll, przypisania, uzytkownicy, zakresy, terminyDomyslne, raporty }) {
+function ZakladkaKoordynacjaInwestycji({ projektyAll, przypisania, uzytkownicy, zakresy, terminyDomyslne, raporty, nieaktywne, pokazToast, odswiez }) {
   const uzytMap = React.useMemo(() => Object.fromEntries(uzytkownicy.map((u) => [u.id, u])), [uzytkownicy]);
   const zakresMap = React.useMemo(() => Object.fromEntries(zakresy.map((z) => [z.kod, z])), [zakresy]);
   const [filtrStatus, setFiltrStatus] = React.useState("wszystkie"); // wszystkie | zagrozone | bez-raportu
   const [prog, setProg] = React.useState(30);                        // próg dni „bez aktualnego raportu"
   const [szukaj, setSzukaj] = React.useState("");
+  const [otwarty, setOtwarty] = React.useState(null);                // id inwestycji z rozwiniętym panelem zarządzania
   const dzis = dzisISO();
+
+  // --- Zarządzanie inwestycją (zakres, termin, wstrzymanie, zakończenie, przywrócenie) ---
+  async function zapiszZakres(projektId, kod) {
+    try { await ustawKoordynacjeProjektu(projektId, { zakres: kod || null }); odswiez?.(); }
+    catch (e) { console.error(e); pokazToast?.("Błąd zapisu zakresu"); }
+  }
+  async function zapiszTermin(projektId, data) {
+    try { await ustawKoordynacjeProjektu(projektId, { termin_zakonczenia: data || null }); odswiez?.(); }
+    catch (e) { console.error(e); pokazToast?.("Błąd zapisu terminu"); }
+  }
+  async function zakonczInwestycje(projektId, nazwa) {
+    if (!window.confirm(`Oznaczyć „${nazwa}" jako zakończoną?\n\nZniknie z listy aktywnych inwestycji i z przypisań. Możesz ją przywrócić w sekcji „Zakończone".`)) return;
+    try { await ustawAktywnoscProjektu(projektId, false); odswiez?.(); pokazToast?.(`„${nazwa}" przeniesiona do zakończonych`); }
+    catch (e) { console.error(e); pokazToast?.("Błąd archiwizacji inwestycji"); }
+  }
+  async function przelaczWstrzymanie(p) {
+    const wstrzymac = !p.wstrzymana;
+    try {
+      await ustawKoordynacjeProjektu(p.id, { wstrzymana: wstrzymac });
+      odswiez?.();
+      pokazToast?.(wstrzymac ? `„${p.nazwa}" wstrzymana — punkty nie liczą się do obciążenia` : `„${p.nazwa}" aktywna — punkty znów się naliczają`);
+    } catch (e) { console.error(e); pokazToast?.("Błąd zmiany statusu inwestycji"); }
+  }
+  async function przywrocInwestycje(projektId, nazwa) {
+    try { await ustawAktywnoscProjektu(projektId, true); odswiez?.(); pokazToast?.(`„${nazwa}" przywrócona`); }
+    catch (e) { console.error(e); pokazToast?.("Błąd przywracania inwestycji"); }
+  }
 
   // Najnowszy raport per projekt (klucz: projekt_id)
   const raportyProjektu = React.useMemo(() => {
@@ -3118,10 +2970,19 @@ function ZakladkaKoordynacjaInwestycji({ projektyAll, przypisania, uzytkownicy, 
                 </tr>
               </thead>
               <tbody>
-                {widoczne.map((d) => (
-                  <tr key={d.projekt.id} style={{ opacity: d.wstrzymana ? 0.6 : 1 }}>
-                    <td style={{ ...td, fontWeight: 700 }}>
-                      {d.projekt.nazwa}
+                {widoczne.map((d) => {
+                  const p = d.projekt;
+                  const otw = otwarty === p.id;
+                  const auto = terminyDomyslne?.[p.id] || "";
+                  const reczny = p.termin_zakonczenia || "";
+                  const wartoscT = reczny || auto;
+                  const zAuto = !reczny && !!auto;
+                  return (
+                  <React.Fragment key={p.id}>
+                  <tr style={{ opacity: d.wstrzymana ? 0.6 : 1, background: otw ? C.jasny : "transparent" }}>
+                    <td style={{ ...td, fontWeight: 700, cursor: "pointer" }} onClick={() => setOtwarty(otw ? null : p.id)} title="Kliknij, aby zarządzać inwestycją">
+                      <span style={{ color: C.szary, marginRight: 6, fontSize: 11 }}>{otw ? "▼" : "▶"}</span>
+                      {p.nazwa}
                       {d.wstrzymana && <span style={odznakaWstrzymana}>WSTRZYMANA</span>}
                     </td>
                     <td style={{ ...td, color: d.pmy.length ? C.czarny : C.szary, fontSize: 12.5 }}>{d.pmy.length ? d.pmy.join(", ") : "—"}</td>
@@ -3140,12 +3001,70 @@ function ZakladkaKoordynacjaInwestycji({ projektyAll, przypisania, uzytkownicy, 
                       </div>
                     </td>
                   </tr>
-                ))}
+                  {otw && (
+                    <tr>
+                      <td colSpan={7} style={{ padding: "12px 14px 16px 30px", background: C.jasny, borderBottom: `1px solid ${C.linia}` }}>
+                        <div style={{ display: "flex", flexWrap: "wrap", gap: 18, alignItems: "flex-end" }}>
+                          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                            <label style={lbl}>Zakres</label>
+                            <select value={p.zakres || ""} onChange={(e) => zapiszZakres(p.id, e.target.value)}
+                              style={{ padding: "7px 9px", border: `1px solid ${C.linia}`, borderRadius: 6, fontSize: 13, minWidth: 180, background: C.bialy }}>
+                              <option value="">— brak —</option>
+                              {zakresy.map((z) => <option key={z.kod} value={z.kod}>{z.nazwa}</option>)}
+                            </select>
+                          </div>
+                          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                            <label style={lbl}>Termin zakończenia</label>
+                            <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                              <input type="date" defaultValue={wartoscT} onBlur={(e) => zapiszTermin(p.id, e.target.value)}
+                                title={zAuto ? "Termin dociągnięty z harmonogramu — zapisz, by ustawić na stałe, lub zmień ręcznie" : ""}
+                                style={{ padding: "6px 8px", border: `1px solid ${zAuto ? C.zolty : C.linia}`, borderRadius: 6, fontSize: 13, background: zAuto ? "#FFFDF5" : C.bialy }} />
+                              {zAuto && <span style={{ fontSize: 9.5, color: "#B8860B", fontWeight: 700 }}>AUTO</span>}
+                            </span>
+                          </div>
+                          <button onClick={() => przelaczWstrzymanie(p)}
+                            title={p.wstrzymana ? "Wznów — punkty znów liczą się do obciążenia" : "Wstrzymaj — punkty przestają liczyć się do obciążenia"}
+                            style={{ border: "none", cursor: "pointer", fontFamily: "inherit", fontSize: 12, fontWeight: 700, padding: "8px 14px", borderRadius: 6,
+                              color: p.wstrzymana ? "#1B7A3D" : "#B9791A", background: p.wstrzymana ? "#E6F3EA" : "#FBF0DC" }}>
+                            {p.wstrzymana ? "▶ Wznów inwestycję" : "⏸ Wstrzymaj inwestycję"}
+                          </button>
+                          <button onClick={() => zakonczInwestycje(p.id, p.nazwa)} title="Oznacz jako zakończoną (przenosi do sekcji Zakończone)"
+                            style={{ border: `1px solid ${C.linia}`, background: C.bialy, borderRadius: 6, padding: "8px 14px", fontSize: 12, fontWeight: 600, cursor: "pointer", color: C.szary }}>
+                            ✓ Zakończ inwestycję
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                  </React.Fragment>
+                  );
+                })}
               </tbody>
             </table>
           </div>
         )}
       </section>
+
+      {/* ZAKOŃCZONE INWESTYCJE — przywracanie */}
+      {nieaktywne && nieaktywne.length > 0 && (
+        <section style={card}>
+          <div style={secTitle}><span style={{ color: C.zolty, fontWeight: 700 }}>/ </span>Zakończone inwestycje</div>
+          <p style={{ fontSize: 12.5, color: C.szary, marginTop: -2, marginBottom: 14, lineHeight: 1.5 }}>
+            Inwestycje oznaczone jako zakończone. Nie liczą się do obciążenia i nie pojawiają się w przypisaniach. Możesz je przywrócić.
+          </p>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {nieaktywne.map((p) => (
+              <div key={p.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "8px 12px", border: `1px solid ${C.linia}`, borderRadius: 6, background: C.jasny }}>
+                <span style={{ fontSize: 13.5, color: C.szary }}>{p.nazwa}</span>
+                <button onClick={() => przywrocInwestycje(p.id, p.nazwa)}
+                  style={{ border: `1px solid ${C.linia}`, background: C.bialy, borderRadius: 6, padding: "5px 12px", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>
+                  ↩ Przywróć
+                </button>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
     </>
   );
 }
@@ -4787,4 +4706,5 @@ const printCSS = `
     .grafika-okladka { max-height: 108mm !important; width: auto !important; max-width: 100% !important; }
   }
 `;
+
 
