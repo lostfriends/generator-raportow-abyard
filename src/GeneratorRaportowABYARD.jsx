@@ -6,6 +6,9 @@ import {
   pobierzOstatniRaport,
   wgrajZdjecia,
   wgrajPojedynczyObraz,
+  listaObrazowStorage,
+  pobierzObiektStorage,
+  nadpiszObiektStorage,
   zapiszRaport,
   aktualizujRaport,
   mapWierszNaForm,
@@ -2332,6 +2335,7 @@ function PanelAdmina({ pokazToast, email, onForm, onArchiwum, onKoordynacja, onW
   const [nowaBudowa, setNowaBudowa] = useState("");
   const [wybranyPM, setWybranyPM] = useState("");
   const [zakladka, setZakladka] = useState("zarzadzanie"); // zarzadzanie | koordynacja
+  const [kompresja, setKompresja] = useState(null); // stan jednorazowej kompresji zdjęć w Storage
 
   async function wczytaj() {
     setLadowanie(true);
@@ -2373,6 +2377,51 @@ function PanelAdmina({ pokazToast, email, onForm, onArchiwum, onKoordynacja, onW
     } catch (e) {
       console.error(e);
       pokazToast(String(e?.message || "").includes("duplicate") ? "Taka budowa już istnieje" : "Błąd dodawania budowy");
+    }
+  }
+
+  // Jednorazowa kompresja istniejących zdjęć w Storage. Robimy to w przeglądarce
+  // (admin jest zalogowany → ma prawo zapisu; sieć do Supabase dostępna) — pobieramy
+  // każdy obiekt, przepakowujemy przez kompresujObraz i NADPISUJEMY tę samą ścieżkę
+  // (URL-e w bazie bez zmian). Idempotentne: pomija pliki już małe / bez realnego zysku.
+  function paramyKompresji(sciezka) {
+    if (sciezka.includes("/grafika")) return { max: 2600, jakosc: 0.88 };
+    if (sciezka.includes("/harmonogram")) return { max: 2000, jakosc: 0.85 };
+    return { max: 1600, jakosc: 0.8 }; // zdjęcia dokumentacji
+  }
+  async function uruchomKompresje() {
+    if (kompresja?.trwa) return;
+    if (!window.confirm("Skompresować istniejące zdjęcia w bazie?\n\nOperacja nadpisuje pliki w Storage (linki i raporty pozostają bez zmian) i może chwilę potrwać. Można ją bezpiecznie powtórzyć.")) return;
+    setKompresja({ trwa: true, i: 0, n: 0, przed: 0, po: 0, zmienione: 0, pominiete: 0, blad: 0 });
+    try {
+      const sciezki = await listaObrazowStorage();
+      let przed = 0, po = 0, zmienione = 0, pominiete = 0, blad = 0;
+      for (let idx = 0; idx < sciezki.length; idx++) {
+        const s = sciezki[idx];
+        setKompresja((k) => ({ ...k, i: idx + 1, n: sciezki.length }));
+        try {
+          const blob = await pobierzObiektStorage(s);
+          const oryg = blob.size || 0;
+          przed += oryg;
+          if (oryg < 400 * 1024) { po += oryg; pominiete++; continue; } // już małe
+          const { max, jakosc } = paramyKompresji(s);
+          const file = new File([blob], (s.split("/").pop() || "obraz"), { type: blob.type || "image/jpeg" });
+          const { plik } = await kompresujObraz(file, max, jakosc);
+          if (!plik || plik.size >= oryg * 0.85) { po += oryg; pominiete++; continue; } // brak realnego zysku
+          await nadpiszObiektStorage(s, plik);
+          po += plik.size; zmienione++;
+        } catch (e) {
+          console.error("Kompresja pliku", s, e);
+          blad++;
+        }
+        setKompresja((k) => ({ ...k, przed, po, zmienione, pominiete, blad }));
+      }
+      setKompresja({ trwa: false, gotowe: true, i: sciezki.length, n: sciezki.length, przed, po, zmienione, pominiete, blad });
+      pokazToast(`Kompresja zakończona — zaoszczędzono ${((przed - po) / 1024 / 1024).toFixed(1)} MB`);
+    } catch (e) {
+      console.error(e);
+      setKompresja((k) => ({ ...(k || {}), trwa: false, fatal: String(e?.message || e) }));
+      pokazToast("Błąd kompresji: " + (e?.message || e));
     }
   }
 
@@ -2537,6 +2586,34 @@ function PanelAdmina({ pokazToast, email, onForm, onArchiwum, onKoordynacja, onW
                   );
                 })}
               </div>
+            </section>
+
+            {/* Konserwacja — jednorazowa kompresja zdjęć już zapisanych w bazie */}
+            <section style={card}>
+              <div style={secTitle}><span style={{ color: C.zolty, fontWeight: 700 }}>/ </span>Konserwacja — kompresja zdjęć</div>
+              <p style={{ color: C.szary, fontSize: 13, marginTop: -6, marginBottom: 14 }}>
+                Przepakowuje zdjęcia już zapisane w bazie do rozdzielczości druku (nadpisuje pliki w Storage — linki i raporty pozostają bez zmian). Zmniejsza wagę bazy i rozmiar PDF-ów. Można bezpiecznie powtórzyć — pomija pliki już zoptymalizowane. Nie zamykaj karty w trakcie.
+              </p>
+              <button style={btnPrimary} onClick={uruchomKompresje} disabled={kompresja?.trwa}>
+                {kompresja?.trwa ? `Kompresuję… ${kompresja.i}/${kompresja.n}` : "Kompresuj zdjęcia w bazie"}
+              </button>
+              {kompresja && (
+                <div style={{ marginTop: 14 }}>
+                  {kompresja.trwa && kompresja.n > 0 && (
+                    <div style={{ height: 6, background: C.linia, borderRadius: 999, overflow: "hidden", marginBottom: 10 }}>
+                      <div style={{ height: "100%", width: `${Math.round((kompresja.i / kompresja.n) * 100)}%`, background: C.zolty, transition: "width .2s" }} />
+                    </div>
+                  )}
+                  {(kompresja.trwa || kompresja.gotowe) && (
+                    <div style={{ fontFamily: C.mono, fontSize: 12, color: C.szary }}>
+                      Przetworzono {kompresja.i}/{kompresja.n} · skompresowane {kompresja.zmienione || 0} · pominięte {kompresja.pominiete || 0}{kompresja.blad ? ` · błędy ${kompresja.blad}` : ""}
+                      {kompresja.przed > 0 && <> · {(kompresja.przed / 1024 / 1024).toFixed(1)} MB → {(kompresja.po / 1024 / 1024).toFixed(1)} MB (−{Math.max(0, Math.round((1 - kompresja.po / kompresja.przed) * 100))}%)</>}
+                    </div>
+                  )}
+                  {kompresja.gotowe && <div style={{ color: "#2E7D32", marginTop: 8, fontWeight: 700, fontSize: 13 }}>✓ Gotowe</div>}
+                  {kompresja.fatal && <div style={{ color: "#B3261E", marginTop: 8, fontSize: 13 }}>Błąd: {kompresja.fatal}</div>}
+                </div>
+              )}
             </section>
           </>
         )}
@@ -4864,6 +4941,7 @@ const printCSS = `
     .cover-foto { max-height: 150mm !important; width: 100% !important; object-fit: cover !important; }
   }
 `;
+
 
 
 
