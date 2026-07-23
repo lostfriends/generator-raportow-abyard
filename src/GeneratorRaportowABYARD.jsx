@@ -914,10 +914,10 @@ function usunPogrubienie(html) {
 function kompresujObraz(file, maxWymiar = 1440, jakosc = 0.7) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
-    reader.onerror = () => reject(new Error("read"));
+    reader.onerror = () => reject(new Error("nie udało się odczytać pliku"));
     reader.onload = () => {
       const img = new Image();
-      img.onerror = () => reject(new Error("img"));
+      img.onerror = () => reject(new Error("nie udało się wczytać obrazu (uszkodzony lub nieobsługiwany plik)"));
       img.onload = () => {
         let { width, height } = img;
         if (width > maxWymiar || height > maxWymiar) {
@@ -2416,7 +2416,8 @@ function PanelAdmina({ pokazToast, email, onForm, onArchiwum, onKoordynacja, onW
           console.error("Kompresja pliku", s, e);
           blad++;
           const msg = String(e?.message || e?.error || e?.statusCode || e || "nieznany");
-          if (bledy.length < 5 && !bledy.includes(msg)) bledy.push(msg);
+          const wpis = `${msg} — ${s.split("/").slice(-2).join("/")}`;
+          if (bledy.length < 5 && !bledy.includes(wpis)) bledy.push(wpis);
         }
         setKompresja((k) => ({ ...k, przed, po, zmienione, pominiete, blad, bledy: [...bledy] }));
       }
@@ -2691,7 +2692,7 @@ function KompaktowaListaInwestycji({ projekty, przypisania, zakresMap, uzytMap, 
                     <div style={{ minWidth: 0 }}>
                       <div style={{ fontSize: 13.5, fontWeight: 600, color: C.czarny }}>{p.nazwa}{p.wstrzymana && <span style={odznakaWstrzymana}>WSTRZ.</span>}</div>
                       <div style={{ fontFamily: C.mono, fontSize: 9.5, letterSpacing: "0.03em", color: C.szary2, marginTop: 2, textTransform: "uppercase" }}>
-                        {zk ? zk.nazwa : "brak zakresu"}{dom != null ? ` · dom. ${dom} pkt` : ""}
+                        {zk ? zk.nazwa : "brak zakresu"}{dom != null ? ` · domyślnie ${dom} pkt` : ""}
                       </div>
                     </div>
                     <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
