@@ -802,6 +802,32 @@ function PasekPostepu({ proc, etykieta, szer = 120 }) {
   );
 }
 
+// Overline sekcji w panelach (mono „/ TYTUŁ", amber) — spójny z designem abyard.com.
+function TytulSekcji({ children }) {
+  return (
+    <div style={secTitle}><span style={{ color: C.zolty, fontWeight: 700 }}>/ </span>{children}</div>
+  );
+}
+
+// Przełącznik-pigułka (segmentowy) w stylu abyard.com: mono, uppercase, aktywny =
+// ciemne tło + jasnozłoty tekst. opcje: [[wartosc, etykieta], ...].
+function PigulkaPrzelacznik({ opcje, wartosc, onZmiana }) {
+  return (
+    <div style={{ display: "inline-flex", border: `1px solid ${C.linia}`, borderRadius: 999, overflow: "hidden", fontFamily: C.mono, fontSize: 10.5, letterSpacing: "0.06em", textTransform: "uppercase" }}>
+      {opcje.map(([val, et]) => {
+        const akt = wartosc === val;
+        return (
+          <button key={String(val)} onClick={() => onZmiana(val)}
+            style={{ border: "none", background: akt ? C.czarny : C.bialy, color: akt ? C.zoltyBright : C.szary,
+              fontWeight: akt ? 700 : 400, padding: "7px 13px", cursor: "pointer", fontFamily: "inherit", letterSpacing: "inherit", textTransform: "inherit" }}>
+            {et}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 // Wspólny pasek nawigacji — jeden dla wszystkich widoków (formularz, archiwum, panel).
 // aktywny: "form" | "archiwum" | "admin". Zakładka panelu tylko dla admina.
 function PasekNawigacji({ aktywny, jestAdmin, email, onForm, onArchiwum, onKoordynacja, onAdmin, onWyloguj }) {
@@ -2631,7 +2657,6 @@ function ZakladkaKoordynacja({ uzytkownicy, projektyAll, przypisania, zakresy, t
     catch (e) { console.error(e); pokazToast("Błąd zapisu danych kierownika"); }
   }
 
-  const th = { textAlign: "left", padding: "8px 10px", color: C.szary, fontSize: 11, textTransform: "uppercase", letterSpacing: .5 };
   const td = { padding: "8px 10px", borderBottom: `1px solid ${C.jasny}`, fontSize: 13.5 };
   const numInp = { width: 70, padding: "6px 8px", border: `1px solid ${C.linia}`, borderRadius: 6, fontSize: 13, textAlign: "center" };
 
@@ -2640,21 +2665,13 @@ function ZakladkaKoordynacja({ uzytkownicy, projektyAll, przypisania, zakresy, t
       {/* SEKCJA ANALIZY — OBCIĄŻENIE ZESPOŁU (na górze) */}
       <section style={card}>
         <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 16 }}>
-          <div style={secTitle}>Obciążenie zespołu</div>
-          <div style={{ display: "flex", border: `1px solid ${C.linia}`, borderRadius: 8, overflow: "hidden" }}>
-            {[[0, "Dziś"], [30, "Za miesiąc"], [60, "Za 2 msc"], [90, "Za 3 msc"]].map(([d, et]) => (
-              <button key={d} onClick={() => setHoryzont(d)}
-                style={{ border: "none", background: horyzont === d ? C.czarny : C.bialy, color: horyzont === d ? C.bialy : C.czarny,
-                  padding: "8px 14px", fontSize: 13, fontWeight: 600, cursor: "pointer", borderRight: `1px solid ${C.linia}` }}>
-                {et}
-              </button>
-            ))}
-          </div>
+          <TytulSekcji>Obciążenie zespołu</TytulSekcji>
+          <PigulkaPrzelacznik opcje={[[0, "Dziś"], [30, "Za miesiąc"], [60, "Za 2 msc"], [90, "Za 3 msc"]]} wartosc={horyzont} onZmiana={setHoryzont} />
         </div>
-        <div style={{ display: "flex", gap: 16, flexWrap: "wrap", fontSize: 12, color: C.szary, marginBottom: 14 }}>
-          <span>● <span style={{ color: "#1B7A3D" }}>do 80%</span> zapas</span>
-          <span>● <span style={{ color: "#B9791A" }}>80–100%</span> pełne</span>
-          <span>● <span style={{ color: C.czerwony }}>ponad 100%</span> przeciążenie</span>
+        <div style={{ display: "flex", gap: 16, flexWrap: "wrap", fontFamily: C.mono, fontSize: 10, color: C.szary2, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 14 }}>
+          <span style={{ color: "#1B7A3D" }}>● <span style={{ color: C.szary2 }}>do 80% — zapas</span></span>
+          <span style={{ color: "#B9791A" }}>● <span style={{ color: C.szary2 }}>80–100% — pełne</span></span>
+          <span style={{ color: C.czerwony }}>● <span style={{ color: C.szary2 }}>ponad 100% — przeciążenie</span></span>
         </div>
         {analiza.length === 0 ? (
           <div style={{ color: C.szary, fontSize: 13, fontStyle: "italic" }}>Brak kierowników z przypisanymi inwestycjami.</div>
@@ -2671,7 +2688,8 @@ function ZakladkaKoordynacja({ uzytkownicy, projektyAll, przypisania, zakresy, t
                     <div>
                       <div style={{ fontWeight: 700, fontSize: 14 }}>{nazwaOsoby(a.u)}</div>
                       <div style={{ fontSize: 11.5, color: C.szary, marginTop: 1 }}>{a.tematy.filter((t) => !t.schodzi && !t.wstrzymana).length} akt. · {a.razem} pkt{a.inne > 0 ? ` (w tym ${a.inne} inne)` : ""}</div>
-                      <span style={{ display: "inline-block", fontSize: 10.5, fontWeight: 700, padding: "1px 7px", borderRadius: 20, marginTop: 3, color: stCol, background: stBg }}>{st}</span>
+                      <span style={{ display: "inline-flex", alignItems: "center", gap: 5, fontFamily: C.mono, fontSize: 9, fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase", padding: "3px 8px", borderRadius: 999, marginTop: 4, color: stCol, background: stBg }}>
+                        <span style={{ width: 5, height: 5, borderRadius: "50%", background: "currentColor" }} />{st}</span>
                     </div>
                     <div style={{ position: "relative", height: 24, background: C.jasny, borderRadius: 6, overflow: "hidden", border: `1px solid ${C.linia}` }}>
                       <div style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: `${Math.max(szer, 2)}%`, background: kolorProc(a.proc) }} />
@@ -2706,7 +2724,7 @@ function ZakladkaKoordynacja({ uzytkownicy, projektyAll, przypisania, zakresy, t
       {/* SEKCJA 1 — PUNKTY PM: przypisywanie punktów obciążenia PM do inwestycji */}
       <section style={card}>
         <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 8 }}>
-          <div style={secTitle}>Punkty PM per inwestycja</div>
+          <TytulSekcji>Punkty PM per inwestycja</TytulSekcji>
           <input type="text" value={szukaj} onChange={(e) => setSzukaj(e.target.value)} placeholder="Szukaj inwestycji…"
             style={{ padding: "7px 11px", border: `1px solid ${C.linia}`, borderRadius: 6, fontSize: 13, width: 220 }} />
         </div>
@@ -2721,17 +2739,17 @@ function ZakladkaKoordynacja({ uzytkownicy, projektyAll, przypisania, zakresy, t
 
       {/* SEKCJA 2 — KIEROWNICY: pojemność, inne obowiązki */}
       <section style={card}>
-        <div style={secTitle}>Kierownicy — pojemność i inne obowiązki</div>
-        <p style={{ fontSize: 12.5, color: C.szary, marginTop: -6, marginBottom: 16, lineHeight: 1.5 }}>
+        <TytulSekcji>Kierownicy — pojemność i inne obowiązki</TytulSekcji>
+        <p style={{ fontSize: 12.5, color: C.szary, marginTop: 6, marginBottom: 16, lineHeight: 1.5 }}>
           Pojemność to punkty odpowiadające pełnemu obłożeniu (100%). „Inne obowiązki" to punkty za zadania spoza inwestycji
           (gwarancje, usterki itp.). Widoczni są tylko kierownicy z przypisanymi inwestycjami.
         </p>
         <table style={{ width: "100%", borderCollapse: "collapse" }}>
           <thead>
-            <tr style={{ borderBottom: `2px solid ${C.linia}` }}>
-              <th style={th}>Kierownik</th>
-              <th style={{ ...th, textAlign: "center" }}>Pojemność</th>
-              <th style={{ ...th, textAlign: "center" }}>Inne obowiązki</th>
+            <tr>
+              <th style={thAdm}>Kierownik</th>
+              <th style={{ ...thAdm, textAlign: "center" }}>Pojemność</th>
+              <th style={{ ...thAdm, textAlign: "center" }}>Inne obowiązki</th>
             </tr>
           </thead>
           <tbody>
@@ -2862,10 +2880,13 @@ function ZakladkaKoordynacjaInwestycji({ projektyAll, przypisania, uzytkownicy, 
     return [...lista].sort((a, b) => (rank(b) - rank(a)) || (b.opozDni - a.opozDni) || ((b.dniOd || 0) - (a.dniOd || 0)) || a.projekt.nazwa.localeCompare(b.projekt.nazwa, "pl"));
   }, [dane, filtrStatus, szukaj]);
 
-  const th = { textAlign: "left", padding: "8px 10px", color: C.szary, fontSize: 11, textTransform: "uppercase", letterSpacing: .5, borderBottom: `2px solid ${C.linia}` };
+  const th = { textAlign: "left", padding: "9px 10px", color: C.szary, fontFamily: C.mono, fontSize: 9.5, fontWeight: 400, textTransform: "uppercase", letterSpacing: "0.1em", borderBottom: `2px solid ${C.czarny}` };
   const td = { padding: "8px 10px", borderBottom: `1px solid ${C.jasny}`, fontSize: 13, verticalAlign: "top" };
+  // Chip statusu w stylu abyard.com: mono, uppercase, z kropką w kolorze tekstu.
   const chip = (txt, kolor, tlo) => (
-    <span style={{ display: "inline-block", fontSize: 10.5, fontWeight: 700, padding: "2px 8px", borderRadius: 20, color: kolor, background: tlo, whiteSpace: "nowrap" }}>{txt}</span>
+    <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontFamily: C.mono, fontSize: 9.5, fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase", padding: "4px 9px", borderRadius: 999, color: kolor, background: tlo, whiteSpace: "nowrap" }}>
+      <span style={{ width: 6, height: 6, borderRadius: "50%", background: "currentColor", flexShrink: 0 }} />{txt}
+    </span>
   );
   // Etykieta „ostatni raport": ile dni temu + numer, z kolorem wg zalegania
   function ostatniRaportKom(d) {
@@ -2890,8 +2911,8 @@ function ZakladkaKoordynacjaInwestycji({ projektyAll, przypisania, uzytkownicy, 
           ["Wstrzymane", liczby.wstrzymane, C.szary, C.jasny],
         ].map(([et, n, kol, tlo]) => (
           <div key={et} style={{ flex: "1 1 160px", border: `1px solid ${C.linia}`, borderRadius: 8, padding: "12px 16px", background: tlo }}>
-            <div style={{ fontSize: 28, fontWeight: 800, color: kol, lineHeight: 1 }}>{n}</div>
-            <div style={{ fontSize: 11.5, color: C.szary, marginTop: 4, textTransform: "uppercase", letterSpacing: .4 }}>{et}</div>
+            <div style={{ fontFamily: "'Roboto', system-ui, sans-serif", fontSize: 28, fontWeight: 900, color: kol, lineHeight: 1 }}>{n}</div>
+            <div style={{ fontFamily: C.mono, fontSize: 10, color: C.szary, marginTop: 5, textTransform: "uppercase", letterSpacing: "0.1em" }}>{et}</div>
           </div>
         ))}
       </section>
@@ -2899,17 +2920,10 @@ function ZakladkaKoordynacjaInwestycji({ projektyAll, przypisania, uzytkownicy, 
       {/* MONITOR KOMPLETNOŚCI — KTO NIE ZŁOŻYŁ RAPORTU */}
       <section style={card}>
         <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 8 }}>
-          <div style={secTitle}>Do uzupełnienia — brak aktualnego raportu</div>
+          <TytulSekcji>Do uzupełnienia — brak aktualnego raportu</TytulSekcji>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <span style={{ fontSize: 12, color: C.szary }}>Próg</span>
-            <div style={{ display: "flex", border: `1px solid ${C.linia}`, borderRadius: 8, overflow: "hidden" }}>
-              {[30, 45, 60].map((d) => (
-                <button key={d} onClick={() => setProg(d)}
-                  style={{ border: "none", background: prog === d ? C.czarny : C.bialy, color: prog === d ? C.bialy : C.czarny, padding: "6px 12px", fontSize: 12.5, fontWeight: 600, cursor: "pointer", borderRight: `1px solid ${C.linia}` }}>
-                  {d} dni
-                </button>
-              ))}
-            </div>
+            <span style={{ fontFamily: C.mono, fontSize: 10, color: C.szary2, textTransform: "uppercase", letterSpacing: "0.08em" }}>Próg</span>
+            <PigulkaPrzelacznik opcje={[[30, "30 dni"], [45, "45 dni"], [60, "60 dni"]]} wartosc={prog} onZmiana={setProg} />
           </div>
         </div>
         <p style={{ fontSize: 12.5, color: C.szary, marginTop: -2, marginBottom: 14, lineHeight: 1.5 }}>
@@ -2939,16 +2953,9 @@ function ZakladkaKoordynacjaInwestycji({ projektyAll, przypisania, uzytkownicy, 
       {/* KOKPIT — WSZYSTKIE INWESTYCJE */}
       <section style={card}>
         <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 12 }}>
-          <div style={secTitle}>Kokpit inwestycji</div>
+          <TytulSekcji>Kokpit inwestycji</TytulSekcji>
           <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8 }}>
-            <div style={{ display: "flex", border: `1px solid ${C.linia}`, borderRadius: 8, overflow: "hidden" }}>
-              {[["wszystkie", "Wszystkie"], ["zagrozone", "Zagrożone"], ["bez-raportu", "Bez raportu"]].map(([kod, et]) => (
-                <button key={kod} onClick={() => setFiltrStatus(kod)}
-                  style={{ border: "none", background: filtrStatus === kod ? C.czarny : C.bialy, color: filtrStatus === kod ? C.bialy : C.czarny, padding: "6px 12px", fontSize: 12.5, fontWeight: 600, cursor: "pointer", borderRight: `1px solid ${C.linia}` }}>
-                  {et}
-                </button>
-              ))}
-            </div>
+            <PigulkaPrzelacznik opcje={[["wszystkie", "Wszystkie"], ["zagrozone", "Zagrożone"], ["bez-raportu", "Bez raportu"]]} wartosc={filtrStatus} onZmiana={setFiltrStatus} />
             <input type="text" value={szukaj} onChange={(e) => setSzukaj(e.target.value)} placeholder="Szukaj inwestycji…"
               style={{ padding: "7px 11px", border: `1px solid ${C.linia}`, borderRadius: 6, fontSize: 13, width: 200 }} />
           </div>
@@ -3048,8 +3055,8 @@ function ZakladkaKoordynacjaInwestycji({ projektyAll, przypisania, uzytkownicy, 
       {/* ZAKOŃCZONE INWESTYCJE — przywracanie */}
       {nieaktywne && nieaktywne.length > 0 && (
         <section style={card}>
-          <div style={secTitle}><span style={{ color: C.zolty, fontWeight: 700 }}>/ </span>Zakończone inwestycje</div>
-          <p style={{ fontSize: 12.5, color: C.szary, marginTop: -2, marginBottom: 14, lineHeight: 1.5 }}>
+          <TytulSekcji>Zakończone inwestycje</TytulSekcji>
+          <p style={{ fontSize: 12.5, color: C.szary, marginTop: 6, marginBottom: 14, lineHeight: 1.5 }}>
             Inwestycje oznaczone jako zakończone. Nie liczą się do obciążenia i nie pojawiają się w przypisaniach. Możesz je przywrócić.
           </p>
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
@@ -4706,5 +4713,6 @@ const printCSS = `
     .grafika-okladka { max-height: 108mm !important; width: auto !important; max-width: 100% !important; }
   }
 `;
+
 
 
