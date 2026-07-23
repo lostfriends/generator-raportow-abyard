@@ -331,22 +331,17 @@ function harmonogramMaKwoty(harmonogram) {
 }
 
 // Pozycje harmonogramu BEZ uzupełnionej wartości umowy (cashflow) — do egzekwowania
-// obowiązkowego cashflow w 1. raporcie nowej inwestycji. Liczymy „liście":
-//   • pozycja z podpozycjami → każda podpozycja z treścią musi mieć kwotę > 0,
-//   • pozycja bez podpozycji → sama musi mieć kwotę > 0.
-// Puste wiersze (bez nazwy zadania) pomijamy. Zwraca [{etykieta}] braków.
+// obowiązkowego cashflow w 1. raporcie nowej inwestycji. Liczymy per pozycja główna,
+// tą samą logiką co sam cashflow (kwotaZadania): pozycja jest kompletna, gdy ma
+// wartość NA SOBIE albo w podpozycjach (główna sumuje podpozycje). Dzięki temu nie
+// blokujemy PM-a, który wpisał kwotę łączną na pozycji nadrzędnej, a podpozycje
+// służą tylko do dat. Puste wiersze (bez nazwy i bez podpozycji) pomijamy.
 function brakiCashflowu(harmonogram) {
   const braki = [];
   (harmonogram || []).forEach((w, i) => {
-    const maNazwe = (w.zadanie || "").trim();
-    if (maPodpozycje(w)) {
-      (w.pod || []).forEach((p, j) => {
-        const tresc = p && (p.zadanie || p.start || p.koniec || p.rzecz || p.proc);
-        if (tresc && !((parseFloat(p.kwota) || 0) > 0)) braki.push(`${i + 1}.${j + 1} ${p.zadanie || "(podpozycja)"}`);
-      });
-    } else if (maNazwe) {
-      if (!((parseFloat(w.kwota) || 0) > 0)) braki.push(`${i + 1}. ${w.zadanie}`);
-    }
+    const istotna = (w.zadanie || "").trim() || maPodpozycje(w);
+    if (!istotna) return;
+    if (!(kwotaZadania(w) > 0)) braki.push(`${i + 1}. ${w.zadanie || "(pozycja)"}`);
   });
   return braki;
 }
