@@ -2531,59 +2531,90 @@ function PanelAdmina({ pokazToast, email, onForm, onArchiwum, onKoordynacja, onW
   );
 }
 
-/* ---------- KOMPAKTOWA LISTA INWESTYCJI (koordynacja) -------------------- */
-// Koordynacja PM — UPROSZCZONA lista: tylko przypisywanie punktów obciążenia PM
-// do inwestycji. Zarządzanie samą inwestycją (zakres, termin, wstrzymanie,
-// zakończenie) przeniesione do zakładki „Koordynacja Inwestycji".
+/* ---------- MACIERZ PUNKTÓW PM (koordynacja PM) ------------------------- */
+// Przejrzysta macierz: wiersze = inwestycje, kolumny = kierownicy, komórka =
+// punkty obciążenia tam, gdzie istnieje przypisanie (edytowalne, zapis on-blur).
+// Wszystko widać naraz — bez rozwijania i szukania po jednej inwestycji.
+// Przypisania PM↔inwestycja ustawia się w zakładce „Zarządzanie".
 function KompaktowaListaInwestycji({ projekty, przypisania, zakresMap, uzytMap, punktyLok, setPunktyLok, zapiszPunkty }) {
-  const [otwarty, setOtwarty] = React.useState(null);
-  const numInp = { width: 60, padding: "5px 7px", border: `1px solid ${C.linia}`, borderRadius: 5, fontSize: 13, textAlign: "center" };
+  // Kolumny = kierownicy z co najmniej jednym przypisaniem (stabilne, alfabetycznie).
+  const pmCols = React.useMemo(() => {
+    const ids = [...new Set(przypisania.map((x) => x.uzytkownik))];
+    return ids.map((id) => uzytMap[id]).filter(Boolean).sort((a, b) => nazwaOsoby(a).localeCompare(nazwaOsoby(b), "pl"));
+  }, [przypisania, uzytMap]);
+  // Szybki dostęp do przypisania: klucz "projekt_id|uzytkownik".
+  const mapPrzyp = React.useMemo(() => {
+    const m = {};
+    for (const x of przypisania) m[x.projekt_id + "|" + x.uzytkownik] = x;
+    return m;
+  }, [przypisania]);
+
+  // Efektywne punkty komórki: wpisane, a gdy puste — domyślne z zakresu inwestycji
+  // (spójnie z analizą obciążenia). Do sum wierszy/kolumn.
+  const efekt = (x, p) => {
+    const raw = punktyLok[x.id] !== undefined ? punktyLok[x.id] : x.punkty;
+    if (raw === "" || raw == null) { const zk = zakresMap[p.zakres]; return zk ? (Number(zk.punkty) || 0) : 0; }
+    const n = parseFloat(raw); return isNaN(n) ? 0 : n;
+  };
+  const okr = (n) => Math.round(n * 10) / 10;
+
+  if (pmCols.length === 0) {
+    return <div style={{ fontSize: 13, color: C.szary, fontStyle: "italic" }}>Brak przypisań PM do inwestycji — dodaj je w zakładce „Zarządzanie".</div>;
+  }
+
+  const thMx = { ...thAdm, whiteSpace: "nowrap" };
+  const tdMx = { padding: "7px 8px", borderBottom: `1px solid ${C.jasny}` };
+  const numInp = { width: 56, padding: "6px 4px", border: `1px solid ${C.linia}`, borderRadius: 5, fontSize: 13, textAlign: "center", background: "#FCFBF8" };
+
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-      {projekty.map((p) => {
-        const przypP = przypisania.filter((x) => x.projekt_id === p.id);
-        const zk = zakresMap[p.zakres];
-        const otw = otwarty === p.id;
-        return (
-          <div key={p.id} style={{ border: `1px solid ${C.linia}`, borderRadius: 8, background: C.bialy, opacity: p.wstrzymana ? 0.6 : 1 }}>
-            <div onClick={() => setOtwarty(otw ? null : p.id)}
-              style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, padding: "10px 14px", cursor: "pointer" }}>
-              <div style={{ fontWeight: 700, fontSize: 13.5 }}>
-                <span style={{ color: C.szary, marginRight: 6, fontSize: 11 }}>{otw ? "▼" : "▶"}</span>{p.nazwa}
-                {p.wstrzymana && <span style={odznakaWstrzymana}>WSTRZYMANA</span>}
-              </div>
-              <span style={{ fontFamily: C.mono, fontSize: 11, color: C.szary2, textTransform: "uppercase", letterSpacing: "0.04em" }}>
-                {przypP.length ? `${przypP.length} PM` : "brak PM"}
-              </span>
-            </div>
-            {otw && (
-              <div style={{ borderTop: `1px dashed ${C.linia}`, padding: "10px 14px 12px 32px" }}>
-                {przypP.length === 0 ? (
-                  <div style={{ fontSize: 12, color: C.szary, fontStyle: "italic" }}>
-                    brak przypisanych kierowników — dodaj ich w zakładce „Zarządzanie"
-                  </div>
-                ) : (
-                  <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                    {przypP.map((x) => {
-                      const u = uzytMap[x.uzytkownik];
-                      const val = punktyLok[x.id] !== undefined ? punktyLok[x.id] : (x.punkty ?? "");
-                      return (
-                        <div key={x.id} style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                          <span style={{ flex: "1 1 auto", fontSize: 13 }}>{nazwaOsoby(u)}</span>
-                          <input type="number" min="0" step="0.5" value={val} placeholder={zk ? String(zk.punkty) : "—"}
-                            onChange={(e) => setPunktyLok((s) => ({ ...s, [x.id]: e.target.value }))}
-                            onBlur={(e) => zapiszPunkty(x.id, e.target.value)} style={numInp} />
-                          <span style={{ fontSize: 11.5, color: C.szary, width: 26 }}>pkt</span>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-        );
-      })}
+    <div className="tabela-scroll-own" style={{ overflowX: "auto" }}>
+      <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 300 + pmCols.length * 96 }}>
+        <thead>
+          <tr>
+            <th style={{ ...thMx, textAlign: "left" }}>Inwestycja</th>
+            {pmCols.map((pm) => <th key={pm.id} style={{ ...thMx, textAlign: "center" }}>{nazwaOsoby(pm)}</th>)}
+            <th style={{ ...thMx, textAlign: "center" }}>Σ pkt</th>
+          </tr>
+        </thead>
+        <tbody>
+          {projekty.map((p) => {
+            const zk = zakresMap[p.zakres];
+            const sumaW = pmCols.reduce((s, pm) => { const x = mapPrzyp[p.id + "|" + pm.id]; return s + (x ? efekt(x, p) : 0); }, 0);
+            return (
+              <tr key={p.id} style={{ opacity: p.wstrzymana ? 0.55 : 1 }}>
+                <td style={{ ...tdMx, fontSize: 13, fontWeight: 600, whiteSpace: "nowrap" }}>
+                  {p.nazwa}{p.wstrzymana && <span style={odznakaWstrzymana}>WSTRZYMANA</span>}
+                </td>
+                {pmCols.map((pm) => {
+                  const x = mapPrzyp[p.id + "|" + pm.id];
+                  return (
+                    <td key={pm.id} style={{ ...tdMx, textAlign: "center" }}>
+                      {x ? (
+                        <input type="number" min="0" step="0.5"
+                          value={punktyLok[x.id] !== undefined ? punktyLok[x.id] : (x.punkty ?? "")}
+                          placeholder={zk ? String(zk.punkty) : "—"}
+                          onChange={(e) => setPunktyLok((s) => ({ ...s, [x.id]: e.target.value }))}
+                          onBlur={(e) => zapiszPunkty(x.id, e.target.value)} style={numInp} />
+                      ) : <span style={{ color: "#D9D6CE" }}>·</span>}
+                    </td>
+                  );
+                })}
+                <td style={{ ...tdMx, textAlign: "center", fontFamily: C.mono, fontSize: 12.5, fontWeight: 700 }}>{sumaW ? okr(sumaW) : "—"}</td>
+              </tr>
+            );
+          })}
+        </tbody>
+        <tfoot>
+          <tr>
+            <td style={{ padding: "9px 8px", borderTop: `2px solid ${C.linia}`, fontFamily: C.mono, fontSize: 9.5, textTransform: "uppercase", letterSpacing: "0.08em", color: C.szary2, whiteSpace: "nowrap" }}>Σ na kierownika</td>
+            {pmCols.map((pm) => {
+              const sumaK = projekty.reduce((s, p) => { const x = mapPrzyp[p.id + "|" + pm.id]; return s + (x ? efekt(x, p) : 0); }, 0);
+              return <td key={pm.id} style={{ padding: "9px 8px", borderTop: `2px solid ${C.linia}`, textAlign: "center", fontFamily: C.mono, fontSize: 12.5, fontWeight: 700 }}>{sumaK ? okr(sumaK) : "—"}</td>;
+            })}
+            <td style={{ borderTop: `2px solid ${C.linia}` }} />
+          </tr>
+        </tfoot>
+      </table>
     </div>
   );
 }
@@ -2735,7 +2766,7 @@ function ZakladkaKoordynacja({ uzytkownicy, projektyAll, przypisania, zakresy, t
             style={{ padding: "7px 11px", border: `1px solid ${C.linia}`, borderRadius: 6, fontSize: 13, width: 220 }} />
         </div>
         <p style={{ fontSize: 12.5, color: C.szary, marginTop: -2, marginBottom: 14, lineHeight: 1.5 }}>
-          Kliknij inwestycję, aby rozwinąć i przypisać punkty obciążenia kierownikom. Zakres, termin, wstrzymanie i zakończenie ustawiasz w zakładce „Koordynacja Inwestycji".
+          Macierz punktów obciążenia: wiersz = inwestycja, kolumna = kierownik. Wpisz punkty w komórce (puste = domyślne z zakresu). „·" oznacza brak przypisania — nadajesz je w zakładce „Zarządzanie". Zakres, termin, wstrzymanie i zakończenie ustawiasz w „Koordynacji Inwestycji".
         </p>
         <KompaktowaListaInwestycji
           projekty={projektyWidoczne} przypisania={przypisania} zakresMap={zakresMap}
@@ -3646,6 +3677,34 @@ async function przygotujObraz(url) {
   } catch { return null; }
 }
 
+// Wpieka PRAWDZIWE (gładkie) gradienty w grafikę okładki: górny (ciemnienie pod
+// pasek nagłówka) i dolny (wtopienie w czerń strony #0F0F0E). Robimy to na canvasie,
+// bo pdfmake nie ma pionowego gradientu — a rysowanie go stosem półprzezroczystych
+// prostokątów dawało widoczne poziome pasy na jednolitym niebie. Zwraca dataURL JPEG.
+async function komponujOkladke(dataUrl) {
+  if (typeof document === "undefined") return dataUrl; // Node/SSR — bez kompozycji
+  try {
+    const img = await wczytajObrazek(dataUrl);
+    if (!img) return dataUrl;
+    const w = img.naturalWidth, h = img.naturalHeight;
+    const cv = document.createElement("canvas");
+    cv.width = w; cv.height = h;
+    const ctx = cv.getContext("2d");
+    ctx.drawImage(img, 0, 0, w, h);
+    // Górny gradient — czytelność białego paska nad jasnym niebem.
+    const gt = ctx.createLinearGradient(0, 0, 0, h * 0.20);
+    gt.addColorStop(0, "rgba(15,15,14,0.55)");
+    gt.addColorStop(1, "rgba(15,15,14,0)");
+    ctx.fillStyle = gt; ctx.fillRect(0, 0, w, Math.ceil(h * 0.20));
+    // Dolny gradient — bezszwowe wtopienie dołu grafiki w czerń strony.
+    const gb = ctx.createLinearGradient(0, h * 0.70, 0, h);
+    gb.addColorStop(0, "rgba(15,15,14,0)");
+    gb.addColorStop(1, "#0F0F0E");
+    ctx.fillStyle = gb; ctx.fillRect(0, Math.floor(h * 0.70), w, Math.ceil(h * 0.30));
+    return cv.toDataURL("image/jpeg", 0.92);
+  } catch { return dataUrl; }
+}
+
 // HTML z edytora (b/i/u/span/listy/br/div/p) -> tablica „runs" dla pdfmake.
 // Pogrubienia, kursywę i podkreślenia wykrywamy zarówno ze znaczników
 // (b/strong, i/em, u/s), jak i ze STYLI INLINE (font-weight/style/text-decoration) —
@@ -3948,24 +4007,27 @@ function fotoPodpis(nr, opis) {
 
 async function pdfZdjecia(content, form) {
   if (!form.zdjecia || form.zdjecia.length === 0) return;
-  // Grupowanie jak w podglądzie: pionowe (lub bez orientacji) 1/str., poziome 2/str.
-  const strony = []; let bufor = [];
+  // Wczytujemy wszystkie zdjęcia z wymiarami. Orientację bierzemy z RZECZYWISTEJ
+  // proporcji obrazu (a = szer./wys.), a NIE z zapisanego flagu `pion` — dzięki temu
+  // dwa faktycznie poziome zdjęcia zawsze łączą się 2/str., niezależnie od (bywa
+  // błędnego) flagu. Poziome (a ≥ 1) po 2 na stronę; pionowe 1 na stronę.
+  const items = [];
   for (const z of form.zdjecia) {
-    const poziome = z.pion === false;
-    if (!poziome) { if (bufor.length) { strony.push(bufor); bufor = []; } strony.push([z]); }
-    else { bufor.push(z); if (bufor.length === 2) { strony.push(bufor); bufor = []; } }
+    const im = await przygotujObraz(z.dataUrl || z.url);
+    if (im) items.push({ z, im, a: im.w / im.h });
+  }
+  if (items.length === 0) return;
+  const strony = []; let bufor = [];
+  for (const it of items) {
+    const poziome = it.a >= 1;
+    if (!poziome) { if (bufor.length) { strony.push(bufor); bufor = []; } strony.push([it]); }
+    else { bufor.push(it); if (bufor.length === 2) { strony.push(bufor); bufor = []; } }
   }
   if (bufor.length) strony.push(bufor);
 
   let pierwszaGrupa = true;
   let fotoNr = 0;
-  for (const grupa of strony) {
-    // Wczytujemy obrazy z wymiarami (a = proporcja szer./wys.).
-    const zdj = [];
-    for (const z of grupa) {
-      const im = await przygotujObraz(z.dataUrl || z.url);
-      if (im) zdj.push({ z, im, a: im.w / im.h });
-    }
+  for (const zdj of strony) {
     if (zdj.length === 0) continue;
 
     const naglowekTu = pierwszaGrupa;
@@ -4023,7 +4085,7 @@ async function budujDocDefinition(form) {
   let coverImg = null, coverH = 0;
   if (form.grafikaInwestycji && (form.grafikaInwestycji.dataUrl || form.grafikaInwestycji.url)) {
     const g = await przygotujObraz(form.grafikaInwestycji.dataUrl || form.grafikaInwestycji.url);
-    if (g && g.w && g.h) { coverImg = g.dataUrl; coverH = Math.min(PH * 0.58, PW * g.h / g.w); }
+    if (g && g.w && g.h) { coverImg = await komponujOkladke(g.dataUrl); coverH = Math.min(PH * 0.58, PW * g.h / g.w); }
   }
 
   // Treść okładki (flow) zaczyna się tuż pod grafiką (margines uwzględnia margines strony 40).
@@ -4070,8 +4132,16 @@ async function budujDocDefinition(form) {
   pdfSekcjaTekst(content, "Sprawy dotyczące Inwestora", form.sprawyInwestora);
   pdfSekcjaTekst(content, "Teren placu budowy", form.placBudowy);
 
+  // Podsumowanie = werdykt raportu. Wyróżnione, ale gustownie: miękki kafelek w tonie
+  // statusu + cienki pasek w kolorze (czerwony = zagrożenie, zielony = niezagrożony),
+  // tekst 11.5 pt bold (nie ciężkie RobotoBlack 14 pt).
+  const stPods = statusZRaportu({ harmonogram: form.harmonogram, data_opracowania: form.dataOpracowania, podsumowanie: form.podsumowanie });
+  const zagrPods = stPods.kod === "zagrozenie";
   content.push(pdfNaglowekSekcji("Podsumowanie"));
-  content.push({ table: { widths: [4, "*"], body: [[{ text: "", fillColor: zolty, border: [false, false, false, false] }, { text: form.podsumowanie || "—", font: "RobotoBlack", fontSize: 14, lineHeight: 1.3, color: ink, margin: [16, 2, 0, 2], border: [false, false, false, false] }]] }, layout: "noBorders" });
+  content.push({ table: { widths: [3, "*"], body: [[
+    { text: "", fillColor: zagrPods ? czerwony : zielony, border: [false, false, false, false] },
+    { text: form.podsumowanie || "—", fontSize: 11.5, bold: true, lineHeight: 1.4, color: ink, fillColor: zagrPods ? "#FBECEA" : "#E9F4EC", margin: [13, 11, 14, 11], border: [false, false, false, false] },
+  ]] }, layout: "noBorders", margin: [0, 4, 0, 0] });
 
   await pdfHarmonogram(content, form);
   pdfCashflow(content, form);
@@ -4091,15 +4161,8 @@ async function budujDocDefinition(form) {
       if (page !== 1) return null;
       const bg = [{ canvas: [{ type: "rect", x: 0, y: 0, w: PW, h: PH, color: ink }] }];
       if (coverImg) {
+        // Grafika ma już wpieczone gładkie gradienty (komponujOkladke) — bez pasków.
         bg.push({ image: coverImg, width: PW, absolutePosition: { x: 0, y: 0 } });
-        // Górny gradient — czytelność paska nad jasnym niebem grafiki.
-        const topFade = [], TN = 16, TH = 96;
-        for (let i = 0; i <= TN; i++) topFade.push({ type: "rect", x: 0, y: i * (TH / TN), w: PW, h: TH / TN + 0.8, color: ink, fillOpacity: 0.5 * (1 - i / TN) });
-        bg.push({ canvas: topFade, absolutePosition: { x: 0, y: 0 } });
-        // Dolny gradient — wtopienie dołu grafiki w czerń strony.
-        const botFade = [], BN = 22, BH = 110;
-        for (let i = 0; i <= BN; i++) botFade.push({ type: "rect", x: 0, y: coverH - BH + i * (BH / BN), w: PW, h: BH / BN + 0.8, color: ink, fillOpacity: i / BN });
-        bg.push({ canvas: botFade, absolutePosition: { x: 0, y: 0 } });
       }
       // Pasek górny nad grafiką: overline + plakietka numeru.
       bg.push({ text: [{ text: "/ ", color: zoltyBright }, { text: "RAPORT Z BUDOWY · ABYARD", color: "#FFFFFF" }], font: "Mono", fontSize: 9, characterSpacing: 1.4, absolutePosition: { x: 40, y: 41 } });
@@ -4250,7 +4313,14 @@ function PodgladPDF({ form, onBack, nazwaPliku, raportId, publiczny, jestAdmin }
         {maTresc(form.placBudowy) && <BlokPDF tytul="Teren placu budowy"><Tekst v={form.placBudowy} /></BlokPDF>}
 
         <BlokPDF tytul="Podsumowanie">
-          <div style={{ borderLeft: `4px solid ${CR.gold}`, paddingLeft: 16, fontWeight: 900, fontSize: 18, lineHeight: 1.3, color: CR.ink }}>{form.podsumowanie}</div>
+          {(() => {
+            const zagr = statusZRaportu({ harmonogram: form.harmonogram, data_opracowania: form.dataOpracowania, podsumowanie: form.podsumowanie }).kod === "zagrozenie";
+            return (
+              <div style={{ background: zagr ? "#FBECEA" : "#E9F4EC", borderLeft: `3px solid ${zagr ? CR.danger : CR.ok}`, padding: "13px 16px" }}>
+                <div style={{ fontWeight: 700, fontSize: 13.5, lineHeight: 1.45, color: CR.ink }}>{form.podsumowanie}</div>
+              </div>
+            );
+          })()}
         </BlokPDF>
 
         {(() => {
@@ -4724,6 +4794,7 @@ const printCSS = `
     .cover-foto { max-height: 150mm !important; width: 100% !important; object-fit: cover !important; }
   }
 `;
+
 
 
 
