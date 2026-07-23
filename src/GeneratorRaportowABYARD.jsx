@@ -925,7 +925,6 @@ export default function GeneratorRaportowABYARD() {
   const [profil, setProfil] = useState(null); // {id, email, rola}
   const [mojePrzypisania, setMojePrzypisania] = useState([]);
   const photoInputRef = useRef(null);
-  const harmInputRef = useRef(null);
   const grafikaInputRef = useRef(null);
   const wczytanaBudowaRef = useRef(null);
 
@@ -1118,39 +1117,6 @@ export default function GeneratorRaportowABYARD() {
       // Autopodpowiedź prognozy dla podpozycji.
       if (key === "koniec" && val && !h[i].pod[j].rzecz) h[i].pod[j].rzecz = val;
       return { ...f, harmonogram: h };
-    });
-  }
-  function dodajObrazHarm(e) {
-    const files = Array.from(e.target.files || []);
-    if (files.length === 0) return;
-    plikiRef.current.harm = [...plikiRef.current.harm, ...files]; // oryginały do uploadu
-    // Harmonogram zawiera drobny tekst i liczby — NIE kompresujemy, by zachować czytelność.
-    Promise.all(
-      files.map(
-        (file) =>
-          new Promise((resolve) => {
-            const reader = new FileReader();
-            reader.onload = () => resolve({ nazwa: file.name, dataUrl: reader.result });
-            reader.readAsDataURL(file);
-          })
-      )
-    ).then((nowe) => setForm((f) => ({ ...f, harmonogramObrazy: [...f.harmonogramObrazy, ...nowe] })));
-    e.target.value = "";
-  }
-  function usunObrazHarm(i) {
-    plikiRef.current.harm = plikiRef.current.harm.filter((_, idx) => idx !== i);
-    setForm((f) => ({ ...f, harmonogramObrazy: f.harmonogramObrazy.filter((_, idx) => idx !== i) }));
-  }
-  function przesunObrazHarm(i, kierunek) {
-    setForm((f) => {
-      const arr = [...f.harmonogramObrazy];
-      const j = i + kierunek;
-      if (j < 0 || j >= arr.length) return f;
-      [arr[i], arr[j]] = [arr[j], arr[i]];
-      // utrzymaj kolejność surowych plików zgodną z podglądem
-      const praw = plikiRef.current.harm;
-      if (praw[i] && praw[j]) [praw[i], praw[j]] = [praw[j], praw[i]];
-      return { ...f, harmonogramObrazy: arr };
     });
   }
   function dodajGrafike(e) {
@@ -2040,38 +2006,6 @@ export default function GeneratorRaportowABYARD() {
             )}
           </div>
 
-          {/* Harmonogram jako obraz — UKRYTY dla pierwszego raportu nowej inwestycji.
-              Raport nr 1 ustanawia bazę: wymagamy ręcznie wprowadzonego harmonogramu
-              (tabela ZZK + cashflow), więc opcja wgrania obrazu (który zastąpiłby tabelę)
-              nie ma tu sensu i znika. Dla kolejnych raportów sekcja działa jak dotąd. */}
-          {!pierwszyRaportForm && (
-          <div style={{ marginTop: 20, paddingTop: 16, borderTop: `1px solid ${C.linia}` }}>
-            <label style={lbl}>Harmonogram jako obraz (dla złożonych projektów — np. zrzut z MS Project)</label>
-            <p style={{ fontSize: 12, color: C.szary, marginTop: -2, marginBottom: 10 }}>
-              Możesz dodać kilka obrazów (np. wielostronicowy harmonogram) — pojawią się w raporcie jeden pod drugim, w tej kolejności. Format PNG lub JPG (pliki TIF nie są obsługiwane — zapisz harmonogram jako PNG/JPG). <strong>Gdy dodasz obraz, tabela ZZK poniżej nie pojawi się w raporcie.</strong>
-            </p>
-            <button style={btnGhost} onClick={() => harmInputRef.current?.click()}>+ Dodaj obraz(y) harmonogramu</button>
-            <input ref={harmInputRef} type="file" accept="image/png,image/jpeg,image/*" multiple style={{ display: "none" }} onChange={dodajObrazHarm} />
-            {form.harmonogramObrazy.length > 0 && (
-              <div style={{ marginTop: 14, display: "flex", flexDirection: "column", gap: 12 }}>
-                {form.harmonogramObrazy.map((o, i) => (
-                  <div key={i} style={{ display: "flex", gap: 14, alignItems: "flex-start", padding: 12, background: C.bialy, border: `1px solid ${C.linia}`, borderRadius: 6 }}>
-                    <span style={{ fontWeight: 800, color: C.szary, alignSelf: "center", minWidth: 20 }}>{i + 1}</span>
-                    <img src={o.dataUrl} alt="" style={{ width: 160, maxHeight: 120, objectFit: "contain", borderRadius: 4, border: `1px solid ${C.linia}` }} />
-                    <div style={{ flex: 1 }}>
-                      <div style={{ fontSize: 13, marginBottom: 8, wordBreak: "break-all" }}>{o.nazwa}</div>
-                      <div style={{ display: "flex", gap: 8 }}>
-                        <button style={miniBtn} onClick={() => przesunObrazHarm(i, -1)} disabled={i === 0}>↑</button>
-                        <button style={miniBtn} onClick={() => przesunObrazHarm(i, 1)} disabled={i === form.harmonogramObrazy.length - 1}>↓</button>
-                        <button style={{ ...miniBtn, color: "#C0392B", borderColor: "#E0B4B4" }} onClick={() => usunObrazHarm(i)}>Usuń</button>
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-          )}
         </Sekcja>
 
         {/* Zdjęcia */}
