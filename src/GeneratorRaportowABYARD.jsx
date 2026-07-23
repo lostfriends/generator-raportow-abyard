@@ -1615,7 +1615,7 @@ export default function GeneratorRaportowABYARD() {
         onWyloguj={async () => { await wyloguj(); setWidok("form"); }}
       />
 
-      <main style={{ maxWidth: 1080, margin: "0 auto", padding: "28px 24px 120px" }}>
+      <main className="ekran-formularz" style={{ maxWidth: 1080, margin: "0 auto", padding: "28px 24px 120px" }}>
 
         {przywroconoDraft && (
           <div style={{ marginBottom: 16, padding: "10px 16px", background: C.zoltyJasny, border: `1px solid ${C.zolty}`, borderRadius: 8, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, fontSize: 13, flexWrap: "wrap" }}>
@@ -2013,7 +2013,7 @@ export default function GeneratorRaportowABYARD() {
                 ? "Raport zapisany — możesz go wygenerować. Kolejny zapis nadpisze (aktualizacja)."
                 : <>Najpierw <strong>zapisz raport w bazie</strong> — dopiero wtedy odblokuje się „Generuj raport".</>}
           </span>
-          <div style={{ display: "flex", gap: 10 }}>
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
             <button style={{ ...btnGhost, borderColor: C.linia, color: C.szary }} onClick={wyczyscFormularz} disabled={zapisywanie} title="Wyczyść widoczny formularz (i wersję roboczą). Zapisane raporty w bazie zostają.">
               Wyczyść
             </button>
@@ -4570,6 +4570,10 @@ const globalCSS = `
   @media screen and (max-width: 640px) {
     footer > div { flex-direction: column; align-items: stretch !important; }
     footer button { width: 100%; }
+    /* Dolny pasek akcji formularza układa się w kolumnę (przyciski pełnej szerokości),
+       więc jest znacznie wyższy niż na desktopie. Rezerwujemy więcej miejsca na dole
+       formularza, aby ostatnia karta nie chowała się pod przyklejonym paskiem. */
+    .ekran-formularz { padding-bottom: 260px !important; }
     /* Szerokie tabele na telefonie: własne poziome przewijanie zamiast rozpychania strony.
        Tylko ekran (screen) i wąski — laptop oraz druk PDF nietknięte.
        display:block daje przewijanie; width:max-content wymusza, by tabela nie ściskała
