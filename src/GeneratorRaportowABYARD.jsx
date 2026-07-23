@@ -3937,9 +3937,18 @@ const FOTO_CAPTION_H = 22;
 
 // Podpis pod zdjęciem: mono „FOT. NN" (amber) + opcjonalny opis użytkownika.
 function fotoPodpis(nr, opis) {
-  const label = { text: "FOT. " + String(nr).padStart(2, "0"), font: "Mono", fontSize: 8, color: PDF_KOL.zoltyDeep, characterSpacing: 1 };
-  if (!opis) return { ...label, margin: [0, 4, 0, 6] };
-  return { columns: [ { ...label, width: "auto", margin: [0, 1, 0, 0] }, { text: opis, fontSize: 9.5, bold: true, color: "#26251F", width: "*", margin: [8, 0, 0, 0] } ], margin: [0, 4, 0, 6] };
+  const labelText = "FOT. " + String(nr).padStart(2, "0");
+  const label = { text: labelText, font: "Mono", fontSize: 8, color: PDF_KOL.zoltyDeep, characterSpacing: 1 };
+  // Podpis wyśrodkowany pod zdjęciem (label „FOT. NN" + opcjonalny opis w jednej linii).
+  if (!opis) return { ...label, alignment: "center", margin: [0, 4, 0, 6] };
+  return {
+    text: [
+      { text: labelText + "   ", font: "Mono", fontSize: 8, color: PDF_KOL.zoltyDeep, characterSpacing: 1 },
+      { text: opis, fontSize: 9.5, bold: true, color: "#26251F" },
+    ],
+    alignment: "center",
+    margin: [0, 4, 0, 6],
+  };
 }
 
 async function pdfZdjecia(content, form) {
@@ -4459,7 +4468,7 @@ function PodgladPDF({ form, onBack, nazwaPliku, raportId, publiczny, jestAdmin }
                 return (
                 <figure key={k} className="foto-fig" style={{ margin: 0, flex: "1 1 0", minHeight: 0, width: "100%", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
                   <img src={z.dataUrl} alt="" style={{ maxWidth: "100%", maxHeight: "100%", width: "auto", height: "auto", objectFit: "contain", borderRadius: 4, display: "block" }} />
-                  <figcaption style={{ marginTop: 6, textAlign: "left", flexShrink: 0, alignSelf: "flex-start" }}>
+                  <figcaption style={{ marginTop: 6, textAlign: "center", flexShrink: 0, alignSelf: "center" }}>
                     <span style={{ fontFamily: CR.mono, fontSize: 9.5, color: CR.goldDeep, letterSpacing: "0.08em" }}>FOT. {String(nr).padStart(2, "0")}</span>
                     {z.opis && <span style={{ fontWeight: 700, color: "#26251F", marginLeft: 8, fontSize: 12.5 }}>{z.opis}</span>}
                   </figcaption>
