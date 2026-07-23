@@ -4599,7 +4599,13 @@ function PodgladPDF({ form, onBack, nazwaPliku, raportId, publiczny, jestAdmin }
                 const nr = ++fotoNr;
                 return (
                 <figure key={k} className="foto-fig" style={{ margin: 0, flex: "1 1 0", minHeight: 0, width: "100%", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
-                  <img src={z.dataUrl} alt="" style={{ maxWidth: "100%", maxHeight: "100%", width: "auto", height: "auto", objectFit: "contain", borderRadius: 4, display: "block" }} />
+                  {/* Obraz w osobnym elastycznym kontenerze (flex:1, minHeight:0), by podpis
+                      (flexShrink:0) ZAWSZE dostał swoją wysokość. Wcześniej img z maxHeight:100%
+                      zajmował całą połowę strony i podpis GÓRNEGO zdjęcia (przy dwóch na stronie)
+                      był wypychany poza kadr i przycinany. */}
+                  <div style={{ flex: "1 1 0", minHeight: 0, width: "100%", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                    <img src={z.dataUrl} alt="" style={{ maxWidth: "100%", maxHeight: "100%", width: "auto", height: "auto", objectFit: "contain", borderRadius: 4, display: "block" }} />
+                  </div>
                   <figcaption style={{ marginTop: 6, textAlign: "center", flexShrink: 0, alignSelf: "center" }}>
                     <span style={{ fontFamily: CR.mono, fontSize: 9.5, color: CR.goldDeep, letterSpacing: "0.08em" }}>FOT. {String(nr).padStart(2, "0")}</span>
                     {z.opis && <span style={{ fontWeight: 700, color: "#26251F", marginLeft: 8, fontSize: 12.5 }}>{z.opis}</span>}
