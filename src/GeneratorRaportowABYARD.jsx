@@ -904,8 +904,10 @@ function usunPogrubienie(html) {
   return div.innerHTML;
 }
 
-// ---- Automatyczna kompresja obrazu: skaluje do max 1440px i zapisuje JPEG 0.7
-// Zwraca Promise<string> z dataUrl skompresowanego obrazu.
+// ---- Automatyczna kompresja obrazu: skaluje do max `maxWymiar` px i koduje JPEG.
+// Zwraca Promise<{ dataUrl, plik, w, h }>:
+//   dataUrl — do podglądu, plik — SKOMPRESOWANY File do uploadu (kluczowe: do Storage
+//   idzie wersja lekka, nie oryginał 4000 px / 3–4 MB, który rozdymał bazę i PDF-y).
 function kompresujObraz(file, maxWymiar = 1440, jakosc = 0.7) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -932,11 +934,18 @@ function kompresujObraz(file, maxWymiar = 1440, jakosc = 0.7) {
         ctx.fillStyle = "#FFFFFF";
         ctx.fillRect(0, 0, width, height);
         ctx.drawImage(img, 0, 0, width, height);
+        const nazwaJpg = String(file.name || "obraz").replace(/\.[^.]+$/, "") + ".jpg";
+        let dataUrl;
+        try { dataUrl = canvas.toDataURL("image/jpeg", jakosc); }
+        catch { resolve({ dataUrl: reader.result, plik: file, w: width, h: height }); return; }
+        // Plik do uploadu z tego samego canvasu (toBlob — bez ponownego kodowania base64).
         try {
-          resolve({ dataUrl: canvas.toDataURL("image/jpeg", jakosc), w: width, h: height });
+          canvas.toBlob((blob) => {
+            const plik = blob ? new File([blob], nazwaJpg, { type: "image/jpeg" }) : file;
+            resolve({ dataUrl, plik, w: width, h: height });
+          }, "image/jpeg", jakosc);
         } catch {
-          // fallback: jeśli toDataURL zawiedzie, użyj oryginału
-          resolve({ dataUrl: reader.result, w: width, h: height });
+          resolve({ dataUrl, plik: file, w: width, h: height });
         }
       };
       img.src = reader.result;
@@ -1201,16 +1210,15 @@ export default function GeneratorRaportowABYARD() {
   function dodajGrafike(e) {
     const file = e.target.files?.[0];
     if (!file) return;
-    plikiRef.current.grafika = file; // zachowaj oryginał do uploadu przy zapisie
-    // Grafika okładki jest teraz HERO na całą szerokość A4 (~210 mm) i jest JEDNYM
-    // plikiem dziedziczonym przez wszystkie raporty danej inwestycji (nie dokłada się
-    // co raport jak dokumentacja fotograficzna), więc kompresujemy ją znacznie LŻEJ niż
-    // zwykłe zdjęcia (te: 1440 px / 0.7). 2600 px > 300 DPI przy pełnej szerokości,
-    // jakość 0.88 minimalizuje artefakty (banding nieba) — podgląd i PDF wyglądają ostro
-    // bez zauważalnego obciążenia bazy. (Zapisany raport i tak używa oryginału z uploadu.)
-    kompresujObraz(file, 2600, 0.88).then(({ dataUrl }) =>
-      setForm((f) => ({ ...f, grafikaInwestycji: { nazwa: file.name, dataUrl } }))
-    );
+    // Grafika okładki jest HERO na całą szerokość A4 (~210 mm) i jest JEDNYM plikiem
+    // dziedziczonym przez wszystkie raporty danej inwestycji (nie dokłada się co raport
+    // jak dokumentacja fotograficzna), więc kompresujemy ją LŻEJ niż zwykłe zdjęcia
+    // (te: 1440 px / 0.7). 2600 px > 300 DPI przy pełnej szerokości, jakość 0.88
+    // minimalizuje artefakty (banding nieba). Do Storage idzie ta wersja (nie oryginał).
+    kompresujObraz(file, 2600, 0.88).then(({ dataUrl, plik }) => {
+      plikiRef.current.grafika = plik; // skompresowany plik do uploadu
+      setForm((f) => ({ ...f, grafikaInwestycji: { nazwa: file.name, dataUrl } }));
+    });
     e.target.value = "";
   }
   function usunGrafike() {
@@ -1317,10 +1325,15 @@ export default function GeneratorRaportowABYARD() {
   // ---- Dodawanie zdjęć -------------------------------------------------------
   function dodajZdjecia(e) {
     const files = Array.from(e.target.files || []);
-    plikiRef.current.zdjecia = [...plikiRef.current.zdjecia, ...files]; // oryginały do uploadu
-    // kompresujemy równolegle, ale wstawiamy w oryginalnej kolejności
-    Promise.all(files.map((file) => kompresujObraz(file).then(({ dataUrl, w, h }) => ({ nazwa: file.name, dataUrl, opis: "", pion: h > w }))))
-      .then((nowe) => setForm((f) => ({ ...f, zdjecia: [...f.zdjecia, ...nowe] })));
+    // Kompresujemy równolegle (zachowując kolejność). Do Storage i podglądu idzie
+    // wersja SKOMPRESOWANA (nie oryginał) — inaczej baza i PDF-y puchły do dziesiątek MB.
+    // plikiRef (pliki do uploadu) i form.zdjecia (meta) uzupełniamy razem, więc indeksy
+    // zawsze się zgadzają (usuwanie/przesuwanie działa po tym samym indeksie).
+    Promise.all(files.map((file) => kompresujObraz(file).then(({ dataUrl, plik, w, h }) => ({ plik, meta: { nazwa: file.name, dataUrl, opis: "", pion: h > w } }))))
+      .then((nowe) => {
+        plikiRef.current.zdjecia = [...plikiRef.current.zdjecia, ...nowe.map((n) => n.plik)];
+        setForm((f) => ({ ...f, zdjecia: [...f.zdjecia, ...nowe.map((n) => n.meta)] }));
+      });
     e.target.value = "";
   }
   function usunZdjecie(i) {
@@ -3685,22 +3698,34 @@ function wczytajObrazek(dataUrl) {
   });
 }
 // Zwraca { dataUrl (PNG/JPEG — pdfmake nie przyjmuje innych), w, h } albo null.
-async function przygotujObraz(url) {
+// maxWymiar/jakosc: PDF osadza obraz 1:1, więc oryginały 4000 px (3–4 MB każdy)
+// rozdymały plik do kilkudziesięciu MB. Skalujemy do rozsądnej rozdzielczości
+// druku i przekodowujemy na JPEG — dotyczy też raportów, których zdjęcia leżą w
+// Storage w pełnej rozdzielczości (podgląd był kompresowany, ale do Storage szedł
+// oryginał). Obrazy już małe/JPEG-owe przepuszczamy bez rekompresji.
+async function przygotujObraz(url, maxWymiar = 1600, jakosc = 0.82) {
   const dataUrl = await urlNaDataUrl(url);
   if (!dataUrl) return null;
   const img = await wczytajObrazek(dataUrl);
   if (!img) return null;
+  const w = img.naturalWidth, h = img.naturalHeight;
   const mime = (dataUrl.slice(5, dataUrl.indexOf(";")) || "").toLowerCase();
-  if (mime === "image/png" || mime === "image/jpeg") {
-    return { dataUrl, w: img.naturalWidth, h: img.naturalHeight };
-  }
-  // inny format (np. webp) — przekoduj na JPEG przez canvas (data: URI nie „truje" canvasu)
+  const jpegLubPng = mime === "image/png" || mime === "image/jpeg";
+  const zaDuze = Math.max(w, h) > maxWymiar;
+  // W rozsądnym rozmiarze i akceptowalnym formacie — osadzamy bez straty jakości.
+  if (jpegLubPng && !zaDuze) return { dataUrl, w, h };
+  // Node/harness (brak canvasu) — nie przeskalujemy; oddaj oryginał, jeśli to JPEG/PNG.
+  if (typeof document === "undefined") return jpegLubPng ? { dataUrl, w, h } : null;
   try {
+    const skala = zaDuze ? maxWymiar / Math.max(w, h) : 1;
+    const dw = Math.max(1, Math.round(w * skala)), dh = Math.max(1, Math.round(h * skala));
     const cv = document.createElement("canvas");
-    cv.width = img.naturalWidth; cv.height = img.naturalHeight;
-    cv.getContext("2d").drawImage(img, 0, 0);
-    return { dataUrl: cv.toDataURL("image/jpeg", 0.85), w: img.naturalWidth, h: img.naturalHeight };
-  } catch { return null; }
+    cv.width = dw; cv.height = dh;
+    const ctx = cv.getContext("2d");
+    ctx.fillStyle = "#FFFFFF"; ctx.fillRect(0, 0, dw, dh); // JPEG bez alfy — tło białe
+    ctx.drawImage(img, 0, 0, dw, dh);
+    return { dataUrl: cv.toDataURL("image/jpeg", jakosc), w: dw, h: dh };
+  } catch { return jpegLubPng ? { dataUrl, w, h } : null; }
 }
 
 // Wpieka PRAWDZIWE (gładkie) gradienty w grafikę okładki: górny (ciemnienie pod
@@ -3901,7 +3926,8 @@ async function pdfHarmonogram(content, form) {
   if (form.harmonogramObrazy && form.harmonogramObrazy.length > 0) {
     content.push(pdfNaglowekSekcji("Harmonogram budowy"));
     for (const o of form.harmonogramObrazy) {
-      const im = await przygotujObraz(o.dataUrl || o.url);
+      // Harmonogram bywa zrzutem ekranu z tekstem — trochę wyższy limit dla czytelności.
+      const im = await przygotujObraz(o.dataUrl || o.url, 2000, 0.85);
       if (im) content.push({ image: im.dataUrl, fit: [PDF_SZER, 700], alignment: "center", margin: [0, 0, 0, 10] });
     }
     return;
@@ -4110,7 +4136,9 @@ async function budujDocDefinition(form) {
   // Trzymana w domknięciu — rysowana w `background` (bleeduje do krawędzi).
   let coverImg = null, coverH = 0;
   if (form.grafikaInwestycji && (form.grafikaInwestycji.dataUrl || form.grafikaInwestycji.url)) {
-    const g = await przygotujObraz(form.grafikaInwestycji.dataUrl || form.grafikaInwestycji.url);
+    // Okładka to bohater strony (jeden plik powielany we wszystkich raportach) —
+    // trzymamy ją w wyższej rozdzielczości/jakości niż zwykłe zdjęcia.
+    const g = await przygotujObraz(form.grafikaInwestycji.dataUrl || form.grafikaInwestycji.url, 2600, 0.9);
     if (g && g.w && g.h) { coverImg = await komponujOkladke(g.dataUrl); coverH = Math.min(PH * 0.58, PW * g.h / g.w); }
   }
 
@@ -4195,7 +4223,14 @@ async function budujDocDefinition(form) {
         ], width: 170, absolutePosition: { x: 40 + i * 172, y: 740 } });
       });
       bg.push({ text: `OPRACOWAŁ · ${(form.opracowal || "—").toUpperCase()}`, font: "Mono", fontSize: 8, characterSpacing: 0.6, color: szary2, absolutePosition: { x: 40, y: 802 } });
-      bg.push({ text: `DATA · ${fmtPL(form.dataOpracowania) || "—"}`, font: "Mono", fontSize: 8, characterSpacing: 0.6, color: szary2, alignment: "right", width: PW - 80, absolutePosition: { x: 40, y: 802 } });
+      // Data: alignment:"right" + absolutePosition kotwiczyło ją do KRAWĘDZI strony
+      // (pdfmake ignoruje width przy absolutePosition) — wystawała poza hairline.
+      // Font Mono (DejaVuSansMono) jest równoszerokowy, więc liczymy x tak, by prawa
+      // krawędź trafiła dokładnie w koniec hairline (PW-40), równo z 3. kolumną dat.
+      const dataTxt = `DATA · ${fmtPL(form.dataOpracowania) || "—"}`;
+      const monoZnak = 8 * (1233 / 2048) + 0.6; // szer. znaku DejaVuSansMono @8pt + characterSpacing
+      const dataSzer = dataTxt.length * monoZnak - 0.6; // bez odstępu za ostatnim znakiem
+      bg.push({ text: dataTxt, font: "Mono", fontSize: 8, characterSpacing: 0.6, color: szary2, absolutePosition: { x: Math.round((PW - 40) - dataSzer), y: 802 } });
       return bg;
     },
     content,
