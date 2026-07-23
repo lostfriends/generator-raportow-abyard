@@ -460,6 +460,49 @@ export async function wgrajZdjecia(pliki, prefix = "zdjecia") {
 }
 
 /* ---------------------------------------------------------------------------
+   KONSERWACJA: kompresja istniejących obrazów w Storage (jednorazowo, z panelu
+   admina). Przez pewien czas do bucketa trafiały ORYGINAŁY zdjęć (4000 px, kilka
+   MB), bo kompresja dotyczyła tylko podglądu — tu przepakowujemy to, co już leży.
+--------------------------------------------------------------------------- */
+// Wszystkie ścieżki obrazów referowanych w tabeli raporty (bez duplikatów).
+export async function listaObrazowStorage() {
+  const { data, error } = await supabase
+    .from("raporty")
+    .select("zdjecia, grafika_url, harmonogram_urls");
+  if (error) throw error;
+  const zbior = new Set();
+  for (const r of data || []) {
+    const urle = [
+      ...((r.zdjecia || []).map((z) => z?.url)),
+      r.grafika_url,
+      ...((r.harmonogram_urls || [])),
+    ];
+    for (const u of urle) {
+      const s = sciezkaZUrl(u);
+      if (s) zbior.add(s);
+    }
+  }
+  return [...zbior];
+}
+
+// Pobierz obiekt z bucketa jako Blob (do rekompresji w przeglądarce).
+export async function pobierzObiektStorage(sciezka) {
+  const { data, error } = await supabase.storage.from(BUCKET).download(sciezka);
+  if (error) throw error;
+  return data; // Blob
+}
+
+// Nadpisz TEN SAM obiekt (upsert) — publiczne URL-e w bazie pozostają ważne.
+export async function nadpiszObiektStorage(sciezka, plik) {
+  const { error } = await supabase.storage.from(BUCKET).upload(sciezka, plik, {
+    contentType: "image/jpeg",
+    upsert: true,
+    cacheControl: "3600",
+  });
+  if (error) throw error;
+}
+
+/* ---------------------------------------------------------------------------
    ZAPIS RAPORTU
    form: stan formularza z aplikacji. projektId: uuid z tabeli projekty.
    Zwraca zapisany wiersz.
