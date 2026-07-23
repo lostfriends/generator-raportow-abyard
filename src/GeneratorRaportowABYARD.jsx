@@ -4122,21 +4122,10 @@ async function budujDocDefinition(form) {
   if (form.adres) content.push({ text: String(form.adres).toUpperCase(), color: szary2, font: "Mono", fontSize: 8.5, characterSpacing: 1, margin: [0, 9, 0, 0] });
   if (form.tytulZadania) content.push({ text: `„${form.tytulZadania}”`, color: "#B9B4AA", italics: true, fontSize: 9.5, lineHeight: 1.4, margin: [0, 12, 70, 0] });
 
-  // Kluczowe daty + stopka — przypięte do dołu strony (absolutePosition).
-  content.push({ canvas: [{ type: "line", x1: 0, y1: 0, x2: PW - 80, y2: 0, lineWidth: 1, lineColor: "#3A3A36" }], absolutePosition: { x: 40, y: 724 } });
-  const datyOkl = [
-    ["Rozpoczęcie", fmtPL(form.rozpoczecie) || "—"],
-    ["Zakończenie robót", fmtPL(form.zakonczenieRobot) || "—"],
-    ["Pozwolenie na użytkowanie", form.pnuNieDotyczy ? "Nie dotyczy" : (fmtPL(form.pnu) || "—")],
-  ];
-  datyOkl.forEach(([l, v], i) => {
-    content.push({ stack: [
-      { text: String(l).toUpperCase(), font: "Mono", fontSize: 7.5, characterSpacing: 0.8, color: szary2 },
-      { text: v, font: "RobotoBlack", fontSize: 14, color: "#FFFFFF", margin: [0, 6, 0, 0] },
-    ], width: 170, absolutePosition: { x: 40 + i * 172, y: 740 } });
-  });
-  content.push({ text: `OPRACOWAŁ · ${(form.opracowal || "—").toUpperCase()}`, font: "Mono", fontSize: 8, characterSpacing: 0.6, color: szary2, absolutePosition: { x: 40, y: 802 } });
-  content.push({ text: `DATA · ${fmtPL(form.dataOpracowania) || "—"}`, font: "Mono", fontSize: 8, characterSpacing: 0.6, color: szary2, alignment: "right", width: PW - 80, absolutePosition: { x: 40, y: 802 } });
+  // Kluczowe daty (linia + 3 kolumny) i stopka (opracował / data) są przypięte do
+  // DOŁU strony tytułowej i rysowane w callbacku `background` strony 1 — dzięki temu
+  // NIGDY nie przeskakują na kolejną stronę (absolutePosition w treści potrafił je
+  // zepchnąć na str. 2 przy dłuższym tytule/adresie).
 
   // Strona tytułowa kończy się na kluczowych datach — reszta od nowej strony
   const nagInfo = pdfNaglowekSekcji("Informacje ogólne");
@@ -4193,6 +4182,20 @@ async function budujDocDefinition(form) {
       // Pasek górny nad grafiką: overline + plakietka numeru.
       bg.push({ text: [{ text: "/ ", color: zoltyBright }, { text: "RAPORT Z BUDOWY · ABYARD", color: "#FFFFFF" }], font: "Mono", fontSize: 9, characterSpacing: 1.4, absolutePosition: { x: 40, y: 41 } });
       bg.push({ table: { body: [[{ text: `NR ${String(form.numer).padStart(3, "0")}`, font: "Mono", fontSize: 9, bold: true, color: "#161512", fillColor: zolty, margin: [9, 4, 9, 4], border: [false, false, false, false] }]] }, layout: "noBorders", absolutePosition: { x: 497, y: 34 } });
+      // Dół okładki: złota hairline + kluczowe daty (3 kolumny) + stopka (opracował / data).
+      // W tle strony 1 — zawsze na stronie tytułowej, bez ryzyka przeskoku na str. 2.
+      bg.push({ canvas: [{ type: "line", x1: 0, y1: 0, x2: PW - 80, y2: 0, lineWidth: 1, lineColor: "#3A3A36" }], absolutePosition: { x: 40, y: 724 } });
+      [["Rozpoczęcie", fmtPL(form.rozpoczecie) || "—"],
+       ["Zakończenie robót", fmtPL(form.zakonczenieRobot) || "—"],
+       ["Pozwolenie na użytkowanie", form.pnuNieDotyczy ? "Nie dotyczy" : (fmtPL(form.pnu) || "—")]
+      ].forEach(([l, v], i) => {
+        bg.push({ stack: [
+          { text: String(l).toUpperCase(), font: "Mono", fontSize: 7.5, characterSpacing: 0.8, color: szary2 },
+          { text: v, font: "RobotoBlack", fontSize: 14, color: "#FFFFFF", margin: [0, 6, 0, 0] },
+        ], width: 170, absolutePosition: { x: 40 + i * 172, y: 740 } });
+      });
+      bg.push({ text: `OPRACOWAŁ · ${(form.opracowal || "—").toUpperCase()}`, font: "Mono", fontSize: 8, characterSpacing: 0.6, color: szary2, absolutePosition: { x: 40, y: 802 } });
+      bg.push({ text: `DATA · ${fmtPL(form.dataOpracowania) || "—"}`, font: "Mono", fontSize: 8, characterSpacing: 0.6, color: szary2, alignment: "right", width: PW - 80, absolutePosition: { x: 40, y: 802 } });
       return bg;
     },
     content,
