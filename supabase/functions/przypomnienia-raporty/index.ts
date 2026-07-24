@@ -1,10 +1,10 @@
 // ============================================================================
 //  ABYARD — Edge Function: przypomnienia o raportach z budowy
 //
-//  Wysyłka przez Microsoft 365 (SMTP smtp.office365.com:587, STARTTLS) z konta
-//  firmowego. Dzięki temu poczta jest uwierzytelniona przez samo M365 (SPF/DKIM
-//  OK), bez konfiguracji DNS i bez zewnętrznego dostawcy — nie ma ostrzeżeń
-//  „niezweryfikowany nadawca" ani linków śledzących.
+//  Wysyłka przez Microsoft 365 (SMTP smtp.office365.com:587, STARTTLS, biblioteka
+//  nodemailer) z konta firmowego. Dzięki temu poczta jest uwierzytelniona przez
+//  samo M365 (SPF/DKIM OK), bez konfiguracji DNS i bez zewnętrznego dostawcy —
+//  nie ma ostrzeżeń „niezweryfikowany nadawca" ani linków śledzących.
 //
 //  Co robi:
 //   1. Budzi się codziennie (cron o 8:00 czasu PL — patrz instrukcja).
@@ -33,7 +33,7 @@
 // ============================================================================
 
 import { createClient } from "jsr:@supabase/supabase-js@2";
-import { SMTPClient } from "https://deno.land/x/denomailer@1.6.0/mod.ts";
+import nodemailer from "npm:nodemailer@6.9.16";
 
 // --- Konfiguracja (do ewentualnej edycji) -----------------------------------
 const DATA_STARTU = "2026-07-10";              // pierwszy piątek raportowy
@@ -55,29 +55,31 @@ function czyDzienRaportowy(dzis: Date): boolean {
   return roznicaDni % 14 === 0; // co 2 tygodnie od startu (start jest piątkiem)
 }
 
-// Tworzy klienta SMTP M365 (STARTTLS na 587). Jeden na cały przebieg funkcji.
-function polaczSMTP(): SMTPClient {
+// Tworzy transporter SMTP M365 (STARTTLS na 587). Jeden na cały przebieg funkcji.
+// pool+maxConnections:1 — jedno połączenie reużywane do wszystkich maili, zgodnie
+// z limitami Office 365 (30 wiadomości/min, do 3 połączeń).
+function polaczSMTP(): any {
   const user = Deno.env.get("M365_USER");
   const pass = Deno.env.get("M365_PASS");
   if (!user || !pass) throw new Error("Brak sekretów M365_USER / M365_PASS w konfiguracji funkcji.");
-  return new SMTPClient({
-    connection: {
-      hostname: "smtp.office365.com",
-      port: 587,
-      tls: false, // STARTTLS — biblioteka podniesie szyfrowanie po EHLO
-      auth: { username: user, password: pass },
-    },
+  return nodemailer.createTransport({
+    host: "smtp.office365.com",
+    port: 587,
+    secure: false, // STARTTLS — podniesienie szyfrowania po EHLO
+    auth: { user, pass },
+    pool: true,
+    maxConnections: 1,
+    tls: { minVersion: "TLSv1.2" },
   });
 }
 
-// Wysyłka pojedynczego maila przez uprzednio otwartego klienta SMTP.
-async function wyslijMail(smtp: SMTPClient, doEmail: string, doNazwa: string, temat: string, html: string) {
-  await smtp.send({
+// Wysyłka pojedynczego maila przez uprzednio otwartego transportera SMTP.
+async function wyslijMail(smtp: any, doEmail: string, doNazwa: string, temat: string, html: string) {
+  await smtp.sendMail({
     from: `${NADAWCA_NAZWA} <${NADAWCA_EMAIL}>`,
-    to: `${doNazwa || doEmail} <${doEmail}>`,
+    to: doNazwa ? `${doNazwa} <${doEmail}>` : doEmail,
     subject: temat,
     html,
-    content: "auto", // tekstowa wersja generowana automatycznie z HTML
   });
 }
 
@@ -125,7 +127,7 @@ function fmtDataPL(d: Date): string {
 }
 
 Deno.serve(async (req) => {
-  let smtp: SMTPClient | null = null;
+  let smtp: any = null;
   try {
     const teraz = new Date();
 
@@ -220,6 +222,6 @@ Deno.serve(async (req) => {
       status: 500, headers: { "content-type": "application/json" },
     });
   } finally {
-    try { await smtp?.close(); } catch { /* ignore */ }
+    try { smtp?.close(); } catch { /* ignore */ }
   }
 });
