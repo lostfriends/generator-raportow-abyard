@@ -1,12 +1,17 @@
 // ============================================================================
 //  ABYARD — Edge Function: przypomnienia o raportach z budowy
 //
+//  Wysyłka przez Microsoft 365 (SMTP smtp.office365.com:587, STARTTLS) z konta
+//  firmowego. Dzięki temu poczta jest uwierzytelniona przez samo M365 (SPF/DKIM
+//  OK), bez konfiguracji DNS i bez zewnętrznego dostawcy — nie ma ostrzeżeń
+//  „niezweryfikowany nadawca" ani linków śledzących.
+//
 //  Co robi:
 //   1. Budzi się codziennie (cron o 8:00 czasu PL — patrz instrukcja).
 //   2. Sprawdza, czy DZIŚ jest "dzień raportowy": piątek w cyklu co 2 tygodnie
 //      liczonym od 2026-07-10. Jeśli nie — kończy bez wysyłki.
 //   3. Pobiera z bazy aktywne przypisania (PM -> inwestycje).
-//   4. Wysyła przez Brevo:
+//   4. Wysyła:
 //        - do każdego PM z >=1 tematem: lista jego inwestycji,
 //        - do adminów z listy ADMIN_PELNA_LISTA: pełna lista pogrupowana po PM.
 //
@@ -14,24 +19,31 @@
 //  (nadal można raportować), ale w treści maila ich nazwa dostaje dopisek
 //  " - wstrzymana", żeby PM/admin od razu je odróżnił.
 //
-//  Sekrety (ustawiane w Supabase, NIE w kodzie):
-//   - BREVO_API_KEY        — klucz API z Brevo (xkeysib-...)
+//  Sekrety (ustawiane w Supabase → Edge Functions → Secrets, NIE w kodzie):
+//   - M365_USER            — pełny adres skrzynki nadawczej, np. ddziedzic@abyard.pl
+//   - M365_PASS            — hasło do tej skrzynki albo (przy MFA) hasło aplikacji
 //   - SUPABASE_URL         — URL projektu (Supabase wstrzykuje automatycznie)
 //   - SUPABASE_SERVICE_ROLE_KEY — klucz service_role (Supabase wstrzykuje automat.)
 //
 //  Uwaga: service_role omija RLS — dlatego funkcja widzi wszystkie dane.
-//         Ten klucz NIGDY nie może trafić do aplikacji front-end.
+//         Ten klucz oraz M365_PASS NIGDY nie mogą trafić do aplikacji front-end.
+//
+//  Wymóg M365: skrzynka musi mieć włączony "Authenticated SMTP" (Microsoft 365
+//  Admin → użytkownik → Mail → Manage email apps). Przy MFA użyj hasła aplikacji.
 // ============================================================================
 
 import { createClient } from "jsr:@supabase/supabase-js@2";
+import { SMTPClient } from "https://deno.land/x/denomailer@1.6.0/mod.ts";
 
 // --- Konfiguracja (do ewentualnej edycji) -----------------------------------
 const DATA_STARTU = "2026-07-10";              // pierwszy piątek raportowy
-const NADAWCA_EMAIL = "oferty@abyard.pl";   // zweryfikowany nadawca w Brevo
 const NADAWCA_NAZWA = "Generator raportów Abyard";
 const LINK_APLIKACJI = "https://generator-raportow-abyard.netlify.app";
 const ADMIN_PELNA_LISTA = ["ddziedzic@abyard.pl", "kdarul@urba.pl"]; // pełna lista
 const TEST_EMAIL = "ddziedzic@abyard.pl"; // w trybie ?test=1 WSZYSTKIE maile idą tylko tutaj
+
+// Adres nadawcy = uwierzytelniona skrzynka M365 (M365 pozwala wysyłać tylko "jako" ona).
+const NADAWCA_EMAIL = Deno.env.get("M365_USER") ?? "";
 
 // Czy podana data (UTC) to dzień raportowy: piątek w cyklu co 14 dni od DATA_STARTU.
 function czyDzienRaportowy(dzis: Date): boolean {
@@ -43,27 +55,30 @@ function czyDzienRaportowy(dzis: Date): boolean {
   return roznicaDni % 14 === 0; // co 2 tygodnie od startu (start jest piątkiem)
 }
 
-// Wysyłka pojedynczego maila przez Brevo API.
-async function wyslijMail(apiKey: string, doEmail: string, doNazwa: string, temat: string, html: string) {
-  const res = await fetch("https://api.brevo.com/v3/smtp/email", {
-    method: "POST",
-    headers: {
-      "api-key": apiKey,
-      "content-type": "application/json",
-      "accept": "application/json",
+// Tworzy klienta SMTP M365 (STARTTLS na 587). Jeden na cały przebieg funkcji.
+function polaczSMTP(): SMTPClient {
+  const user = Deno.env.get("M365_USER");
+  const pass = Deno.env.get("M365_PASS");
+  if (!user || !pass) throw new Error("Brak sekretów M365_USER / M365_PASS w konfiguracji funkcji.");
+  return new SMTPClient({
+    connection: {
+      hostname: "smtp.office365.com",
+      port: 587,
+      tls: false, // STARTTLS — biblioteka podniesie szyfrowanie po EHLO
+      auth: { username: user, password: pass },
     },
-    body: JSON.stringify({
-      sender: { email: NADAWCA_EMAIL, name: NADAWCA_NAZWA },
-      to: [{ email: doEmail, name: doNazwa || doEmail }],
-      subject: temat,
-      htmlContent: html,
-    }),
   });
-  if (!res.ok) {
-    const tekst = await res.text();
-    throw new Error(`Brevo ${res.status}: ${tekst}`);
-  }
-  return await res.json();
+}
+
+// Wysyłka pojedynczego maila przez uprzednio otwartego klienta SMTP.
+async function wyslijMail(smtp: SMTPClient, doEmail: string, doNazwa: string, temat: string, html: string) {
+  await smtp.send({
+    from: `${NADAWCA_NAZWA} <${NADAWCA_EMAIL}>`,
+    to: `${doNazwa || doEmail} <${doEmail}>`,
+    subject: temat,
+    html,
+    content: "auto", // tekstowa wersja generowana automatycznie z HTML
+  });
 }
 
 // Szablon HTML — mail do PM (lista jego inwestycji).
@@ -110,6 +125,7 @@ function fmtDataPL(d: Date): string {
 }
 
 Deno.serve(async (req) => {
+  let smtp: SMTPClient | null = null;
   try {
     const teraz = new Date();
 
@@ -122,9 +138,6 @@ Deno.serve(async (req) => {
         headers: { "content-type": "application/json" },
       });
     }
-
-    const apiKey = Deno.env.get("BREVO_API_KEY");
-    if (!apiKey) throw new Error("Brak BREVO_API_KEY w sekretach funkcji.");
 
     const supa = createClient(
       Deno.env.get("SUPABASE_URL")!,
@@ -162,6 +175,9 @@ Deno.serve(async (req) => {
     const wyniki: any[] = [];
     const dataPiatek = fmtDataPL(teraz);
 
+    // Otwórz połączenie SMTP raz na cały przebieg
+    smtp = polaczSMTP();
+
     // 1) Maile do PM z tematami (pomijamy adminów z pełnej listy — oni dostaną osobny)
     for (const [uid, inwestycje] of Object.entries(tematyPM)) {
       const u = uzytMap[uid];
@@ -170,7 +186,7 @@ Deno.serve(async (req) => {
       const imie = (u.imie_nazwisko?.trim()?.split(" ")[0]) || "";
       const odbiorca = test ? TEST_EMAIL : u.email;
       try {
-        await wyslijMail(apiKey, odbiorca, nazwaOsoby(u), `Przypomnienie: raport z budowy — ${dataPiatek}`, mailPM(imie, inwestycje, dataPiatek));
+        await wyslijMail(smtp, odbiorca, nazwaOsoby(u), `Przypomnienie: raport z budowy — ${dataPiatek}`, mailPM(imie, inwestycje, dataPiatek));
         wyniki.push({ email: u.email, wyslano_na: odbiorca, status: "wysłano", tematów: inwestycje.length });
       } catch (err) {
         wyniki.push({ email: u.email, status: "błąd", blad: String(err) });
@@ -183,14 +199,13 @@ Deno.serve(async (req) => {
       .filter((g) => g.inwestycje.length > 0)
       .sort((a, b) => a.osoba.localeCompare(b.osoba, "pl"));
 
-    // 2) Pełna lista pogrupowana po PM — do adminów z ADMIN_PELNA_LISTA.
     //    W trybie testowym wysyłamy ją tylko raz, na TEST_EMAIL.
     const odbiorcyAdmin = test ? [TEST_EMAIL] : ADMIN_PELNA_LISTA;
     for (const adminEmail of odbiorcyAdmin) {
       const u = (uzyt || []).find((x: any) => x.email === adminEmail);
       const nazwa = u ? nazwaOsoby(u) : adminEmail;
       try {
-        await wyslijMail(apiKey, adminEmail, nazwa, `Zestawienie przypisań — raporty ${dataPiatek}`, mailAdmin(grupy, dataPiatek));
+        await wyslijMail(smtp, adminEmail, nazwa, `Zestawienie przypisań — raporty ${dataPiatek}`, mailAdmin(grupy, dataPiatek));
         wyniki.push({ email: adminEmail, status: "wysłano (pełna lista)" });
       } catch (err) {
         wyniki.push({ email: adminEmail, status: "błąd", blad: String(err) });
@@ -204,5 +219,7 @@ Deno.serve(async (req) => {
     return new Response(JSON.stringify({ ok: false, blad: String(err) }), {
       status: 500, headers: { "content-type": "application/json" },
     });
+  } finally {
+    try { await smtp?.close(); } catch { /* ignore */ }
   }
 });
