@@ -94,7 +94,7 @@ function mailPM(imie: string, inwestycje: string[], dataPiatek: string): string 
     <ul style="padding-left:20px">${pozycje}</ul>
     <p>Raporty przygotujesz w generatorze:<br>
        <a href="${LINK_APLIKACJI}" style="color:#1668C7">${LINK_APLIKACJI}</a></p>
-    <p style="color:#6B6B6B;margin-top:24px">Pozdrawiamy,<br>${NADAWCA_NAZWA}</p>
+    ${STOPKA_AUTO}
   </div>`;
 }
 
@@ -112,9 +112,15 @@ function mailAdmin(grupy: { osoba: string; inwestycje: string[] }[], dataPiatek:
     <p>Zestawienie przypisań kierowników na dzień raportowy ${escapeHtml(dataPiatek)} (Procedura nr 03):</p>
     ${bloki}
     <p>Aplikacja: <a href="${LINK_APLIKACJI}" style="color:#1668C7">${LINK_APLIKACJI}</a></p>
-    <p style="color:#6B6B6B;margin-top:24px">${NADAWCA_NAZWA}</p>
+    ${STOPKA_AUTO}
   </div>`;
 }
+
+// Wspólna stopka: informacja o automatycznym wygenerowaniu (wyszarzona, po linii).
+const STOPKA_AUTO =
+  `<hr style="border:none;border-top:1px solid #E4E1D9;margin:20px 0 12px" />` +
+  `<p style="color:#8A867E;font-size:12px;line-height:1.5;margin:0">` +
+  `<strong>Uwaga:</strong> wiadomość wygenerowana automatycznie przez ${NADAWCA_NAZWA}.</p>`;
 
 function escapeHtml(s: string): string {
   return (s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
