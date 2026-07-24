@@ -48,6 +48,7 @@ import {
   wylaczUdostepnienie,
   raportPoTokenie,
 } from "./supabase";
+import { pobierzXlsx, adres, STYLE } from "./xlsx";
 
 /* ============================================================================
    GENERATOR RAPORTÓW Z BUDOWY — ABYARD
@@ -961,6 +962,168 @@ function nazwaPliku(f) {
   const num = String(f.numer).padStart(3, "0");
   const proj = (f.projekt || "RAPORT").replace(/[^\p{L}\p{N}_-]+/gu, "_");
   return `RAPORT_NR_${num}_-_${proj}_-_${f.dataOpracowania}`;
+}
+
+/* ============================================================================
+   EKSPORT „DLA INWESTORA" — sam HARMONOGRAM + CASHFLOW do pliku .xlsx
+   ----------------------------------------------------------------------------
+   Wydzielony, lekki załącznik do maila (bez opisów, zdjęć, oceny PM). Dwa
+   arkusze:
+     „Harmonogram" — pozycje ZZK z datami, %, opóźnieniem i (gdy jest) wartością
+                     umowy; podpozycje jako wcięte wiersze; wiersz podsumowania.
+     „Cashflow"    — macierz zadania × miesiące (rozkład sprzedaży) + sumy
+                     miesięczne i narastająco (krzywa S). Arkusz pomijany, gdy
+                     w harmonogramie nie ma żadnych kwot.
+   Kwoty i daty są prawdziwymi liczbami/datami Excela — inwestor może na nich
+   liczyć i filtrować. Formatowanie w barwach marki (żółty/czerń) — patrz xlsx.js.
+========================================================================== */
+
+// Nazwa pliku eksportu (bez rozszerzenia).
+function nazwaPlikuEksportu(f) {
+  const proj = (f.projekt || "inwestycja").replace(/[^\p{L}\p{N}_-]+/gu, "_");
+  return `Harmonogram_i_cashflow_-_${proj}_-_${f.dataOpracowania || dzisISO()}`;
+}
+
+// Komórki-pomocniki (skrót zapisu).
+const _txt = (v, s) => ({ v, t: "s", s });
+const _num = (v, s) => ({ v, t: "n", s });
+const _dat = (v, s) => (v ? { v, t: "d", s } : { v: "—", t: "s", s: STYLE.TEKST_SZARY });
+
+// Arkusz „Harmonogram": pozycje główne + podpozycje + wiersz podsumowania.
+function arkuszHarmonogram(form, maKwoty) {
+  const h = form.harmonogram || [];
+  const ref = form.dataOpracowania;
+  const naglowki = ["Lp.", "Zadanie", "Start (umowa)", "Koniec (umowa)", "Koniec (prognoza/rzecz.)", "% wyk.", "Opóźnienie (dni)"];
+  const kolumny = [{ szer: 6 }, { szer: 46 }, { szer: 14 }, { szer: 14 }, { szer: 18 }, { szer: 8 }, { szer: 14 }];
+  if (maKwoty) { naglowki.push("Wartość umowy (zł)"); kolumny.push({ szer: 18 }); }
+  const nKol = naglowki.length;
+
+  const wiersze = [];
+  // Blok tytułowy
+  wiersze.push([_txt(`Harmonogram budowy — ${form.projekt || "inwestycja"}`, STYLE.TYTUL)]);
+  wiersze.push([_txt(`Raport nr ${form.numer} · stan na ${fmtPL(ref) || "—"}${form.adres ? " · " + form.adres : ""}`, STYLE.PODPIS)]);
+  wiersze.push([]); // odstęp
+  wiersze.push(naglowki.map((t) => _txt(t, STYLE.NAGL_CIEMNY)));
+
+  const wierszPozycji = (lp, nazwa, ef, kwota, glowny) => {
+    const dni = opoznienieDni(ef, ref);
+    const stylTekst = glowny ? STYLE.TEKST_POGR : STYLE.TEKST;
+    const r = [
+      glowny ? _num(lp, STYLE.TEKST_SRODEK) : _txt(lp, STYLE.TEKST_SZARY),
+      _txt(glowny ? nazwa : "    " + nazwa, stylTekst),
+      _dat(ef.start, STYLE.DATA),
+      _dat(ef.koniec, STYLE.DATA),
+      _dat(ef.rzecz, STYLE.DATA),
+      ef.proc !== "" && ef.proc != null ? _num(Number(ef.proc), STYLE.PROCENT) : _txt("—", STYLE.TEKST_SZARY),
+      dni > 0 ? _num(dni, STYLE.TEKST_SRODEK) : _txt("—", STYLE.TEKST_SZARY),
+    ];
+    if (maKwoty) r.push(kwota > 0 ? _num(Math.round(kwota), STYLE.LICZBA_ZL) : _txt("—", STYLE.TEKST_SZARY));
+    return r;
+  };
+
+  h.forEach((w, i) => {
+    const ef = efektywnyWiersz(w);
+    wiersze.push(wierszPozycji(i + 1, w.zadanie || "—", ef, kwotaZadania(w), true));
+    const pod = Array.isArray(w.pod) ? w.pod : [];
+    pod.forEach((p, j) => {
+      if (!(p && (p.zadanie || p.start || p.koniec || p.rzecz || p.proc || p.kwota))) return;
+      const efp = { start: p.start || "", koniec: p.koniec || "", rzecz: p.rzecz || "", proc: p.proc };
+      wiersze.push(wierszPozycji(`${i + 1}.${j + 1}`, p.zadanie || "(podpozycja)", efp, parseFloat(p.kwota) || 0, false));
+    });
+  });
+
+  // Podsumowanie
+  const starty = [], konce = [];
+  for (const w of h) { const ef = efektywnyWiersz(w); if (ef.start) starty.push(ef.start); const k = ef.rzecz || ef.koniec; if (k) konce.push(k); }
+  const dataMin = starty.sort()[0] || "";
+  const dataMax = konce.sort()[konce.length - 1] || "";
+  const opoz = opoznienieInwestycji(h, ref);
+  const stopka = [
+    _txt("Σ", STYLE.STOPKA_TEKST),
+    _txt(`PODSUMOWANIE (${h.length} zadań)`, STYLE.STOPKA_TEKST),
+    _txt(dataMin ? fmtPL(dataMin) : "—", STYLE.STOPKA_TEKST),
+    { s: STYLE.STOPKA_TEKST },
+    _txt(dataMax ? fmtPL(dataMax) : "—", STYLE.STOPKA_TEKST),
+    { s: STYLE.STOPKA_TEKST },
+    _txt(opoz ? (opoz.dni > 0 ? `${opoz.dni} dni` : "brak") : "—", STYLE.STOPKA_TEKST),
+  ];
+  if (maKwoty) stopka.push(_num(Math.round(sumaWartosciUmowy(h)), STYLE.STOPKA_ZL));
+  wiersze.push(stopka);
+
+  return {
+    nazwa: "Harmonogram",
+    kolumny,
+    zamrozenie: { wiersze: 4 },
+    scalenia: [`${adres(1, 1)}:${adres(nKol, 1)}`, `${adres(1, 2)}:${adres(nKol, 2)}`],
+    wiersze,
+  };
+}
+
+// Arkusz „Cashflow": macierz zadania × miesiące + sumy (miesięcznie, narastająco).
+function arkuszCashflow(form, macierz) {
+  const { miesiace, zadania, sumaMies, sumaNaras, sumaCalosc } = macierz;
+  const nKol = 4 + miesiace.length;
+
+  const kolumny = [{ szer: 42 }, { szer: 16 }, { szer: 13 }, { szer: 13 }, ...miesiace.map(() => ({ szer: 11 }))];
+
+  const wiersze = [];
+  wiersze.push([_txt(`Cashflow sprzedażowy — ${form.projekt || "inwestycja"}`, STYLE.TYTUL)]);
+  wiersze.push([_txt(`Raport nr ${form.numer} · stan na ${fmtPL(form.dataOpracowania) || "—"} · wartość umowy rozłożona kalendarzowo (netto)`, STYLE.PODPIS)]);
+  wiersze.push([]);
+  wiersze.push([
+    _txt("Zadanie", STYLE.NAGL_CIEMNY),
+    _txt("Kwota netto", STYLE.NAGL_CIEMNY),
+    _txt("Start", STYLE.NAGL_CIEMNY),
+    _txt("Koniec", STYLE.NAGL_CIEMNY),
+    ...miesiace.map((m) => _txt(m.etykieta, STYLE.NAGL_MIES)),
+  ]);
+
+  for (const z of zadania) {
+    wiersze.push([
+      _txt(z.nazwa, STYLE.TEKST),
+      _num(Math.round(z.kwota), STYLE.LICZBA_ZL),
+      _dat(z.start, STYLE.DATA),
+      _dat(z.koniec, STYLE.DATA),
+      ...miesiace.map((m) => {
+        const v = z.komorki[m.klucz];
+        return v ? _num(Math.round(v), STYLE.LICZBA_ZOLTA) : { s: STYLE.LICZBA };
+      }),
+    ]);
+  }
+
+  // RAZEM miesięcznie
+  wiersze.push([
+    _txt("RAZEM miesięcznie", STYLE.STOPKA_TEKST),
+    _num(Math.round(sumaCalosc), STYLE.STOPKA_ZL),
+    { s: STYLE.STOPKA_TEKST }, { s: STYLE.STOPKA_TEKST },
+    ...miesiace.map((m) => (sumaMies[m.klucz] ? _num(Math.round(sumaMies[m.klucz]), STYLE.STOPKA_LICZBA) : { s: STYLE.STOPKA_LICZBA })),
+  ]);
+  // Narastająco
+  wiersze.push([
+    _txt("Narastająco", STYLE.NARAST_TEKST),
+    { s: STYLE.NARAST_TEKST }, { s: STYLE.NARAST_TEKST }, { s: STYLE.NARAST_TEKST },
+    ...miesiace.map((m) => _num(Math.round(sumaNaras[m.klucz] || 0), STYLE.NARAST_LICZBA)),
+  ]);
+
+  return {
+    nazwa: "Cashflow",
+    kolumny,
+    zamrozenie: { wiersze: 4, kolumny: 4 },
+    scalenia: [`${adres(1, 1)}:${adres(nKol, 1)}`, `${adres(1, 2)}:${adres(nKol, 2)}`],
+    wiersze,
+  };
+}
+
+// Buduje i pobiera plik .xlsx z harmonogramem (+ cashflow, gdy są kwoty).
+function eksportHarmonogramCashflow(form) {
+  const h = form.harmonogram || [];
+  const maKwoty = harmonogramMaKwoty(h);
+  const arkusze = [arkuszHarmonogram(form, maKwoty)];
+  if (maKwoty) {
+    const macierz = macierzCashflow(h);
+    if (macierz.zadania.length && macierz.miesiace.length) arkusze.push(arkuszCashflow(form, macierz));
+  }
+  pobierzXlsx(arkusze, nazwaPlikuEksportu(form));
 }
 
 // Token z adresu (#r/<token>) — obecność przełącza aplikację w publiczny
@@ -2116,6 +2279,17 @@ export default function GeneratorRaportowABYARD() {
                 })()}
               </>
             )}
+          </div>
+
+          {/* Eksport dla inwestora — sam harmonogram + cashflow do .xlsx (załącznik do maila) */}
+          <div style={{ marginTop: 20, paddingTop: 16, borderTop: `1px solid ${C.linia}`, display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
+            <button type="button" style={btnGhost} onClick={() => eksportHarmonogramCashflow(form)}
+              title="Pobierz sam harmonogram i cashflow jako plik Excel — gotowy załącznik do maila (np. dla inwestora)">
+              ⬇ Eksport harmonogramu i cashflow (Excel)
+            </button>
+            <span style={{ fontSize: 12, color: C.szary, lineHeight: 1.5, maxWidth: 460 }}>
+              Osobny plik <strong>.xlsx</strong> z samym harmonogramem i {harmonogramMaKwoty(form.harmonogram) ? "cashflow" : "cashflow (gdy uzupełnisz wartości umowy)"} — bez opisów, zdjęć i oceny PM. Kwoty i daty jako edytowalne liczby, do wysłania inwestorowi.
+            </span>
           </div>
 
         </Sekcja>
