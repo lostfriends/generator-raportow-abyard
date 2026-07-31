@@ -45,7 +45,7 @@ z sześcioma kluczami — **każdy to tablica całych wierszy**:
 | `uzytkownicy` | wszystkie wiersze |
 | `projekty` | wszystkie wiersze |
 | `przypisania` | wszystkie wiersze |
-| `raporty` | **dwa najnowsze raporty na inwestycję** (`row_number()` po `numer desc`) |
+| `raporty` | **najnowszy raport na inwestycję** (`row_number()` po `numer desc`) |
 | `udostepnienia` | wszystkie wiersze |
 
 Wiersze idą **w całości** — łącznie z pełnym `harmonogram`, kwotami, HTML-em w polach
@@ -58,14 +58,18 @@ Wyłączone są **wyłącznie** cztery pola:
 * `raporty.zdjecia`, `raporty.grafika_url`, `raporty.harmonogram_urls` — setki URL-i do plików,
 * `udostepnienia.token` — nie wygasa i otwiera raport bez logowania.
 
-Okno `rn <= 2` w `raporty` to **jedyne ograniczenie ilości**: historia się nie zmienia,
+Okno `rn <= 1` w `raporty` to **jedyne ograniczenie ilości**: historia się nie zmienia,
 a odbiorca ma ją u siebie. **To nie jest selekcja treści — żadne pole nie jest oceniane.**
+
+Okno było pierwotnie `rn <= 2` (dwa najnowsze raporty). Gdyby odbiorca kiedyś potrzebował
+poprzedniego raportu do porównania, zmiana wraca w **jedno miejsce** — cyfrę w `where r.rn <= …`
+w `kartoteka_eksport()`. Funkcji ani jej deployu to nie dotyka.
 
 ### Drobiazg dla odbiorcy: pole `rn`
 
 `to_jsonb(r)` liczone jest na podzapytaniu z funkcją okna, więc każdy wiersz `raporty` niesie
-dodatkowe pole `rn` (`1` = najnowszy raport inwestycji, `2` = poprzedni). Tak wyglądał ręczny
-eksport z 31.07.2026, na którym zaprojektowano odbiorcę — i tak zostaje.
+dodatkowe pole `rn` — przy obecnym oknie **zawsze `1`**. Tak wyglądał ręczny eksport
+z 31.07.2026, na którym zaprojektowano odbiorcę, i tak zostaje.
 
 ---
 
@@ -112,8 +116,14 @@ transport dokłada coś od siebie do kontraktu.
 ### Podział na części
 
 Payload powyżej **200 kB** jest dzielony na części o **tym samym numerze wydania**;
-różnią się polem `czesc: { nr, z }`. (Ręczny eksport całości ważył 887 kB z `jsonb_pretty`;
-bez upiększania i z oknem dwóch raportów spodziewaj się 200–300 kB, czyli zwykle 1–2 części.)
+różnią się polem `czesc: { nr, z }`.
+
+Skala z 31.07.2026 (36 inwestycji, 26 raportów po zwężeniu okna): **199,5 kB, jedna część** —
+czyli **497 bajtów pod progiem**. Jeden nowy raport albo dopisane zdanie w podsumowaniu i
+wydanie znów pójdzie w dwóch częściach. **Odbiorca nie może zakładać, że mail jest jeden**;
+obsługa `czesc: { nr, z }` musi zostać, nawet jeśli przez jakiś czas każde wydanie mieści się
+w jednej wiadomości. (Dla porównania: przy oknie `rn <= 2` było to 343,6 kB i dwie części,
+a ręczny eksport całości ważył 887 kB z `jsonb_pretty`.)
 
 Podział jest **ślepy na znaczenie**: bierze kolejne elementy tablic najwyższego poziomu
 i pakuje je zachłannie. Nie zna nazw kluczy ani pól — nowa tabela w eksporcie podzieli się sama.
