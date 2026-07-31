@@ -271,9 +271,24 @@ hash się zmienił.
 | `?pelny=1` | wysyłka bezwarunkowa, także przy identycznym hashu |
 | `?sucho=1` | tylko wyliczenia; bez maila i bez wpisu w `sync_wydania` |
 
-### Bez terminala — z przeglądarki
+`?sucho=1` jest sprawdzane **przed** porównaniem hasha, więc podaje rozmiar i liczbę części
+także wtedy, gdy od ostatniego wydania nic się nie zmieniło — czyli w sytuacji, w której
+najczęściej się go używa. Odpowiedź niesie przy okazji `bez_zmian`, `ostatnie_wydanie` i `cron`.
 
-To samo da się zrobić z **SQL Editor** (`pg_net` i tak jest potrzebny do harmonogramu):
+Ustawienie obu parametrów naraz nie ma sensu: **`sucho` wygrywa** i mail nie wyjdzie.
+
+### Bez terminala — panel testowy (najprościej)
+
+Supabase → **Edge Functions** → `kartoteka-sync` → **Test**. W sekcji **Query Parameters**
+wpisujesz `sucho` = `1` (a potem `pelny` = `1`) i klikasz **Send Request**.
+
+Metodę zostaw na `POST`, `Request Body` może zostać z domyślną zawartością — funkcja w ogóle
+nie czyta ciała żądania. **Klucza nie potrzebujesz**: panel uwierzytelnia się sam rolą
+wybraną w polu obok przycisku (`postgres`). Odpowiedź pojawia się w tym samym panelu.
+
+### Bez terminala — SQL Editor
+
+Wariant dla wywołań skryptowanych (`pg_net` i tak jest potrzebny do harmonogramu):
 
 ```sql
 select net.http_post(
