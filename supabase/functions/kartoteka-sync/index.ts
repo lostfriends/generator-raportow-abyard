@@ -234,6 +234,19 @@ Deno.serve(async (req) => {
 
     const bezZmian = !!poprzednie && poprzednie.hash === hash;
 
+    // Przebieg próbny idzie PRZED sprawdzeniem hasha: „na sucho" ma zawsze podać
+    // komplet wyliczeń (rozmiar, liczba części), a najczęściej pyta się o nie
+    // właśnie wtedy, gdy nic się nie zmieniło — przy niezmienionym hashu skrót
+    // niżej odpowiedziałby „nic się nie zmieniło" i liczby części by nie było.
+    if (sucho) {
+      return odp({
+        ok: true, wyslano: false, powod: "przebieg próbny (?sucho=1) — bez maila i bez wpisu w sync_wydania",
+        hash, rozmiar_b: rozmiar, czesci: podzielNaCzesci(dane, LIMIT_CZESCI).length,
+        bez_zmian: bezZmian, przebieg_pelny: przebiegPelny,
+        ostatnie_wydanie: poprzednie?.numer ?? null, cron: cronZwykly || null, ostrzezenia,
+      });
+    }
+
     if (bezZmian && !przebiegPelny) {
       return odp({
         ok: true, wyslano: false, powod: "hash identyczny z ostatnim wydaniem — nic się nie zmieniło",
@@ -242,14 +255,6 @@ Deno.serve(async (req) => {
     }
 
     const czesci = podzielNaCzesci(dane, LIMIT_CZESCI);
-
-    if (sucho) {
-      return odp({
-        ok: true, wyslano: false, powod: "przebieg próbny (?sucho=1) — bez maila i bez wpisu w sync_wydania",
-        hash, rozmiar_b: rozmiar, czesci: czesci.length, bez_zmian: bezZmian,
-        przebieg_pelny: przebiegPelny, ostrzezenia,
-      });
-    }
 
     // 3. Rezerwacja numeru wydania. Wiersz powstaje PRZED wysyłką, żeby numer w
     //    temacie i znacznik `wygenerowano` miały jedno źródło (bazę), a nieudana
