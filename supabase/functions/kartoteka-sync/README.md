@@ -97,6 +97,18 @@ eksport z 31.07.2026, na którym zaprojektowano odbiorcę — i tak zostaje.
   zapytania. `wygenerowano` jest **w UTC (ISO 8601)** — to jest wartość dla maszyny;
   czas w temacie i w pierwszej linii jest dla człowieka.
 
+### Uwaga dla odbiorcy: `Content-Transfer-Encoding: quoted-printable`
+
+Payload to **jedna linia o długości 180–200 kB**, a SMTP nie przepuszcza dowolnie długich
+linii — nadawca (nodemailer) koduje więc treść jako `quoted-printable` i wstawia miękkie
+łamania (`=` na końcu linii) mniej więcej co 76 znaków. Widać to w surowym `.eml`.
+
+**Odbiorca musi zdekodować treść zgodnie z nagłówkiem `Content-Transfer-Encoding`, zanim
+zacznie parsować JSON.** Każda porządna biblioteka pocztowa robi to sama (`email` w Pythonie,
+`mailparser` w Node, `MimeMessage` w .NET) — ale czytanie surowego body „na piechotę"
+skończy się JSON-em posiekanym znakami `=` i błędem parsowania. To jedyne miejsce, w którym
+transport dokłada coś od siebie do kontraktu.
+
 ### Podział na części
 
 Payload powyżej **200 kB** jest dzielony na części o **tym samym numerze wydania**;
@@ -259,6 +271,27 @@ hash się zmienił.
 | `?pelny=1` | wysyłka bezwarunkowa, także przy identycznym hashu |
 | `?sucho=1` | tylko wyliczenia; bez maila i bez wpisu w `sync_wydania` |
 
+### Bez terminala — z przeglądarki
+
+To samo da się zrobić z **SQL Editor** (`pg_net` i tak jest potrzebny do harmonogramu):
+
+```sql
+select net.http_post(
+  url     := 'https://<PROJEKT>.supabase.co/functions/v1/kartoteka-sync?sucho=1',
+  headers := jsonb_build_object('Authorization', 'Bearer <SERVICE_ROLE_KEY>',
+                                'Content-Type',  'application/json')
+);
+```
+
+Wywołanie jest asynchroniczne — zwraca `id` żądania, a odpowiedź dojedzie chwilę później:
+
+```sql
+select id, status_code, content
+  from net._http_response
+ order by id desc
+ limit 3;
+```
+
 ---
 
 ## Co poszło ostatnio — `sync_wydania`
@@ -290,6 +323,23 @@ select numer, wygenerowano, blad
 -- co dokładnie poszło w wydaniu nr 12 (payload w czytelnej postaci)
 select jsonb_pretty(payload) from sync_wydania where numer = 12;
 ```
+
+### „Przyszły dwa identyczne maile" — część czy duplikat?
+
+Trzy rzeczy, które przy tej funkcji wyglądają jak duplikat, a nim nie są:
+
+1. **Części jednego wydania mają identyczny temat** (tak brzmi kontrakt). Różnią się
+   **pierwszą linią treści** — `część 1/2` i `część 2/2` — oraz polem `czesc` w kopercie.
+   Outlook skleja je w jeden wątek, bo temat jest ten sam.
+2. **Mail idzie sam do siebie**, więc Exchange trzyma go w **Odebranych i Wysłanych**.
+   To ta sama wiadomość w dwóch folderach, nie dwie wysyłki.
+3. Rozstrzyga **`Message-ID`** (Outlook: *Plik → Właściwości → Nagłówki internetowe*).
+   Ten sam `Message-ID` = jedna wysyłka, dwie kopie. Różny = dwa maile.
+
+Podział bywa nierówny i to też jest w porządku: klucze pakowane są po kolei, więc część 1
+potrafi zawierać wyłącznie `raporty`, a całą resztę (`projekty`, `uzytkownicy`, `przypisania`,
+`udostepnienia`) znajdziesz dopiero w części 2. **Dopiero komplet części to komplet danych** —
+nagłówek „Inwestycje: 36 · raporty: 45" podaje liczby dla całego wydania, nie dla tej części.
 
 Brak nowych wierszy przez kilka godzin w dzień roboczy to **normalne** — znaczy tyle, że nikt
 nie zapisał ani nie poprawił raportu. Piątkowy przebieg bezwarunkowy zakłada wiersz zawsze,
