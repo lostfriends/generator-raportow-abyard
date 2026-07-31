@@ -112,13 +112,17 @@ alter table public.sync_wydania enable row level security;
 -- tekstowych i kolumny, które dopiero powstaną — `to_jsonb(...)` zabierze je
 -- automatycznie, bez zmiany tej funkcji.
 --
--- Okno `rn <= 2` (dwa najnowsze raporty na inwestycję) to jedyne ograniczenie
--- ILOŚCI. Historia się nie zmienia, a odbiorca ma ją u siebie. Żadne pole nie
--- jest oceniane — to nie jest selekcja treści.
+-- Okno `rn <= 1` (najnowszy raport na inwestycję) to jedyne ograniczenie ILOŚCI.
+-- Historia się nie zmienia, a odbiorca ma ją u siebie. Żadne pole nie jest
+-- oceniane — to nie jest selekcja treści.
+--
+-- Okno było pierwotnie `rn <= 2`; zwężone do jednego raportu decyzją
+-- właściciela. Gdyby odbiorca kiedyś potrzebował poprzedniego raportu do
+-- porównania, zmiana wraca tu i tylko tu — jedna cyfra, bez ruszania funkcji.
 --
 -- Uwaga dla odbiorcy: `to_jsonb(r)` jest liczone na podzapytaniu z funkcją
--- okna, więc każdy wiersz `raporty` niesie dodatkowe pole `rn` (1 = najnowszy).
--- Tak wyglądał ręczny eksport i tak zostaje.
+-- okna, więc każdy wiersz `raporty` niesie dodatkowe pole `rn` (przy tym oknie
+-- zawsze `1`). Tak wyglądał ręczny eksport i tak zostaje.
 --
 -- SECURITY DEFINER: funkcja czyta wszystkie wiersze niezależnie od RLS.
 -- Wykonanie ma wyłącznie `service_role` — nadanie tego prawa komukolwiek
@@ -139,7 +143,7 @@ as $$
     'raporty',      (select coalesce(jsonb_agg(to_jsonb(r) - 'zdjecia' - 'grafika_url' - 'harmonogram_urls'), '[]'::jsonb)
                        from (select *, row_number() over (partition by projekt_id order by numer desc) as rn
                                from raporty) r
-                      where r.rn <= 2),
+                      where r.rn <= 1),
     'udostepnienia',(select coalesce(jsonb_agg(to_jsonb(s) - 'token'), '[]'::jsonb) from udostepnienia s)
   );
 $$;
