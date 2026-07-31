@@ -335,6 +335,17 @@ Trzy rzeczy, które przy tej funkcji wyglądają jak duplikat, a nim nie są:
    To ta sama wiadomość w dwóch folderach, nie dwie wysyłki.
 3. Rozstrzyga **`Message-ID`** (Outlook: *Plik → Właściwości → Nagłówki internetowe*).
    Ten sam `Message-ID` = jedna wysyłka, dwie kopie. Różny = dwa maile.
+   Kopię z Wysłanych poznasz też po tym, że ma **wyraźnie mniej nagłówków** i brak
+   `X-Forefront-Antispam` / `SCL` — nigdy nie była doręczana, więc nie przeszła filtrowania.
+
+**Klucz odsiewania po stronie odbiorcy: para `wydanie` + `czesc.nr`.** Kartoteka czytająca
+wyłącznie *Odebrane* nie zobaczy duplikatów; ta, która przegląda całą skrzynkę (Graph, IMAP po
+wszystkich folderach), dostanie każdą część dwa razy — raz z Odebranych, raz z Wysłanych.
+
+Kopię w Wysłanych da się wyłączyć po stronie M365
+(`Set-Mailbox <skrzynka> -MessageCopyForSMTPClientSubmissionEnabled $false`), ale ustawienie
+działa na **całą skrzynkę** — zniknie wtedy również ślad po mailach z `przypomnienia-raporty`.
+Odsiewanie u odbiorcy jest tańsze i nie zabiera nikomu historii wysyłki.
 
 Podział bywa nierówny i to też jest w porządku: klucze pakowane są po kolei, więc część 1
 potrafi zawierać wyłącznie `raporty`, a całą resztę (`projekty`, `uzytkownicy`, `przypisania`,
