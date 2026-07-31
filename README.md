@@ -68,6 +68,28 @@ npm run build
 
 ---
 
+## Zaplecze Supabase
+
+Katalog `supabase/` nie bierze udziału w buildzie Netlify — trzymamy w nim skrypty SQL
+(uruchamiane ręcznie w SQL Editor, wszystkie idempotentne) oraz Edge Functions:
+
+```
+supabase/
+├── keep_alive.sql            ← tabela pod ping z GitHub Actions (anty-pauza projektu)
+├── udostepnienia.sql         ← linki do raportów (tokeny + RLS + raport_po_tokenie)
+├── edycja_raportu.sql        ← okno edycji raportu przyznawane przez admina
+├── wstrzymane_inwestycje.sql ← flaga projekty.wstrzymana
+├── kartoteka_sync.sql        ← raporty.zaktualizowano, sync_wydania, kartoteka_eksport()
+└── functions/
+    ├── przypomnienia-raporty/ ← cykliczne przypomnienia mailowe do PM i adminów
+    └── kartoteka-sync/        ← eksport bazy mailem do Kartoteki (README w katalogu)
+```
+
+Obie funkcje wysyłają pocztę przez Microsoft 365 (SMTP + nodemailer) i korzystają z tych
+samych sekretów `M365_USER` / `M365_PASS`, ustawianych w Supabase → Edge Functions → Secrets.
+
+---
+
 ## Uwagi
 
 - **Klucz Supabase** w `src/supabase.js` to klucz **publiczny** (publishable/anon) — jest
