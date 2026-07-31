@@ -19,6 +19,26 @@
 //  znaczenia danych: sha256 payloadu, długość tablicy, rozmiar w bajtach,
 //  dopasowanie bieżącej minuty do wyrażenia cron.
 //
+//  PAYLOAD JEDZIE JAKO ZAŁĄCZNIK, NIE W TREŚCI (zmiana z 31.07.2026).
+//  Pierwsza wersja wklejała JSON do treści `text/plain`. Pomiar na wydaniach 2
+//  i 3 pokazał, że to, co dociera do odbiorcy, jest o JEDNO ODESCAPOWANIE za
+//  daleko: `\"` przychodzi jako `"`, `\\` jako `\`, `\\n` jako `\n`. Payload
+//  przestaje być parsowalnym JSON-em wszędzie tam, gdzie w treści raportu
+//  siedzi HTML z cudzysłowami (a siedzi — raporty bywają wklejane z Worda).
+//  Kopia z Odebranych i z Wysłanych są identyczne co do bajta, więc nie robi
+//  tego poczta przychodząca; sprawcy nie dało się wskazać jednoznacznie.
+//  Załącznik omija cały ten problem: jedzie base64 i nikt go po drodze nie
+//  „poprawia". Treść maila zostaje dwiema liniami dla człowieka.
+//
+//  MAILEM JADĄ TYLKO ZMIENIONE WIERSZE `raporty` (od 31.07.2026), a wszystkie
+//  pozostałe tabele w całości. To NIE jest „rozumienie danych": porównanie jest
+//  bajtowe, po `id`, bez wiedzy o znaczeniu pól. Powód jest arytmetyczny —
+//  `raporty` to 344 kB z 366 kB całego eksportu, a odbiorca czyta załącznik
+//  przez konektor ucinający odczyt na 100 000 znaków. Do `sync_wydania` zapisuje
+//  się payload PEŁNY, żeby następne porównanie miało punkt odniesienia.
+//  Przebieg pełny (piątek 18:00 / ?pelny=1) wysyła komplet — to on nadrabia
+//  wszystko, co mogło przepaść.
+//
 //  Wysyłka: Microsoft 365 (SMTP smtp.office365.com:587, STARTTLS, nodemailer)
 //  — identycznie jak w funkcji `przypomnienia-raporty`.
 //
@@ -38,7 +58,12 @@ import { createClient } from "jsr:@supabase/supabase-js@2";
 import nodemailer from "npm:nodemailer@6.9.16";
 
 // Próg podziału payloadu na części (bajty tekstu JSON).
-const LIMIT_CZESCI = 200 * 1024;
+// 80 kB, NIE 200 kB: odbiorca czyta załącznik przez konektor, który ucina odczyt
+// na 100 000 ZNAKÓW. Polski tekst to w UTF-8 do 2 bajtów na znak, więc 80 kB
+// bajtów to zawsze mniej niż 80 000 znaków — z zapasem pod limitem. Podniesienie
+// tej stałej urwie payload po cichu: odbiorca dostanie kawałek JSON-a i błąd
+// parsowania, a nie informację o tym, że czegoś brakuje.
+const LIMIT_CZESCI = 80 * 1024;
 
 // Ile minut wstecz sprawdzać przy dopasowaniu do KARTOTEKA_SYNC_PELNY_CRON.
 // Scheduler potrafi odpalić funkcję kilkadziesiąt sekund po pełnej godzinie,
@@ -160,6 +185,31 @@ function podzielNaCzesci(dane: unknown, limit: number): Record<string, unknown>[
   return czesci;
 }
 
+// --- diff wierszowy ----------------------------------------------------------
+// Zwraca te wiersze, których NIE MA w poprzednim wydaniu albo których treść się
+// zmieniła. Porównanie jest BAJTOWE (JSON.stringify wiersza), po kluczu `id` —
+// żadnej wiedzy o tym, co które pole znaczy. `jsonb` zwraca klucze w stałej
+// kolejności, więc porównanie tekstów jest stabilne.
+//
+// Po co: cały ciężar payloadu siedzi w `raporty` (344 kB na 366 kB całości,
+// pomiar z 31.07.2026). Wszystkie pozostałe tabele to razem 22 kB i jadą w
+// całości ZAWSZE — bez `projekty` i `przypisania` odbiorca nie ma jak dopasować
+// inwestycji ani PM-a, a oszczędność byłaby żadna. Typowe wydanie schodzi dzięki
+// temu z ~350 kB do ~26 kB, czyli do jednego załącznika.
+function tylkoZmienione(biezace: unknown[], poprzednie: unknown[] | null): unknown[] {
+  if (!Array.isArray(poprzednie)) return biezace;
+  const wczesniej = new Map<string, string>();
+  for (const w of poprzednie) {
+    if (w && typeof w === "object" && "id" in (w as any)) {
+      wczesniej.set(String((w as any).id), JSON.stringify(w));
+    }
+  }
+  return biezace.filter((w) => {
+    if (!w || typeof w !== "object" || !("id" in (w as any))) return true; // bez id — nie ryzykuj, wyślij
+    return wczesniej.get(String((w as any).id)) !== JSON.stringify(w);
+  });
+}
+
 // --- SMTP (identycznie jak w przypomnienia-raporty) --------------------------
 
 function polaczSMTP(): any {
@@ -225,7 +275,7 @@ Deno.serve(async (req) => {
     //    wysyłka się nie powiodła (blad is not null), nie może blokować ponowienia.
     const { data: ostatnie, error: eOstatnie } = await supa
       .from("sync_wydania")
-      .select("numer, hash")
+      .select("numer, hash, payload")
       .is("blad", null)
       .order("numer", { ascending: false })
       .limit(1);
@@ -254,7 +304,19 @@ Deno.serve(async (req) => {
       });
     }
 
-    const czesci = podzielNaCzesci(dane, LIMIT_CZESCI);
+    // Co jedzie mailem: w przebiegu pełnym wszystko, w zwykłym — wszystkie małe
+    // tabele w całości plus TYLKO ZMIENIONE wiersze `raporty`. Do `sync_wydania`
+    // zapisujemy niżej payload PEŁNY, żeby następne porównanie miało punkt
+    // odniesienia; skrót jedzie wyłącznie w mailu.
+    const tryb: "pelny" | "zmiany" = przebiegPelny ? "pelny" : "zmiany";
+    const raportyBiezace = Array.isArray((dane as any)?.raporty) ? (dane as any).raporty as unknown[] : [];
+    const raportyPoprzednie = (poprzednie?.payload as any)?.raporty ?? null;
+    const daneDoWysylki = tryb === "pelny"
+      ? dane
+      : { ...(dane as Record<string, unknown>), raporty: tylkoZmienione(raportyBiezace, raportyPoprzednie) };
+    const raportowWWydaniu = Array.isArray((daneDoWysylki as any).raporty) ? (daneDoWysylki as any).raporty.length : 0;
+
+    const czesci = podzielNaCzesci(daneDoWysylki, LIMIT_CZESCI);
 
     // 3. Rezerwacja numeru wydania. Wiersz powstaje PRZED wysyłką, żeby numer w
     //    temacie i znacznik `wygenerowano` miały jedno źródło (bazę), a nieudana
@@ -272,37 +334,51 @@ Deno.serve(async (req) => {
     const wygenerowanoISO = wygenerowano.toISOString();  // koperta: UTC
 
     // 4. Maile. Temat identyczny dla wszystkich części jednego wydania —
-    //    części rozróżnia pole `czesc` w kopercie.
+    //    części rozróżnia pole `czesc` w kopercie i nazwa załącznika.
     const temat = `[RAPORTY-SYNC] ${stempel} · wydanie ${wydanie}`;
     const liczba = (k: string) => Array.isArray((dane as any)?.[k]) ? (dane as any)[k].length : "—";
     const liczbaInwestycji = liczba("projekty");
     const liczbaRaportow = liczba("raporty");
 
     smtp = polaczSMTP();
-    const wyslane: { czesc: number; bajtow: number }[] = [];
+    const wyslane: { czesc: number; bajtow: number; zalacznik: string }[] = [];
 
     for (let i = 0; i < czesci.length; i++) {
       const koperta = {
         wydanie,
         wygenerowano: wygenerowanoISO,
+        tryb, // "pelny" = komplet raportów; "zmiany" = tylko wiersze, które się zmieniły
         czesc: { nr: i + 1, z: czesci.length },
         dane: czesci[i],
       };
       const json = JSON.stringify(koperta);
-      // text/plain, NIE HTML — encje psują JSON.
-      const tresc =
-        `Wydanie ${wydanie} · ${stempel} · część ${i + 1}/${czesci.length}\n` +
-        `Inwestycje: ${liczbaInwestycji} · raporty: ${liczbaRaportow} · payload ${Math.round(bajty(json) / 1024)} kB\n` +
-        `\n` +
-        "```json\n" + json + "\n```\n";
+      const nazwaZalacznika = `raporty-sync-w${wydanie}-cz${i + 1}z${czesci.length}.json`;
 
-      await smtp.sendMail({ from: odbiorca, to: odbiorca, subject: temat, text: tresc });
-      wyslane.push({ czesc: i + 1, bajtow: bajty(json) });
+      // PAYLOAD JEDZIE ZAŁĄCZNIKIEM, nie w treści — patrz nagłówek pliku.
+      // Treść to wyłącznie dwie linie dla człowieka; automat czyta załącznik.
+      const tresc =
+        `Wydanie ${wydanie} · ${stempel} · część ${i + 1}/${czesci.length} · tryb ${tryb}\n` +
+        `Inwestycje: ${liczbaInwestycji} · raporty w wydaniu: ${raportowWWydaniu} z ${liczbaRaportow} · payload ${Math.round(bajty(json) / 1024)} kB\n` +
+        `\n` +
+        `Payload w załączniku: ${nazwaZalacznika}\n`;
+
+      await smtp.sendMail({
+        from: odbiorca,
+        to: odbiorca,
+        subject: temat,
+        text: tresc,
+        attachments: [{
+          filename: nazwaZalacznika,
+          content: json,
+          contentType: "application/json; charset=utf-8",
+        }],
+      });
+      wyslane.push({ czesc: i + 1, bajtow: bajty(json), zalacznik: nazwaZalacznika });
     }
 
     return odp({
       ok: true, wyslano: true, wydanie, wygenerowano: wygenerowanoISO, temat,
-      odbiorca, hash, rozmiar_b: rozmiar, czesci: wyslane,
+      odbiorca, hash, rozmiar_b: rozmiar, tryb, raportow_w_wydaniu: raportowWWydaniu, czesci: wyslane,
       przebieg_pelny: przebiegPelny, bez_zmian: bezZmian,
       powod: przebiegPelny && bezZmian ? "przebieg bezwarunkowy (domknięcie tygodnia)" : "payload różny od ostatniego wydania",
       ostrzezenia,
