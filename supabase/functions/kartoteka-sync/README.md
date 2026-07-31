@@ -2,8 +2,11 @@
 
 Edge Function, która wysyła **mailem** zawartość bazy Generatora Raportów do drugiej
 aplikacji właściciela (**Kartoteka**). Po drugiej stronie skrzynki nie siedzi człowiek,
-tylko automat, więc **treść maila jest kontraktem, nie tekstem do czytania** — format
-opisany niżej jest tym, na czym oparto odbiorcę.
+tylko automat, więc **mail jest kontraktem, nie tekstem do czytania** — format opisany
+niżej jest tym, na czym oparto odbiorcę.
+
+Payload jedzie **w załączniku JSON**; treść wiadomości to trzy linie dla człowieka i nic
+poza tym. Przebiegi zwykłe niosą **tylko zmienione raporty**, piątkowy — komplet.
 
 ---
 
@@ -24,7 +27,9 @@ w którym powstanie.
 Jedyne rachunki, jakie tu są, są **mechaniczne** i nie dotykają znaczenia danych:
 
 * sha256 tekstu payloadu (czy cokolwiek się zmieniło),
-* długość tablicy (dwie linijki nagłówka dla człowieka),
+* porównanie wierszy `raporty` **bajt w bajt po `id`** z poprzednim wydaniem (patrz „Tryb
+  wydania” niżej) — bez wiedzy o tym, co które pole znaczy,
+* długość tablicy (linie nagłówka dla człowieka),
 * rozmiar w bajtach (podział na części),
 * dopasowanie bieżącej minuty do wyrażenia cron (rozpoznanie przebiegu piątkowego).
 
@@ -45,7 +50,7 @@ z sześcioma kluczami — **każdy to tablica całych wierszy**:
 | `uzytkownicy` | wszystkie wiersze |
 | `projekty` | wszystkie wiersze |
 | `przypisania` | wszystkie wiersze |
-| `raporty` | **najnowszy raport na inwestycję** (`row_number()` po `numer desc`) |
+| `raporty` | **najnowszy raport na inwestycję** (`row_number()` po `numer desc`) — w przebiegu zwykłym dodatkowo przycięte do wierszy zmienionych, patrz „Tryb wydania” |
 | `udostepnienia` | wszystkie wiersze |
 
 Wiersze idą **w całości** — łącznie z pełnym `harmonogram`, kwotami, HTML-em w polach
@@ -85,45 +90,52 @@ z 31.07.2026, na którym zaprojektowano odbiorcę, i tak zostaje.
   Znacznik czasu w temacie to **czas polski** (`Europe/Warsaw`), format `RRRR-MM-DD HH:MM`.
   Wszystkie części jednego wydania mają **identyczny temat** — części rozróżnia pole `czesc`
   w kopercie, nie temat.
-* **Treść:** `text/plain`, **nigdy HTML** (encje psują JSON). Dwie linie nagłówka dla
-  człowieka, potem payload w ogrodzeniu ```` ```json ````:
+* **Treść:** `text/plain`, **nigdy HTML**. Trzy linie dla człowieka — **payload jest
+  w załączniku, nie w treści**:
 
-  ````
-  Wydanie 12 · 2026-07-31 18:00 · część 1/2
-  Inwestycje: 37 · raporty: 61 · payload 199 kB
-
-  ```json
-  {"wydanie":12,"wygenerowano":"2026-07-31T16:00:03.412Z","czesc":{"nr":1,"z":2},"dane":{…}}
   ```
-  ````
+  Wydanie 12 · 2026-07-31 18:00 · część 1/2 · tryb zmiany
+  Inwestycje: 36 · raporty w wydaniu: 3 z 26 · payload 61 kB
 
-* **Koperta:** `{ wydanie, wygenerowano, czesc: { nr, z }, dane }`, gdzie `dane` to wynik
-  zapytania. `wygenerowano` jest **w UTC (ISO 8601)** — to jest wartość dla maszyny;
-  czas w temacie i w pierwszej linii jest dla człowieka.
+  Payload w załączniku: raporty-sync-w12-cz1z2.json
+  ```
 
-### Uwaga dla odbiorcy: `Content-Transfer-Encoding: quoted-printable`
+* **Załącznik:** jeden na wiadomość, `application/json; charset=utf-8`, nazwa
+  `raporty-sync-w<wydanie>-cz<nr>z<z>.json`. W nim koperta i tylko ona.
+* **Koperta:** `{ wydanie, wygenerowano, tryb, czesc: { nr, z }, dane }`, gdzie `dane` to
+  wynik zapytania (w trybie `zmiany` z przyciętą tablicą `raporty` — patrz niżej).
+  `wygenerowano` jest **w UTC (ISO 8601)** — to jest wartość dla maszyny; czas w temacie
+  i w pierwszej linii jest dla człowieka.
 
-Payload to **jedna linia o długości 180–200 kB**, a SMTP nie przepuszcza dowolnie długich
-linii — nadawca (nodemailer) koduje więc treść jako `quoted-printable` i wstawia miękkie
-łamania (`=` na końcu linii) mniej więcej co 76 znaków. Widać to w surowym `.eml`.
+### Dlaczego payload jest załącznikiem, a nie w treści
 
-**Odbiorca musi zdekodować treść zgodnie z nagłówkiem `Content-Transfer-Encoding`, zanim
-zacznie parsować JSON.** Każda porządna biblioteka pocztowa robi to sama (`email` w Pythonie,
-`mailparser` w Node, `MimeMessage` w .NET) — ale czytanie surowego body „na piechotę"
-skończy się JSON-em posiekanym znakami `=` i błędem parsowania. To jedyne miejsce, w którym
-transport dokłada coś od siebie do kontraktu.
+Pierwsza wersja wklejała JSON do treści `text/plain` w ogrodzeniu ```` ```json ````. Pomiar
+na wydaniach 2 i 3 pokazał, że to, co dociera do odbiorcy, jest **o jedno odescapowanie za
+daleko**: `\"` przychodzi jako `"`, `\\` jako `\`, `\\n` jako `\n`. Payload przestaje być
+parsowalnym JSON-em wszędzie tam, gdzie w treści raportu siedzi HTML z cudzysłowami — a siedzi,
+bo raporty bywają wklejane z Worda. Kopia z Odebranych i z Wysłanych są identyczne co do bajta,
+więc nie robi tego poczta przychodząca; sprawcy nie udało się wskazać jednoznacznie.
+
+Załącznik omija cały ten problem: jedzie **base64** i nikt go po drodze nie „poprawia".
+
+**Odbiorca czyta załącznik, nie treść.** Dekodowanie robi za niego każda biblioteka pocztowa
+(`email` w Pythonie, `mailparser` w Node, `MimeMessage` w .NET). Treść maila jest odtąd
+wyłącznie dla człowieka — **nie ma w niej payloadu i nie będzie**.
 
 ### Podział na części
 
-Payload powyżej **200 kB** jest dzielony na części o **tym samym numerze wydania**;
-różnią się polem `czesc: { nr, z }`.
+Payload powyżej **80 kB** jest dzielony na części o **tym samym numerze wydania**;
+różnią się polem `czesc: { nr, z }` i nazwą załącznika.
 
-Skala z 31.07.2026 (36 inwestycji, 26 raportów po zwężeniu okna): **199,5 kB, jedna część** —
-czyli **497 bajtów pod progiem**. Jeden nowy raport albo dopisane zdanie w podsumowaniu i
-wydanie znów pójdzie w dwóch częściach. **Odbiorca nie może zakładać, że mail jest jeden**;
-obsługa `czesc: { nr, z }` musi zostać, nawet jeśli przez jakiś czas każde wydanie mieści się
-w jednej wiadomości. (Dla porównania: przy oknie `rn <= 2` było to 343,6 kB i dwie części,
-a ręczny eksport całości ważył 887 kB z `jsonb_pretty`.)
+**Skąd 80 kB, a nie 200 kB:** odbiorca czyta załącznik przez konektor, który **ucina odczyt
+na 100 000 znaków**. Przekroczenie progu nie daje błędu — daje po cichu urwany JSON. Próg
+80 kB trzyma każdą kopertę pod limitem nawet w najgorszym przypadku (czysty ASCII, gdzie bajt
+= znak; zmierzone maksimum to ok. 81 tys. znaków na część). **Podniesienie `LIMIT_CZESCI`
+urwie payload bez ostrzeżenia** — to nie jest stała do „optymalizacji".
+
+Rzędy wielkości z 31.07.2026: pełny eksport to ok. 366 kB, z czego same `raporty` 344 kB.
+Przebieg pełny idzie więc w kilku częściach, a typowy przebieg ze zmianami mieści się w jednej.
+**Odbiorca nie może zakładać, że mail jest jeden** — obsługa `czesc: { nr, z }` jest obowiązkowa.
 
 Podział jest **ślepy na znaczenie**: bierze kolejne elementy tablic najwyższego poziomu
 i pakuje je zachłannie. Nie zna nazw kluczy ani pól — nowa tabela w eksporcie podzieli się sama.
@@ -138,7 +150,45 @@ for (const czesc of czesciPosortowane)
 
 Każda część niesie **komplet kluczy** (puste tablice tam, gdzie nic nie wpadło), więc kształt
 `dane` jest w każdym mailu ten sam. Jedyny przypadek przekroczenia progu: pojedynczy wiersz
-większy niż 200 kB — trafia do własnej części i ją przekracza.
+większy niż 80 kB — trafia do własnej części i ją przekracza.
+
+---
+
+## Tryb wydania: `pelny` i `zmiany`
+
+Pole `tryb` w kopercie mówi, **co jest w tym wydaniu**:
+
+| `tryb` | `raporty` w kopercie | pozostałe tabele | kiedy |
+|---|---|---|---|
+| `zmiany` | **tylko wiersze, które doszły lub się zmieniły** | zawsze w całości | przebiegi zwykłe (co godzinę) |
+| `pelny` | **komplet** | zawsze w całości | piątek 18:00 oraz `?pelny=1` |
+
+Porównanie jest **bajtowe**: `JSON.stringify` wiersza zestawiony po `id` z tym samym wierszem
+z payloadu poprzedniego wydania. Funkcja nie wie, co które pole znaczy — nie sprawdza, czy
+zmiana jest „istotna". `jsonb` zwraca klucze w stałej kolejności, więc porównanie tekstów jest
+stabilne. Wiersz **bez `id`** jest wysyłany zawsze (nie ma po czym porównać — nie ryzykujemy).
+
+Powód jest arytmetyczny, nie znaczeniowy: `raporty` to 344 kB z 366 kB całego eksportu, a
+odbiorca ma limit odczytu (patrz „Podział na części"). Typowe wydanie schodzi dzięki temu
+z ~350 kB do kilkudziesięciu kB. Pozostałe tabele to razem ~22 kB i jadą **zawsze w całości** —
+bez `projekty` i `przypisania` odbiorca nie ma jak dopasować inwestycji ani PM-a, a oszczędność
+byłaby żadna.
+
+Do `sync_wydania.payload` zapisywany jest **payload PEŁNY**, nie skrót. To on jest punktem
+odniesienia dla następnego porównania; skrót istnieje wyłącznie w mailu.
+
+### Co to znaczy dla odbiorcy
+
+1. **Wydanie w trybie `zmiany` to nakładka, nie stan.** Kartoteka musi wmontować przysłane
+   wiersze `raporty` w to, co już ma (upsert po `id`), a nie zastępować nimi całości —
+   inaczej po pierwszym takim wydaniu zostaną jej trzy raporty zamiast dwudziestu sześciu.
+2. **Usunięć nie widać w trybie `zmiany`.** Skasowany raport nie generuje żadnego wiersza.
+   Jedyny moment, w którym odbiorca może wykryć usunięcie, to wydanie `pelny` — tam dostaje
+   komplet i może potraktować go jako stan wzorcowy. To kolejny powód, dla którego piątkowy
+   przebieg bezwarunkowy nie jest ozdobnikiem.
+3. **Pozostałe tabele zawsze zastępuj w całości** — w obu trybach przyjeżdżają kompletne.
+4. `raporty w wydaniu: 3 z 26` w treści maila mówi wprost, ile wierszy niesie to wydanie
+   z ilu istniejących.
 
 ---
 
@@ -354,8 +404,9 @@ select jsonb_pretty(payload) from sync_wydania where numer = 12;
 Trzy rzeczy, które przy tej funkcji wyglądają jak duplikat, a nim nie są:
 
 1. **Części jednego wydania mają identyczny temat** (tak brzmi kontrakt). Różnią się
-   **pierwszą linią treści** — `część 1/2` i `część 2/2` — oraz polem `czesc` w kopercie.
-   Outlook skleja je w jeden wątek, bo temat jest ten sam.
+   **pierwszą linią treści** (`część 1/2`, `część 2/2`), **nazwą załącznika**
+   (`…-cz1z2.json`, `…-cz2z2.json`) oraz polem `czesc` w kopercie. Outlook skleja je
+   w jeden wątek, bo temat jest ten sam.
 2. **Mail idzie sam do siebie**, więc Exchange trzyma go w **Odebranych i Wysłanych**.
    To ta sama wiadomość w dwóch folderach, nie dwie wysyłki.
 3. Rozstrzyga **`Message-ID`** (Outlook: *Plik → Właściwości → Nagłówki internetowe*).
@@ -374,8 +425,9 @@ Odsiewanie u odbiorcy jest tańsze i nie zabiera nikomu historii wysyłki.
 
 Podział bywa nierówny i to też jest w porządku: klucze pakowane są po kolei, więc część 1
 potrafi zawierać wyłącznie `raporty`, a całą resztę (`projekty`, `uzytkownicy`, `przypisania`,
-`udostepnienia`) znajdziesz dopiero w części 2. **Dopiero komplet części to komplet danych** —
-nagłówek „Inwestycje: 36 · raporty: 45" podaje liczby dla całego wydania, nie dla tej części.
+`udostepnienia`) znajdziesz dopiero w części ostatniej. **Dopiero komplet części to komplet
+danych** — nagłówek „Inwestycje: 36 · raporty w wydaniu: 3 z 26" podaje liczby dla całego
+wydania, nie dla tej jednej części.
 
 Brak nowych wierszy przez kilka godzin w dzień roboczy to **normalne** — znaczy tyle, że nikt
 nie zapisał ani nie poprawił raportu. Piątkowy przebieg bezwarunkowy zakłada wiersz zawsze,
