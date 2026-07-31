@@ -281,26 +281,40 @@ Odbiorca rozpoznaje wiersz po `id`, a zmianę po `zaktualizowano`.
    (Edge Functions → *Schedules*) albo SQL-em (`pg_cron` + `pg_net`):
 
    ```sql
-   select cron.schedule('kartoteka-sync', '0 4-16 * * 1-5', $$
-     select net.http_post(
-       url     := 'https://<PROJEKT>.supabase.co/functions/v1/kartoteka-sync',
-       headers := jsonb_build_object('Authorization', 'Bearer <SERVICE_ROLE_KEY>',
-                                     'Content-Type',  'application/json')
-     );
-   $$);
-
-   select cron.schedule('kartoteka-sync-pelny', '0 16 * * 5', $$
-     select net.http_post(
-       url     := 'https://<PROJEKT>.supabase.co/functions/v1/kartoteka-sync',
-       headers := jsonb_build_object('Authorization', 'Bearer <SERVICE_ROLE_KEY>',
-                                     'Content-Type',  'application/json')
-     );
-   $$);
+   select cron.schedule('kartoteka-sync', '0 4-16 * * 1-5', $cron$
+   select net.http_post(
+     url := 'https://<PROJEKT>.supabase.co/functions/v1/kartoteka-sync',
+     headers := jsonb_build_object(
+       'Authorization', 'Bearer <SEKRET>',
+       'Content-Type', 'application/json'
+     ),
+     timeout_milliseconds := 60000
+   );
+   $cron$);
    ```
 
-   Piątek 18:00 trafia w oba harmonogramy — drugi przebieg zobaczy identyczny hash, ale
-   jako „pełny” wyjdzie mimo to. Nic się nie dubluje w sposób szkodliwy: to jedno wydanie
-   więcej, dokładnie takie, jakie miało domknąć tydzień.
+   Drugi wpis jest identyczny, zmienia się tylko nazwa i harmonogram:
+   `cron.schedule('kartoteka-sync-pelny', '0 16 * * 5', …)`.
+
+   **`timeout_milliseconds := 60000` nie jest ozdobnikiem.** Domyślny timeout `net.http_post`
+   to **1 sekunda**, a ta funkcja potrzebuje kilku sekund na eksport i SMTP — przy domyślnej
+   wartości pg_net zrywa połączenie w trakcie i przebieg potrafi urwać się w środku wysyłki.
+
+   Piątkowy wpis woła **ten sam adres, bez parametrów** — funkcja rozpozna swój przebieg
+   bezwarunkowy po `KARTOTEKA_SYNC_PELNY_CRON`. Piątek 18:00 trafia w oba harmonogramy:
+   drugi przebieg zobaczy identyczny hash, ale jako „pełny” wyjdzie mimo to. Nic się nie
+   dubluje szkodliwie — to jedno wydanie więcej, dokładnie takie, jakie miało domknąć tydzień.
+
+   Bez pisania SQL-a: **Integrations → Cron → Create job**, typ *Supabase Edge Function*.
+
+   Sprawdzenie, że wpisy istnieją — warto zrobić od razu, bo brak harmonogramu wygląda
+   dokładnie tak samo jak „nic się nie zmieniło”, czyli jak cisza w skrzynce:
+
+   ```sql
+   select jobid, jobname, schedule, active from cron.job order by jobid;
+   select jobid, status, return_message, start_time
+     from cron.job_run_details order by start_time desc limit 10;
+   ```
 
 ---
 
