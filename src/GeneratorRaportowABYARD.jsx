@@ -254,14 +254,35 @@ function najnowszyRaport(raporty) {
   return best;
 }
 
-// Średni postęp % z pozycji, które mają wpisany procent; null gdy żadna nie ma
+// Zaawansowanie inwestycji w % (kafelek w archiwum i kokpit koordynacji); null gdy
+// harmonogram jest pusty. Zasady:
+//  - liczą się tylko pozycje AKTYWNE, czyli mające cokolwiek wpisane (daty, prognozę,
+//    % albo wartość umowy). Puste wiersze z listy ZZK — czyli zakres, który w danym
+//    projekcie nie występuje — są pomijane, inaczej każdy raport pokazywałby kilka %.
+//  - pozycja aktywna BEZ wpisanego % liczy się jako 0% (robota jeszcze nie ruszyła),
+//    a nie jest wyrzucana ze zbioru. Wcześniej parseInt("") = NaN wypadał z filtra,
+//    przez co np. nierozpoczęta stolarka nie obniżała wyniku i średnia dawała 100%.
+//  - gdy KAŻDA aktywna pozycja ma wartość umowy, średnia jest ważona tą wartością
+//    (Σ kwota×% / Σ kwota) — tak samo jak liczona jest wykonana sprzedaż. Przy
+//    niepełnym cashflow ważenie zniekształcałoby wynik, więc wracamy do średniej
+//    arytmetycznej z pozycji aktywnych.
 function sredniPostep(harmonogram) {
   if (!Array.isArray(harmonogram)) return null;
-  const wartosci = harmonogram
-    .map((w) => efektywnyWiersz(w))
-    .map((w) => parseInt(w.proc, 10))
-    .filter((n) => !isNaN(n));
-  if (wartosci.length === 0) return null;
+  const aktywne = harmonogram.filter((w) => {
+    const ef = efektywnyWiersz(w);
+    return ef.start || ef.koniec || ef.rzecz || (ef.proc !== "" && ef.proc != null) || kwotaZadania(w) > 0;
+  });
+  if (aktywne.length === 0) return null;
+
+  if (aktywne.every((w) => kwotaZadania(w) > 0)) {
+    const suma = sumaWartosciUmowy(aktywne);
+    if (suma > 0) return Math.round((wykonanaSprzedaz(aktywne) / suma) * 100);
+  }
+
+  const wartosci = aktywne.map((w) => {
+    const n = parseInt(efektywnyWiersz(w).proc, 10);
+    return isNaN(n) ? 0 : n;
+  });
   return Math.round(wartosci.reduce((a, b) => a + b, 0) / wartosci.length);
 }
 
