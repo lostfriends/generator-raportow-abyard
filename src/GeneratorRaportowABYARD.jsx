@@ -254,6 +254,123 @@ function najnowszyRaport(raporty) {
   return best;
 }
 
+/* ---------------------------------------------------------------------------
+   KONDYCJA RAPORTOWANIA INWESTYCJI (kafle w archiwum)
+   Cykl raportowy to piątek co 2 tygodnie (patrz Edge Function „przypomnienia-raporty"),
+   więc raport starszy niż 14 dni oznacza, że przepadł co najmniej jeden termin —
+   taką inwestycję wyróżniamy na kaflu razem z nazwiskiem kierownika.
+--------------------------------------------------------------------------- */
+const PROG_ZALEGANIA_DNI = 14;
+
+// Data, po której oceniamy „świeżość" raportu: dzień opracowania, a gdy go brak — koniec okresu.
+function dataRaportu(r) {
+  return r?.data_opracowania || r?.okres_do || null;
+}
+
+// Ile dni temu powstał raport; null gdy raportu (albo daty) nie ma.
+// Datę z przyszłości traktujemy jak dzisiejszą — raport złożony „na zapas" jest aktualny.
+function dniOdRaportu(raport, dzis) {
+  const d = dataRaportu(raport);
+  if (!d) return null;
+  const n = dniMiedzy(dzis, d);
+  return n == null ? null : Math.max(0, n);
+}
+
+// Kondycja raportowania jednej inwestycji:
+//  "wstrzymana" — budowa stoi, nikogo nie ścigamy (choć raportować nadal wolno),
+//  "brak"       — nigdy nie było raportu,
+//  "zalega"     — ostatni raport starszy niż PROG_ZALEGANIA_DNI,
+//  "aktualny"   — raport z bieżącego cyklu.
+function kondycjaRaportowania(dniOd, wstrzymana) {
+  if (wstrzymana) return "wstrzymana";
+  if (dniOd === null) return "brak";
+  return dniOd > PROG_ZALEGANIA_DNI ? "zalega" : "aktualny";
+}
+
+// Kafle inwestycji dla archiwum: jeden kafel na AKTYWNĄ inwestycję. Inwestycje
+// zakończone (projekty.aktywny = false) nie mają kafla — ich raporty zostają
+// na liście poniżej. Do każdego kafla dokładamy ostatni raport, licznik dni bez
+// raportu i nazwiska przypisanych kierowników.
+function kafleInwestycji({ projekty, raporty, przypisania, uzytkownicy, dzis }) {
+  const uzytMap = Object.fromEntries((uzytkownicy || []).map((u) => [u.id, u]));
+  const wgProjektu = {};
+  for (const r of (raporty || [])) (wgProjektu[r.projekt_id] ||= []).push(r);
+  return (projekty || []).map((p) => {
+    const moje = wgProjektu[p.id] || [];
+    const ostatni = najnowszyRaport(moje);
+    const dniOd = dniOdRaportu(ostatni, dzis);
+    const pmy = (przypisania || [])
+      .filter((x) => x.projekt_id === p.id)
+      .map((x) => nazwaOsoby(uzytMap[x.uzytkownik]))
+      .filter(Boolean)
+      .sort((a, b) => a.localeCompare(b, "pl"));
+    return {
+      klucz: p.id,
+      nazwa: p.nazwa,
+      liczba: moje.length,
+      ostatni,
+      dniOd,
+      wstrzymana: !!p.wstrzymana,
+      kondycja: kondycjaRaportowania(dniOd, !!p.wstrzymana),
+      pmy,
+    };
+  });
+}
+
+// Awaryjne kafle z samych raportów — gdy nie udało się pobrać listy inwestycji
+// (np. chwilowy błąd sieci). Wtedy archiwum działa jak dotąd, bez sekcji „zalega".
+function kafleZRaportow(raporty, dzis) {
+  return przegladBudow(raporty || []).map((b) => {
+    const dniOd = dniOdRaportu(b.ostatni, dzis);
+    return {
+      klucz: b.nazwa, nazwa: b.nazwa, liczba: b.liczba, ostatni: b.ostatni, dniOd,
+      wstrzymana: false, kondycja: kondycjaRaportowania(dniOd, false), pmy: [],
+    };
+  });
+}
+
+// Kolejność kafli: najpierw z aktualnym raportem (najświeższy na czele), pod nimi
+// zalegające (najdłużej zalegające i te bez raportu na czele), na końcu wstrzymane.
+const RANGA_KONDYCJI = { aktualny: 0, brak: 1, zalega: 1, wstrzymana: 2 };
+function sortujKafle(a, b) {
+  const ra = RANGA_KONDYCJI[a.kondycja] ?? 3;
+  const rb = RANGA_KONDYCJI[b.kondycja] ?? 3;
+  if (ra !== rb) return ra - rb;
+  const da = a.dniOd === null ? Infinity : a.dniOd;
+  const db = b.dniOd === null ? Infinity : b.dniOd;
+  if (ra === 0 && da !== db) return da - db;       // aktualne: świeższy wyżej
+  if (ra === 1 && da !== db) return db - da;       // zalegające: dłużej zalegający wyżej
+  return a.nazwa.localeCompare(b.nazwa, "pl");
+}
+
+// Kto zalega z raportami — nazwiska z liczbą inwestycji, do paska alarmowego.
+function zalegajacyPM(kafle) {
+  const licznik = new Map();
+  let bezPM = 0;
+  for (const k of kafle) {
+    if (k.pmy.length === 0) { bezPM += 1; continue; }
+    for (const osoba of k.pmy) licznik.set(osoba, (licznik.get(osoba) || 0) + 1);
+  }
+  const osoby = Array.from(licznik.entries())
+    .sort((a, b) => (b[1] - a[1]) || a[0].localeCompare(b[0], "pl"))
+    .map(([osoba, ile]) => (ile > 1 ? `${osoba} (${ile})` : osoba));
+  if (bezPM > 0) osoby.push(`bez przypisanego kierownika (${bezPM})`);
+  return osoby;
+}
+
+// Polska odmiana przez liczbę: odmiana(3, ["raport", "raporty", "raportów"]) → "raporty".
+function odmiana(n, [poj, mn, dop]) {
+  const a = Math.abs(n);
+  if (a === 1) return poj;
+  const r10 = a % 10, r100 = a % 100;
+  return (r10 >= 2 && r10 <= 4 && (r100 < 12 || r100 > 14)) ? mn : dop;
+}
+
+// Wariant plakietki Chip dla kodu ze statusZRaportu.
+function wariantStatusu(kod) {
+  return kod === "zagrozenie" ? "warn" : kod === "ok" ? "ok" : "neutral";
+}
+
 // Zaawansowanie inwestycji w % (kafelek w archiwum i kokpit koordynacji); null gdy
 // harmonogram jest pusty. Zasady:
 //  - liczą się tylko pozycje AKTYWNE, czyli mające cokolwiek wpisane (daty, prognozę,
@@ -1175,6 +1292,10 @@ export default function GeneratorRaportowABYARD() {
   const [toast, setToast] = useState("");
   // Archiwum:
   const [archRaporty, setArchRaporty] = useState(null); // null = nie wczytano; [] = wczytano puste
+  // Tło kafli archiwum: aktywne inwestycje + przypisania + użytkownicy (nazwiska PM).
+  // Kafle budujemy z inwestycji, a nie z raportów — dzięki temu zakończone znikają,
+  // a aktywne bez ani jednego raportu w ogóle się pokazują.
+  const [archInw, setArchInw] = useState({ projekty: [], przypisania: [], uzytkownicy: [] });
   const [archLadowanie, setArchLadowanie] = useState(false);
   const [cashflowWlaczony, setCashflowWlaczony] = useState(false); // czy pokazać kolumnę kwot + cashflow
   const [archFiltr, setArchFiltr] = useState(""); // filtr po nazwie budowy (klik w kafelek)
@@ -1718,8 +1839,17 @@ export default function GeneratorRaportowABYARD() {
   async function wczytajArchiwum({ ciche = false } = {}) {
     if (!ciche) setArchLadowanie(true);
     try {
-      const dane = await listaWszystkichRaportow();
+      // Raporty są obowiązkowe; dane do kafli (inwestycje/przypisania/osoby) pobieramy
+      // „miękko" — gdy któreś zapytanie padnie, archiwum i tak się otworzy, tylko kafle
+      // wrócą do trybu awaryjnego (liczone z samych raportów).
+      const [dane, projAkt, przyp, uzyt] = await Promise.all([
+        listaWszystkichRaportow(),
+        listaAktywnychProjektow().catch(() => []),
+        listaPrzypisan().catch(() => []),
+        listaUzytkownikow().catch(() => []),
+      ]);
       setArchRaporty(dane);
+      setArchInw({ projekty: projAkt, przypisania: przyp, uzytkownicy: uzyt });
     } catch (e) {
       console.error(e);
       if (!ciche) {
@@ -1918,6 +2048,9 @@ export default function GeneratorRaportowABYARD() {
     return (
       <WidokArchiwum
         raporty={archRaporty}
+        inwestycje={archInw.projekty}
+        przypisania={archInw.przypisania}
+        uzytkownicy={archInw.uzytkownicy}
         ladowanie={archLadowanie}
         filtr={archFiltr}
         setFiltr={setArchFiltr}
@@ -3617,25 +3750,140 @@ function WidokKtoCoProwadzi({ jestAdmin, email, onForm, onArchiwum, onAdmin, onW
 }
 
 /* ---------- ARCHIWUM ----------------------------------------------------- */
-function WidokArchiwum({ raporty, ladowanie, filtr, setFiltr, onOdswiez, onOtworz, onEdytuj, onUsun, mozeEdytowac, godzinyDoEdycji, onPozwolEdycje, onCofnijEdycje, onNowyRaport, jestAdmin, email, onForm, onKoordynacja, onAdmin, onWyloguj }) {
-  // Status na plakietce czyta z pola „Podsumowanie" raportu. Dodatkowo, gdy opóźnienie
-  // w harmonogramie realnie opóźnia zakończenie całości projektu, wymuszamy „zagrożenie"
-  // (zabezpiecza też starsze raporty zapisane z domyślną opcją „nie powoduje zagrożenia").
-  const ZAGROZENIE = { txt: "Zagrożenie terminu", kolor: "#C0392B", tlo: "#FBECEA", wariant: "warn" };
-  const NIEZAGROZONY = { txt: "Termin niezagrożony", kolor: "#1B7A3D", tlo: "#E6F3EA", wariant: "ok" };
-  function statusInwestycji(raport) {
-    if (!raport) return { txt: "—", kolor: C.szary, tlo: "transparent", wariant: "neutral" };
-    if (harmonogramWymuszaZagrozenie(raport.harmonogram, raport.data_opracowania)) return ZAGROZENIE;
-    const t = (raport.podsumowanie || "").toLowerCase();
-    const brakZagrozenia = t.includes("nie powoduje") || t.includes("niezagroż") || t.includes("nie ma zagroż") || t.includes("bez zagroż");
-    if (brakZagrozenia) return NIEZAGROZONY;
-    if (t.includes("zagroż") || t.includes("zagroz")) return ZAGROZENIE;
-    return NIEZAGROZONY;
-  }
 
+// Kafel jednej inwestycji w przeglądzie archiwum. Czyta się w dwóch osiach:
+//  - GÓRNY PAS = kondycja raportowania (aktualny / zalega / brak / wstrzymana)
+//    razem z nazwiskiem kierownika, który za raport odpowiada,
+//  - DOLNA PLAKIETKA = status terminu z ostatniego raportu (zagrożenie / niezagrożony).
+function KafelInwestycji({ kafel: k, aktywny, status, onKlik }) {
+  const o = k.ostatni || {};
+  const zalega = k.kondycja === "zalega" || k.kondycja === "brak";
+  const T = {
+    aktualny: { pas: "#E6F3EA", tekst: C.zielony, ramka: C.linia, tlo: C.bialy },
+    zalega: { pas: "#FBF0DC", tekst: "#B9791A", ramka: "#E7C489", tlo: "#FFFDF7" },
+    brak: { pas: "#FBECEA", tekst: C.czerwony, ramka: "#EEB6AE", tlo: "#FFFAF9" },
+    wstrzymana: { pas: C.jasny, tekst: C.szary, ramka: C.linia, tlo: C.bialy },
+  }[k.kondycja] || { pas: C.jasny, tekst: C.szary, ramka: C.linia, tlo: C.bialy };
+
+  const etykietaPasa =
+    k.kondycja === "brak" ? "Brak raportu"
+    : k.kondycja === "wstrzymana" ? "Wstrzymana"
+    : k.dniOd === 0 ? "Raport z dziś"
+    : k.dniOd === 1 ? "1 dzień od raportu"
+    : `${k.dniOd} dni od raportu`;
+
+  const osoby = k.pmy.length > 0 ? k.pmy.join(", ") : "brak kierownika";
+  const postep = sredniPostep(o.harmonogram);
+  const opoz = opoznienieInwestycji(o.harmonogram, o.data_opracowania);
+  const komorka = (etykieta, wartosc, kolor) => (
+    <div style={{ flex: "1 1 calc(50% - 4px)", background: C.jasny, borderRadius: 6, padding: "6px 8px" }}>
+      <div style={{ fontFamily: C.mono, fontSize: 9, fontWeight: 400, textTransform: "uppercase", letterSpacing: "0.08em", color: C.szary2 }}>{etykieta}</div>
+      <div style={{ fontSize: 13, fontWeight: 700, color: kolor || C.czarny }}>{wartosc}</div>
+    </div>
+  );
+
+  return (
+    <div
+      onClick={onKlik}
+      title={k.ostatni ? "Kliknij, aby zawęzić listę raportów do tej inwestycji" : "Ta inwestycja nie ma jeszcze żadnego raportu"}
+      style={{
+        background: T.tlo,
+        border: `2px solid ${aktywny ? C.zolty : T.ramka}`,
+        borderRadius: 10,
+        padding: 16,
+        cursor: "pointer",
+        transition: "border-color .15s",
+        opacity: k.kondycja === "wstrzymana" ? 0.75 : 1,
+      }}
+    >
+      {/* Pas kondycji raportowania — wychodzi na krawędzie kafla */}
+      <div style={{ margin: "-16px -16px 12px", padding: "7px 12px", background: T.pas, borderRadius: "8px 8px 0 0",
+        display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", gap: 6 }}>
+        <span style={{ fontFamily: C.mono, fontSize: 9.5, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: T.tekst, whiteSpace: "nowrap" }}>
+          {etykietaPasa}
+        </span>
+        <span title={osoby}
+          style={{ fontSize: 11.5, fontWeight: zalega ? 700 : 400, color: zalega ? T.tekst : C.szary,
+            maxWidth: "100%", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          {zalega ? `zalega: ${osoby}` : osoby}
+        </span>
+      </div>
+
+      <div style={{ fontWeight: 800, fontSize: 15, marginBottom: 6 }}>{k.nazwa}</div>
+      <div style={{ fontFamily: C.mono, fontSize: 10, letterSpacing: "0.03em", color: C.szary2, textTransform: "uppercase", marginBottom: 12 }}>
+        {k.ostatni
+          ? `${k.liczba} ${odmiana(k.liczba, ["raport", "raporty", "raportów"])} · nr ${o.numer} · ${dataRaportu(o) ? fmtPL(dataRaportu(o)) : "—"}`
+          : "brak raportów w archiwum"}
+      </div>
+
+      {!k.ostatni && (
+        <div style={{ fontSize: 12.5, color: C.szary, lineHeight: 1.5 }}>
+          Inwestycja jest aktywna, ale nie ma ani jednego raportu w bazie.
+          Pierwszy złożysz przyciskiem <strong style={{ color: C.czarny }}>+ Nowy raport</strong>.
+        </div>
+      )}
+
+      {k.ostatni && (<>
+        {postep !== null && <div style={{ marginBottom: 10 }}><PasekPostepu proc={postep} etykieta="zaawansowanie" szer="100%" /></div>}
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 12 }}>
+          {komorka(
+            "Opóźnienie",
+            opoz === null ? "—" : opoz.dni > 0 ? `${opoz.dni} dni` : "brak",
+            opoz && opoz.dni > 0 ? C.czerwony : C.czarny
+          )}
+          {komorka("Zakończenie wg umowy", (() => {
+            const zHarm = najpozniejszePlanowaneZakonczenie(o.harmonogram);
+            if (zHarm) return fmtPL(zHarm);
+            return o.zakonczenie_robot ? fmtPL(o.zakonczenie_robot) : "—";
+          })())}
+          {komorka("Pozwolenie (PNU)", o.pnu_nie_dotyczy ? "Nie dotyczy" : (o.pnu ? fmtPL(o.pnu) : "—"))}
+        </div>
+        <Chip wariant={status.wariant}>{status.txt}</Chip>
+      </>)}
+    </div>
+  );
+}
+
+function WidokArchiwum({ raporty, inwestycje, przypisania, uzytkownicy, ladowanie, filtr, setFiltr, onOdswiez, onOtworz, onEdytuj, onUsun, mozeEdytowac, godzinyDoEdycji, onPozwolEdycje, onCofnijEdycje, onNowyRaport, jestAdmin, email, onForm, onKoordynacja, onAdmin, onWyloguj }) {
+  // Status na plakietce (zagrożenie terminu) — ta sama logika, co w kokpicie koordynacji:
+  // harmonogram opóźniający zakończenie całości ma pierwszeństwo, dalej pole „Podsumowanie".
+  const statusInwestycji = (raport) => {
+    const s = statusZRaportu(raport);
+    return { ...s, wariant: wariantStatusu(s.kod) };
+  };
+
+  const [tylkoZalegajace, setTylkoZalegajace] = React.useState(false);
   const lista = raporty || [];
-  const budowy = przegladBudow(lista);
   const widoczne = filtr ? lista.filter((r) => r.nazwaProjektu === filtr) : lista;
+
+  // --- KAFLE INWESTYCJI ------------------------------------------------------
+  // Źródłem kafli są AKTYWNE inwestycje (nie raporty), więc zakończone znikają
+  // z przeglądu, a aktywne bez ani jednego raportu są od razu widoczne jako „brak".
+  const dzis = dzisISO();
+  const kafle = React.useMemo(() => {
+    const zrodlo = (inwestycje && inwestycje.length > 0)
+      ? kafleInwestycji({ projekty: inwestycje, raporty: lista, przypisania, uzytkownicy, dzis })
+      : kafleZRaportow(lista, dzis);
+    return [...zrodlo].sort(sortujKafle);
+  }, [inwestycje, przypisania, uzytkownicy, lista, dzis]);
+
+  const grupy = React.useMemo(() => {
+    const g = {
+      aktualne: kafle.filter((k) => k.kondycja === "aktualny"),
+      zalegajace: kafle.filter((k) => k.kondycja === "zalega" || k.kondycja === "brak"),
+      wstrzymane: kafle.filter((k) => k.kondycja === "wstrzymana"),
+    };
+    return g;
+  }, [kafle]);
+  const osobyZalegajace = React.useMemo(() => zalegajacyPM(grupy.zalegajace), [grupy.zalegajace]);
+  // Gdy po odświeżeniu nikt już nie zalega, przełącznik znika — wracamy do pełnej listy.
+  const sekcje = (tylkoZalegajace && grupy.zalegajace.length > 0)
+    ? [["zalegajace", `Zalega z raportem — ponad ${PROG_ZALEGANIA_DNI} dni`, grupy.zalegajace]]
+    : [
+        ["aktualne", "Z aktualnym raportem", grupy.aktualne],
+        ["zalegajace", `Zalega z raportem — ponad ${PROG_ZALEGANIA_DNI} dni`, grupy.zalegajace],
+        ["wstrzymane", "Wstrzymane", grupy.wstrzymane],
+      ];
 
   return (
     <div style={{ fontFamily: "'Segoe UI', system-ui, sans-serif", background: C.jasny, minHeight: "100vh", color: C.czarny }}>
@@ -3655,7 +3903,7 @@ function WidokArchiwum({ raporty, ladowanie, filtr, setFiltr, onOdswiez, onOtwor
         <NaglowekEkranu
           eyebrow="Archiwum"
           tytul="Raporty z budów"
-          sub="Kliknij kartę budowy, aby zawęzić listę. Otwórz raport, by pobrać PDF lub udostępnić link."
+          sub={`Kafle to inwestycje w toku: najpierw te z aktualnym raportem, niżej zalegające ponad ${PROG_ZALEGANIA_DNI} dni — z nazwiskiem kierownika. Zakończone inwestycje nie mają kafla, ich raporty zostają na liście poniżej. Kliknij kafel, aby zawęzić listę.`}
           akcje={<>
             <button onClick={onOdswiez} style={{ ...miniBtn, padding: "8px 14px", fontWeight: 600 }}>↻ Odśwież</button>
             <button onClick={onNowyRaport} style={{ background: C.zolty, color: C.czarny, border: "none", padding: "9px 16px", borderRadius: 6, fontWeight: 700, fontSize: 12.5, cursor: "pointer", fontFamily: "inherit" }}>+ Nowy raport</button>
@@ -3665,68 +3913,60 @@ function WidokArchiwum({ raporty, ladowanie, filtr, setFiltr, onOdswiez, onOtwor
           <div style={{ textAlign: "center", padding: 40, color: C.szary }}>Wczytywanie z bazy…</div>
         )}
 
-        {!ladowanie && lista.length === 0 && (
+        {!ladowanie && lista.length === 0 && kafle.length === 0 && (
           <div style={{ textAlign: "center", padding: 60, color: C.szary }}>
             <div style={{ fontSize: 16, marginBottom: 8 }}>Brak zapisanych raportów</div>
             <div style={{ fontSize: 13 }}>Gdy zapiszesz pierwszy raport w bazie, pojawi się tutaj.</div>
           </div>
         )}
 
-        {!ladowanie && lista.length > 0 && (
+        {!ladowanie && (lista.length > 0 || kafle.length > 0) && (
           <>
-            {/* 1) Przegląd zbiorczy budów */}
+            {/* 1) Przegląd zbiorczy inwestycji w toku */}
+            {grupy.zalegajace.length > 0 && (
+              <div style={{ border: "1px solid #F0C0C0", background: "#FCF3F3", borderRadius: 8, padding: "11px 14px", marginBottom: 14,
+                display: "flex", flexWrap: "wrap", alignItems: "center", gap: 10 }}>
+                <Chip wariant="warn">
+                  {grupy.zalegajace.length} {odmiana(grupy.zalegajace.length, ["inwestycja", "inwestycje", "inwestycji"])} bez aktualnego raportu
+                </Chip>
+                <span style={{ fontSize: 13, color: C.czarny, lineHeight: 1.5 }}>
+                  Zalegają: <strong>{osobyZalegajace.join(" · ")}</strong>
+                </span>
+              </div>
+            )}
+
+            <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 12 }}>
+              <TytulSekcji>Inwestycje w toku · {kafle.length}</TytulSekcji>
+              {grupy.zalegajace.length > 0 && (
+                <PigulkaPrzelacznik
+                  opcje={[[false, `Wszystkie (${kafle.length})`], [true, `Zalegające (${grupy.zalegajace.length})`]]}
+                  wartosc={tylkoZalegajace}
+                  onZmiana={setTylkoZalegajace}
+                />
+              )}
+            </div>
+
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", gap: 14, marginBottom: 28 }}>
-              {budowy.map((b) => {
-                const st = statusInwestycji(b.ostatni);
-                const aktywny = filtr === b.nazwa;
-                return (
-                  <div
-                    key={b.nazwa}
-                    onClick={() => setFiltr(aktywny ? "" : b.nazwa)}
-                    style={{
-                      background: C.bialy,
-                      border: `2px solid ${aktywny ? C.zolty : C.linia}`,
-                      borderRadius: 10,
-                      padding: 16,
-                      cursor: "pointer",
-                      transition: "border-color .15s",
-                    }}
-                  >
-                    <div style={{ fontWeight: 800, fontSize: 15, marginBottom: 6 }}>{b.nazwa}</div>
-                    <div style={{ fontFamily: C.mono, fontSize: 10, letterSpacing: "0.03em", color: C.szary2, textTransform: "uppercase", marginBottom: 12 }}>
-                      {b.liczba} {b.liczba === 1 ? "raport" : "raportów"} · nr {b.ostatni?.numer} · {b.ostatni?.data_opracowania ? fmtPL(b.ostatni.data_opracowania) : "—"}
-                    </div>
-                    {(() => {
-                      const o = b.ostatni || {};
-                      const postep = sredniPostep(o.harmonogram);
-                      const opoz = opoznienieInwestycji(o.harmonogram, o.data_opracowania);
-                      const komorka = (etykieta, wartosc, kolor) => (
-                        <div style={{ flex: "1 1 calc(50% - 4px)", background: C.jasny, borderRadius: 6, padding: "6px 8px" }}>
-                          <div style={{ fontFamily: C.mono, fontSize: 9, fontWeight: 400, textTransform: "uppercase", letterSpacing: "0.08em", color: C.szary2 }}>{etykieta}</div>
-                          <div style={{ fontSize: 13, fontWeight: 700, color: kolor || C.czarny }}>{wartosc}</div>
-                        </div>
-                      );
-                      return (<>
-                        {postep !== null && <div style={{ marginBottom: 10 }}><PasekPostepu proc={postep} etykieta="zaawansowanie" szer="100%" /></div>}
-                        <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 12 }}>
-                          {komorka(
-                            "Opóźnienie",
-                            opoz === null ? "—" : opoz.dni > 0 ? `${opoz.dni} dni` : "brak",
-                            opoz && opoz.dni > 0 ? "#C0392B" : C.czarny
-                          )}
-                          {komorka("Zakończenie wg umowy", (() => {
-                            const zHarm = najpozniejszePlanowaneZakonczenie(o.harmonogram);
-                            if (zHarm) return fmtPL(zHarm);
-                            return o.zakonczenie_robot ? fmtPL(o.zakonczenie_robot) : "—";
-                          })())}
-                          {komorka("Pozwolenie (PNU)", o.pnu_nie_dotyczy ? "Nie dotyczy" : (o.pnu ? fmtPL(o.pnu) : "—"))}
-                        </div>
-                      </>);
-                    })()}
-                    <Chip wariant={st.wariant}>{st.txt}</Chip>
+              {sekcje.map(([kod, tytul, pozycje]) => pozycje.length === 0 ? null : (
+                <React.Fragment key={kod}>
+                  <div style={{ gridColumn: "1 / -1", display: "flex", alignItems: "center", gap: 10, marginTop: kod === "aktualne" ? 0 : 6 }}>
+                    <span style={{ fontFamily: C.mono, fontSize: 10, letterSpacing: "0.12em", textTransform: "uppercase", whiteSpace: "nowrap",
+                      color: kod === "zalegajace" ? C.czerwony : kod === "wstrzymane" ? C.szary2 : C.szary }}>
+                      {tytul} · {pozycje.length}
+                    </span>
+                    <span style={{ flex: 1, height: 1, background: C.linia }} />
                   </div>
-                );
-              })}
+                  {pozycje.map((k) => (
+                    <KafelInwestycji
+                      key={k.klucz}
+                      kafel={k}
+                      aktywny={filtr === k.nazwa}
+                      status={statusInwestycji(k.ostatni)}
+                      onKlik={() => setFiltr(filtr === k.nazwa ? "" : k.nazwa)}
+                    />
+                  ))}
+                </React.Fragment>
+              ))}
             </div>
 
             {/* Filtr aktywny — informacja */}
@@ -3739,6 +3979,11 @@ function WidokArchiwum({ raporty, ladowanie, filtr, setFiltr, onOdswiez, onOtwor
 
             {/* 2) Lista raportów — wiersze w stylu abyard.com (numbadge + meta mono + postęp + chip) */}
             <div style={{ background: C.bialy, border: `1px solid ${C.linia}`, borderRadius: 10, padding: "4px 20px" }}>
+              {widoczne.length === 0 && (
+                <div style={{ padding: "22px 4px", fontSize: 13, color: C.szary, fontStyle: "italic" }}>
+                  Brak raportów dla wybranej inwestycji.
+                </div>
+              )}
               {widoczne.map((r, idx) => {
                 const st = statusInwestycji(r);
                 const postep = sredniPostep(r.harmonogram);
