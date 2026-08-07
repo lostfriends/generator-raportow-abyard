@@ -215,10 +215,13 @@ export async function projektyDoWyboru(profil, przypisania) {
    Zwraca tablicę obiektów {id, nazwa} dla aktywnych budów.
    Źródło prawdy dla datalisty — administrator zarządza tym w tabeli projekty.
 --------------------------------------------------------------------------- */
+// `utworzono` = data dodania inwestycji do bazy; kafle archiwum na jej podstawie
+// dają świeżo dodanym budowom czas na pierwszy raport, zamiast od razu pokazywać
+// je jako zaległe.
 export async function listaAktywnychProjektow() {
   const { data, error } = await supabase
     .from("projekty")
-    .select("id, nazwa, zakres, termin_zakonczenia, wstrzymana")
+    .select("id, nazwa, zakres, termin_zakonczenia, wstrzymana, utworzono")
     .eq("aktywny", true)
     .order("nazwa", { ascending: true });
   if (error) throw error;
