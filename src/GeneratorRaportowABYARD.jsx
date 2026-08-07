@@ -276,12 +276,11 @@ function dniOdRaportu(raport, dzis) {
   return n == null ? null : Math.max(0, n);
 }
 
-// Data dodania inwestycji. Tabela projekty mogła powstać z domyślnym created_at
-// (kreator Supabase) albo dostać kolumnę utworzona ze skryptu nowe_inwestycje.sql —
-// bierzemy to, co jest. null = nie wiadomo, kiedy inwestycja weszła do bazy.
+// Data dodania inwestycji do bazy (kolumna projekty.utworzono, timestamptz).
+// null = starszy wiersz bez tej daty; wtedy karencji nie ma i inwestycja jest
+// oceniana normalnie.
 function dataDodaniaInwestycji(p) {
-  const v = p?.utworzona || p?.created_at || p?.utworzono || null;
-  return v ? String(v).slice(0, 10) : null;
+  return p?.utworzono ? String(p.utworzono).slice(0, 10) : null;
 }
 
 // Przesunięcie daty ISO o podaną liczbę dni (do terminu pierwszego raportu).
@@ -296,7 +295,8 @@ function przesunISO(iso, dni) {
 //  "wstrzymana" — budowa stoi, nikogo nie ścigamy (choć raportować nadal wolno),
 //  "nowa"       — dodana mniej niż cykl temu i jeszcze bez raportu; nie było kiedy
 //                 go złożyć, więc NIE jest zaległa (inaczej alarm traci wiarygodność
-//                 i PM przestaje go czytać),
+//                 i PM przestaje go czytać). Taka inwestycja nie dostaje kafla —
+//                 pusty kafel bez żadnych danych tylko zaśmiecałby przegląd,
 //  "brak"       — minął cały cykl, a raportu nadal nie ma,
 //  "zalega"     — ostatni raport starszy niż PROG_ZALEGANIA_DNI,
 //  "aktualny"   — raport z bieżącego cyklu.
@@ -3790,7 +3790,6 @@ function KafelInwestycji({ kafel: k, aktywny, status, onKlik }) {
   const zalega = k.kondycja === "zalega" || k.kondycja === "brak";
   const T = {
     aktualny: { pas: "#E6F3EA", tekst: C.zielony, ramka: C.linia, tlo: C.bialy },
-    nowa: { pas: C.jasny, tekst: C.grafit, ramka: C.linia, tlo: C.bialy },
     zalega: { pas: "#FBF0DC", tekst: "#B9791A", ramka: "#E7C489", tlo: "#FFFDF7" },
     brak: { pas: "#FBECEA", tekst: C.czerwony, ramka: "#EEB6AE", tlo: "#FFFAF9" },
     wstrzymana: { pas: C.jasny, tekst: C.szary, ramka: C.linia, tlo: C.bialy },
@@ -3798,13 +3797,15 @@ function KafelInwestycji({ kafel: k, aktywny, status, onKlik }) {
 
   const etykietaPasa =
     k.kondycja === "brak" ? "Brak raportu"
-    : k.kondycja === "nowa" ? "Nowa inwestycja"
     : k.kondycja === "wstrzymana" ? "Wstrzymana"
     : k.dniOd === 0 ? "Raport z dziś"
     : k.dniOd === 1 ? "1 dzień od raportu"
     : `${k.dniOd} dni od raportu`;
 
-  const osoby = k.pmy.length > 0 ? k.pmy.join(", ") : "brak kierownika";
+  // Przy zalegających piszemy „zalega: <nazwisko>", ale gdy inwestycja nie ma
+  // przypisanego kierownika, nie ma kogo wskazać — wtedy sama informacja o braku.
+  const osoby = k.pmy.length > 0 ? k.pmy.join(", ") : "";
+  const podpisOsob = osoby ? (zalega ? `zalega: ${osoby}` : osoby) : "bez kierownika";
   const postep = sredniPostep(o.harmonogram);
   const opoz = opoznienieInwestycji(o.harmonogram, o.data_opracowania);
   const komorka = (etykieta, wartosc, kolor) => (
@@ -3834,10 +3835,10 @@ function KafelInwestycji({ kafel: k, aktywny, status, onKlik }) {
         <span style={{ fontFamily: C.mono, fontSize: 9.5, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: T.tekst, whiteSpace: "nowrap" }}>
           {etykietaPasa}
         </span>
-        <span title={osoby}
-          style={{ fontSize: 11.5, fontWeight: zalega ? 700 : 400, color: zalega ? T.tekst : C.szary,
+        <span title={podpisOsob}
+          style={{ fontSize: 11.5, fontWeight: zalega && osoby ? 700 : 400, color: zalega && osoby ? T.tekst : C.szary,
             maxWidth: "100%", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-          {zalega ? `zalega: ${osoby}` : osoby}
+          {podpisOsob}
         </span>
       </div>
 
@@ -3845,22 +3846,8 @@ function KafelInwestycji({ kafel: k, aktywny, status, onKlik }) {
       <div style={{ fontFamily: C.mono, fontSize: 10, letterSpacing: "0.03em", color: C.szary2, textTransform: "uppercase", marginBottom: 12 }}>
         {k.ostatni
           ? `${k.liczba} ${odmiana(k.liczba, ["raport", "raporty", "raportów"])} · nr ${o.numer} · ${dataRaportu(o) ? fmtPL(dataRaportu(o)) : "—"}`
-          : "brak raportów w archiwum"}
+          : (k.dniOdDodania !== null ? `w bazie od ${k.dniOdDodania} dni · ani jednego raportu` : "ani jednego raportu")}
       </div>
-
-      {!k.ostatni && k.kondycja === "nowa" && (
-        <div style={{ fontSize: 12.5, color: C.szary, lineHeight: 1.5 }}>
-          {k.dniOdDodania === 0 ? "Dodana dziś" : `Dodana ${k.dniOdDodania} ${odmiana(k.dniOdDodania, ["dzień", "dni", "dni"])} temu`} — pierwszy raport
-          {k.terminPierwszegoRaportu ? <> do <strong style={{ color: C.czarny }}>{fmtPL(k.terminPierwszegoRaportu)}</strong></> : ""}.
-        </div>
-      )}
-
-      {!k.ostatni && k.kondycja !== "nowa" && (
-        <div style={{ fontSize: 12.5, color: C.szary, lineHeight: 1.5 }}>
-          Inwestycja jest aktywna, ale nie ma ani jednego raportu w bazie.
-          Pierwszy złożysz przyciskiem <strong style={{ color: C.czarny }}>+ Nowy raport</strong>.
-        </div>
-      )}
 
       {k.ostatni && (<>
         {postep !== null && <div style={{ marginBottom: 10 }}><PasekPostepu proc={postep} etykieta="zaawansowanie" szer="100%" /></div>}
@@ -3906,19 +3893,22 @@ function WidokArchiwum({ raporty, inwestycje, przypisania, uzytkownicy, ladowani
     return [...zrodlo].sort(sortujKafle);
   }, [inwestycje, przypisania, uzytkownicy, lista, dzis]);
 
+  // Świeżo dodane inwestycje bez raportu nie dostają kafla — nie ma jeszcze czego
+  // na nim pokazać. Zostaje po nich tylko przypis pod przeglądem, żeby nikt nie
+  // szukał budowy, której „nie ma".
+  const nowe = React.useMemo(() => kafle.filter((k) => k.kondycja === "nowa"), [kafle]);
   const grupy = React.useMemo(() => ({
     aktualne: kafle.filter((k) => k.kondycja === "aktualny"),
-    nowe: kafle.filter((k) => k.kondycja === "nowa"),
     zalegajace: kafle.filter((k) => k.kondycja === "zalega" || k.kondycja === "brak"),
     wstrzymane: kafle.filter((k) => k.kondycja === "wstrzymana"),
   }), [kafle]);
+  const widoczneKafle = grupy.aktualne.length + grupy.zalegajace.length + grupy.wstrzymane.length;
   const osobyZalegajace = React.useMemo(() => zalegajacyPM(grupy.zalegajace), [grupy.zalegajace]);
   // Gdy po odświeżeniu nikt już nie zalega, przełącznik znika — wracamy do pełnej listy.
   const sekcje = (tylkoZalegajace && grupy.zalegajace.length > 0)
     ? [["zalegajace", `Zalega z raportem — ponad ${PROG_ZALEGANIA_DNI} dni`, grupy.zalegajace]]
     : [
         ["aktualne", "Z aktualnym raportem", grupy.aktualne],
-        ["nowe", `Nowe — pierwszy raport w ciągu ${PROG_ZALEGANIA_DNI} dni od dodania`, grupy.nowe],
         ["zalegajace", `Zalega z raportem — ponad ${PROG_ZALEGANIA_DNI} dni`, grupy.zalegajace],
         ["wstrzymane", "Wstrzymane", grupy.wstrzymane],
       ];
@@ -3941,7 +3931,7 @@ function WidokArchiwum({ raporty, inwestycje, przypisania, uzytkownicy, ladowani
         <NaglowekEkranu
           eyebrow="Archiwum"
           tytul="Raporty z budów"
-          sub={`Kafle to inwestycje w toku: najpierw te z aktualnym raportem, niżej realnie zalegające ponad ${PROG_ZALEGANIA_DNI} dni — z nazwiskiem kierownika. Świeżo dodane inwestycje mają ${PROG_ZALEGANIA_DNI} dni na pierwszy raport i nie liczą się jako zaległe. Zakończone nie mają kafla, ich raporty zostają na liście poniżej. Kliknij kafel, aby zawęzić listę.`}
+          sub={`Kafle to inwestycje w toku: najpierw te z aktualnym raportem, niżej realnie zalegające ponad ${PROG_ZALEGANIA_DNI} dni — z nazwiskiem kierownika. Kafla nie mają inwestycje zakończone ani świeżo dodane (mają ${PROG_ZALEGANIA_DNI} dni na pierwszy raport), a raporty zakończonych zostają na liście poniżej. Kliknij kafel, aby zawęzić listę.`}
           akcje={<>
             <button onClick={onOdswiez} style={{ ...miniBtn, padding: "8px 14px", fontWeight: 600 }}>↻ Odśwież</button>
             <button onClick={onNowyRaport} style={{ background: C.zolty, color: C.czarny, border: "none", padding: "9px 16px", borderRadius: 6, fontWeight: 700, fontSize: 12.5, cursor: "pointer", fontFamily: "inherit" }}>+ Nowy raport</button>
@@ -3974,10 +3964,10 @@ function WidokArchiwum({ raporty, inwestycje, przypisania, uzytkownicy, ladowani
             )}
 
             <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 12 }}>
-              <TytulSekcji>Inwestycje w toku · {kafle.length}</TytulSekcji>
+              <TytulSekcji>Inwestycje w toku · {widoczneKafle}</TytulSekcji>
               {grupy.zalegajace.length > 0 && (
                 <PigulkaPrzelacznik
-                  opcje={[[false, `Wszystkie (${kafle.length})`], [true, `Zalegające (${grupy.zalegajace.length})`]]}
+                  opcje={[[false, `Wszystkie (${widoczneKafle})`], [true, `Zalegające (${grupy.zalegajace.length})`]]}
                   wartosc={tylkoZalegajace}
                   onZmiana={setTylkoZalegajace}
                 />
@@ -4006,6 +3996,20 @@ function WidokArchiwum({ raporty, inwestycje, przypisania, uzytkownicy, ladowani
                 </React.Fragment>
               ))}
             </div>
+
+            {/* Świeżo dodane inwestycje — bez kafla, tylko dyskretny przypis */}
+            {nowe.length > 0 && (
+              <div style={{ marginTop: -18, marginBottom: 24, fontSize: 11.5, color: C.szary2, lineHeight: 1.6 }}>
+                Świeżo dodane, jeszcze bez kafla ({PROG_ZALEGANIA_DNI} dni na pierwszy raport):{" "}
+                {nowe.map((k, i) => (
+                  <span key={k.klucz}>
+                    {i > 0 ? " · " : ""}
+                    <span style={{ color: C.szary }}>{k.nazwa}</span>
+                    {k.terminPierwszegoRaportu ? ` (do ${fmtPL(k.terminPierwszegoRaportu)})` : ""}
+                  </span>
+                ))}
+              </div>
+            )}
 
             {/* Filtr aktywny — informacja */}
             {filtr && (
