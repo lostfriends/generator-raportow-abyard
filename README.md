@@ -79,6 +79,7 @@ supabase/
 ├── udostepnienia.sql         ← linki do raportów (tokeny + RLS + raport_po_tokenie)
 ├── edycja_raportu.sql        ← okno edycji raportu przyznawane przez admina
 ├── wstrzymane_inwestycje.sql ← flaga projekty.wstrzymana
+├── nowe_inwestycje.sql       ← data dodania inwestycji (karencja na 1. raport)
 ├── kartoteka_sync.sql        ← raporty.zaktualizowano, sync_wydania, kartoteka_eksport()
 └── functions/
     ├── przypomnienia-raporty/ ← cykliczne przypomnienia mailowe do PM i adminów

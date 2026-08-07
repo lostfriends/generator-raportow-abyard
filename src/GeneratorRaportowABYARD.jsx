@@ -276,14 +276,35 @@ function dniOdRaportu(raport, dzis) {
   return n == null ? null : Math.max(0, n);
 }
 
+// Data dodania inwestycji. Tabela projekty mogła powstać z domyślnym created_at
+// (kreator Supabase) albo dostać kolumnę utworzona ze skryptu nowe_inwestycje.sql —
+// bierzemy to, co jest. null = nie wiadomo, kiedy inwestycja weszła do bazy.
+function dataDodaniaInwestycji(p) {
+  const v = p?.utworzona || p?.created_at || p?.utworzono || null;
+  return v ? String(v).slice(0, 10) : null;
+}
+
+// Przesunięcie daty ISO o podaną liczbę dni (do terminu pierwszego raportu).
+function przesunISO(iso, dni) {
+  if (!iso) return null;
+  const d = new Date(iso + "T00:00:00");
+  d.setDate(d.getDate() + dni);
+  return d.toISOString().slice(0, 10);
+}
+
 // Kondycja raportowania jednej inwestycji:
 //  "wstrzymana" — budowa stoi, nikogo nie ścigamy (choć raportować nadal wolno),
-//  "brak"       — nigdy nie było raportu,
+//  "nowa"       — dodana mniej niż cykl temu i jeszcze bez raportu; nie było kiedy
+//                 go złożyć, więc NIE jest zaległa (inaczej alarm traci wiarygodność
+//                 i PM przestaje go czytać),
+//  "brak"       — minął cały cykl, a raportu nadal nie ma,
 //  "zalega"     — ostatni raport starszy niż PROG_ZALEGANIA_DNI,
 //  "aktualny"   — raport z bieżącego cyklu.
-function kondycjaRaportowania(dniOd, wstrzymana) {
+function kondycjaRaportowania(dniOd, wstrzymana, dniOdDodania) {
   if (wstrzymana) return "wstrzymana";
-  if (dniOd === null) return "brak";
+  if (dniOd === null) {
+    return (dniOdDodania !== null && dniOdDodania <= PROG_ZALEGANIA_DNI) ? "nowa" : "brak";
+  }
   return dniOd > PROG_ZALEGANIA_DNI ? "zalega" : "aktualny";
 }
 
@@ -299,6 +320,8 @@ function kafleInwestycji({ projekty, raporty, przypisania, uzytkownicy, dzis }) 
     const moje = wgProjektu[p.id] || [];
     const ostatni = najnowszyRaport(moje);
     const dniOd = dniOdRaportu(ostatni, dzis);
+    const dodana = dataDodaniaInwestycji(p);
+    const dniOdDodania = dodana ? Math.max(0, dniMiedzy(dzis, dodana) ?? 0) : null;
     const pmy = (przypisania || [])
       .filter((x) => x.projekt_id === p.id)
       .map((x) => nazwaOsoby(uzytMap[x.uzytkownik]))
@@ -310,8 +333,10 @@ function kafleInwestycji({ projekty, raporty, przypisania, uzytkownicy, dzis }) 
       liczba: moje.length,
       ostatni,
       dniOd,
+      dniOdDodania,
+      terminPierwszegoRaportu: przesunISO(dodana, PROG_ZALEGANIA_DNI),
       wstrzymana: !!p.wstrzymana,
-      kondycja: kondycjaRaportowania(dniOd, !!p.wstrzymana),
+      kondycja: kondycjaRaportowania(dniOd, !!p.wstrzymana, dniOdDodania),
       pmy,
     };
   });
@@ -324,22 +349,27 @@ function kafleZRaportow(raporty, dzis) {
     const dniOd = dniOdRaportu(b.ostatni, dzis);
     return {
       klucz: b.nazwa, nazwa: b.nazwa, liczba: b.liczba, ostatni: b.ostatni, dniOd,
-      wstrzymana: false, kondycja: kondycjaRaportowania(dniOd, false), pmy: [],
+      dniOdDodania: null, terminPierwszegoRaportu: null,
+      wstrzymana: false, kondycja: kondycjaRaportowania(dniOd, false, null), pmy: [],
     };
   });
 }
 
-// Kolejność kafli: najpierw z aktualnym raportem (najświeższy na czele), pod nimi
-// zalegające (najdłużej zalegające i te bez raportu na czele), na końcu wstrzymane.
-const RANGA_KONDYCJI = { aktualny: 0, brak: 1, zalega: 1, wstrzymana: 2 };
+// Kolejność kafli: najpierw z aktualnym raportem (najświeższy na czele), potem świeżo
+// dodane (jeszcze przed pierwszym raportem), niżej realnie zalegające (najdłużej
+// zalegające i te bez raportu na czele), na końcu wstrzymane.
+const RANGA_KONDYCJI = { aktualny: 0, nowa: 1, brak: 2, zalega: 2, wstrzymana: 3 };
 function sortujKafle(a, b) {
-  const ra = RANGA_KONDYCJI[a.kondycja] ?? 3;
-  const rb = RANGA_KONDYCJI[b.kondycja] ?? 3;
+  const ra = RANGA_KONDYCJI[a.kondycja] ?? 4;
+  const rb = RANGA_KONDYCJI[b.kondycja] ?? 4;
   if (ra !== rb) return ra - rb;
   const da = a.dniOd === null ? Infinity : a.dniOd;
   const db = b.dniOd === null ? Infinity : b.dniOd;
   if (ra === 0 && da !== db) return da - db;       // aktualne: świeższy wyżej
-  if (ra === 1 && da !== db) return db - da;       // zalegające: dłużej zalegający wyżej
+  if (ra === 2 && da !== db) return db - da;       // zalegające: dłużej zalegający wyżej
+  if (ra === 1 && a.dniOdDodania !== b.dniOdDodania) {
+    return (b.dniOdDodania ?? 0) - (a.dniOdDodania ?? 0); // nowe: bliżej terminu wyżej
+  }
   return a.nazwa.localeCompare(b.nazwa, "pl");
 }
 
@@ -3760,6 +3790,7 @@ function KafelInwestycji({ kafel: k, aktywny, status, onKlik }) {
   const zalega = k.kondycja === "zalega" || k.kondycja === "brak";
   const T = {
     aktualny: { pas: "#E6F3EA", tekst: C.zielony, ramka: C.linia, tlo: C.bialy },
+    nowa: { pas: C.jasny, tekst: C.grafit, ramka: C.linia, tlo: C.bialy },
     zalega: { pas: "#FBF0DC", tekst: "#B9791A", ramka: "#E7C489", tlo: "#FFFDF7" },
     brak: { pas: "#FBECEA", tekst: C.czerwony, ramka: "#EEB6AE", tlo: "#FFFAF9" },
     wstrzymana: { pas: C.jasny, tekst: C.szary, ramka: C.linia, tlo: C.bialy },
@@ -3767,6 +3798,7 @@ function KafelInwestycji({ kafel: k, aktywny, status, onKlik }) {
 
   const etykietaPasa =
     k.kondycja === "brak" ? "Brak raportu"
+    : k.kondycja === "nowa" ? "Nowa inwestycja"
     : k.kondycja === "wstrzymana" ? "Wstrzymana"
     : k.dniOd === 0 ? "Raport z dziś"
     : k.dniOd === 1 ? "1 dzień od raportu"
@@ -3816,7 +3848,14 @@ function KafelInwestycji({ kafel: k, aktywny, status, onKlik }) {
           : "brak raportów w archiwum"}
       </div>
 
-      {!k.ostatni && (
+      {!k.ostatni && k.kondycja === "nowa" && (
+        <div style={{ fontSize: 12.5, color: C.szary, lineHeight: 1.5 }}>
+          {k.dniOdDodania === 0 ? "Dodana dziś" : `Dodana ${k.dniOdDodania} ${odmiana(k.dniOdDodania, ["dzień", "dni", "dni"])} temu`} — pierwszy raport
+          {k.terminPierwszegoRaportu ? <> do <strong style={{ color: C.czarny }}>{fmtPL(k.terminPierwszegoRaportu)}</strong></> : ""}.
+        </div>
+      )}
+
+      {!k.ostatni && k.kondycja !== "nowa" && (
         <div style={{ fontSize: 12.5, color: C.szary, lineHeight: 1.5 }}>
           Inwestycja jest aktywna, ale nie ma ani jednego raportu w bazie.
           Pierwszy złożysz przyciskiem <strong style={{ color: C.czarny }}>+ Nowy raport</strong>.
@@ -3867,20 +3906,19 @@ function WidokArchiwum({ raporty, inwestycje, przypisania, uzytkownicy, ladowani
     return [...zrodlo].sort(sortujKafle);
   }, [inwestycje, przypisania, uzytkownicy, lista, dzis]);
 
-  const grupy = React.useMemo(() => {
-    const g = {
-      aktualne: kafle.filter((k) => k.kondycja === "aktualny"),
-      zalegajace: kafle.filter((k) => k.kondycja === "zalega" || k.kondycja === "brak"),
-      wstrzymane: kafle.filter((k) => k.kondycja === "wstrzymana"),
-    };
-    return g;
-  }, [kafle]);
+  const grupy = React.useMemo(() => ({
+    aktualne: kafle.filter((k) => k.kondycja === "aktualny"),
+    nowe: kafle.filter((k) => k.kondycja === "nowa"),
+    zalegajace: kafle.filter((k) => k.kondycja === "zalega" || k.kondycja === "brak"),
+    wstrzymane: kafle.filter((k) => k.kondycja === "wstrzymana"),
+  }), [kafle]);
   const osobyZalegajace = React.useMemo(() => zalegajacyPM(grupy.zalegajace), [grupy.zalegajace]);
   // Gdy po odświeżeniu nikt już nie zalega, przełącznik znika — wracamy do pełnej listy.
   const sekcje = (tylkoZalegajace && grupy.zalegajace.length > 0)
     ? [["zalegajace", `Zalega z raportem — ponad ${PROG_ZALEGANIA_DNI} dni`, grupy.zalegajace]]
     : [
         ["aktualne", "Z aktualnym raportem", grupy.aktualne],
+        ["nowe", `Nowe — pierwszy raport w ciągu ${PROG_ZALEGANIA_DNI} dni od dodania`, grupy.nowe],
         ["zalegajace", `Zalega z raportem — ponad ${PROG_ZALEGANIA_DNI} dni`, grupy.zalegajace],
         ["wstrzymane", "Wstrzymane", grupy.wstrzymane],
       ];
@@ -3903,7 +3941,7 @@ function WidokArchiwum({ raporty, inwestycje, przypisania, uzytkownicy, ladowani
         <NaglowekEkranu
           eyebrow="Archiwum"
           tytul="Raporty z budów"
-          sub={`Kafle to inwestycje w toku: najpierw te z aktualnym raportem, niżej zalegające ponad ${PROG_ZALEGANIA_DNI} dni — z nazwiskiem kierownika. Zakończone inwestycje nie mają kafla, ich raporty zostają na liście poniżej. Kliknij kafel, aby zawęzić listę.`}
+          sub={`Kafle to inwestycje w toku: najpierw te z aktualnym raportem, niżej realnie zalegające ponad ${PROG_ZALEGANIA_DNI} dni — z nazwiskiem kierownika. Świeżo dodane inwestycje mają ${PROG_ZALEGANIA_DNI} dni na pierwszy raport i nie liczą się jako zaległe. Zakończone nie mają kafla, ich raporty zostają na liście poniżej. Kliknij kafel, aby zawęzić listę.`}
           akcje={<>
             <button onClick={onOdswiez} style={{ ...miniBtn, padding: "8px 14px", fontWeight: 600 }}>↻ Odśwież</button>
             <button onClick={onNowyRaport} style={{ background: C.zolty, color: C.czarny, border: "none", padding: "9px 16px", borderRadius: 6, fontWeight: 700, fontSize: 12.5, cursor: "pointer", fontFamily: "inherit" }}>+ Nowy raport</button>

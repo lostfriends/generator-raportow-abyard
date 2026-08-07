@@ -215,10 +215,14 @@ export async function projektyDoWyboru(profil, przypisania) {
    Zwraca tablicę obiektów {id, nazwa} dla aktywnych budów.
    Źródło prawdy dla datalisty — administrator zarządza tym w tabeli projekty.
 --------------------------------------------------------------------------- */
+// select("*") zamiast listy kolumn: kafle archiwum potrzebują daty dodania
+// inwestycji (created_at albo utworzona — zależnie od tego, jak powstała tabela),
+// a wskazanie nieistniejącej kolumny wywaliłoby całe zapytanie błędem 42703.
+// Tabela projekty jest mała, więc pobranie wszystkich kolumn nic nie kosztuje.
 export async function listaAktywnychProjektow() {
   const { data, error } = await supabase
     .from("projekty")
-    .select("id, nazwa, zakres, termin_zakonczenia, wstrzymana")
+    .select("*")
     .eq("aktywny", true)
     .order("nazwa", { ascending: true });
   if (error) throw error;
