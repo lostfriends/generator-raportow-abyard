@@ -667,6 +667,170 @@ function macierzCashflow(harmonogram) {
   return { miesiace, zadania, sumaMies, sumaNaras, sumaCalosc, dataMin, dataMax, koniecNaras, rozjazd };
 }
 
+/* ---------------------------------------------------------------------------
+   CASHFLOW GLOBALNY — sprzedaż CAŁEJ firmy w ujęciu miesięcznym
+   ----------------------------------------------------------------------------
+   ZASADA NADRZĘDNA: jedna inwestycja = JEDEN cashflow. Raporty są cykliczne
+   i każdy kolejny niesie ten sam (zaktualizowany) harmonogram wraz z wartościami
+   umowy, więc zsumowanie „wszystkich raportów" policzyłoby tę samą sprzedaż
+   tyle razy, ile raportów ma budowa. Dlatego z każdej inwestycji bierzemy
+   WYŁĄCZNIE NAJNOWSZY raport — to najświeższy obraz jej harmonogramu i kwot.
+   Reszta liczenia to dokładnie ten sam rdzeń, co w cashflow pojedynczego
+   raportu (rozlozKalendarzowo / pozycjeDoRozkladu), więc suma globalna zawsze
+   zgadza się z sumą cashflow z poszczególnych raportów.
+--------------------------------------------------------------------------- */
+
+// Zastrzeżenie o charakterze liczby — POWTARZANE na ekranie i w eksporcie XLSX
+// z jednego miejsca. Plik wychodzi z aplikacji mailem i zaczyna żyć własnym
+// życiem, więc musi nieść ten sam kontekst, co ekran: to prognoza z raportów,
+// a nie zafakturowana sprzedaż z księgowości.
+const NOTA_PROGNOZY =
+  "PROGNOZA na podstawie raportów z budów, ze stanem na koniec miesiąca rozliczeniowego — nie są to dane księgowe ani sprzedaż zafakturowana.";
+const NOTA_PROGNOZY_DLUGA =
+  "Kwoty pochodzą z harmonogramów raportów i zmieniają się z każdym kolejnym raportem — " +
+  "wartość umowy każdego zadania jest rozkładana kalendarzowo na miesiące, a stan zaawansowania " +
+  "przyjmuje się na koniec miesiąca rozliczeniowego. To narzędzie do planowania, nie podstawa rozliczeń.";
+
+// Ciągła oś miesięcy "YYYY-MM" od najwcześniejszego do najpóźniejszego klucza.
+// Miesiące bez sprzedaży MUSZĄ być widoczne jako zera — inaczej wykres ściskałby
+// przerwy w robocie i krzywa S kłamałaby o tempie sprzedaży.
+function osMiesiecy(klucze) {
+  const posort = Array.from(new Set(klucze || [])).filter(Boolean).sort();
+  if (posort.length === 0) return [];
+  const [r0, m0] = posort[0].split("-").map(Number);
+  const [r1, m1] = posort[posort.length - 1].split("-").map(Number);
+  const wynik = [];
+  let r = r0, m = m0;
+  // zabezpieczenie przed pętlą w nieskończoność przy uszkodzonych danych
+  for (let i = 0; i < 1200 && (r < r1 || (r === r1 && m <= m1)); i++) {
+    wynik.push(`${r}-${String(m).padStart(2, "0")}`);
+    m += 1;
+    if (m > 12) { m = 1; r += 1; }
+  }
+  return wynik;
+}
+
+// Etykieta miesiąca na oś/nagłówek kolumny: "03.26".
+function etykietaMiesiaca(klucz) {
+  const [rok, m] = klucz.split("-");
+  return `${m}.${rok.slice(2)}`;
+}
+
+// Zbiorczy cashflow wszystkich inwestycji.
+//  raporty  — lekka lista z listaWszystkichRaportow() (zawiera harmonogram),
+//  projekty — aktywne + nieaktywne z dopisanym polem `aktywna`.
+// Zwraca { inwestycje: [...], bezRaportu: [...] } — filtrowanie zakresem i rokiem
+// robi dopiero przekrojCashflowu(), żeby przełączniki w widoku nie odpytywały bazy.
+function cashflowGlobalny({ raporty, projekty }) {
+  const projMap = Object.fromEntries((projekty || []).map((p) => [p.id, p]));
+  const wgProjektu = {};
+  for (const r of (raporty || [])) {
+    if (!r.projekt_id) continue;
+    (wgProjektu[r.projekt_id] ||= []).push(r);
+  }
+
+  const inwestycje = [];
+  for (const [projektId, lista] of Object.entries(wgProjektu)) {
+    const ostatni = najnowszyRaport(lista);
+    const h = Array.isArray(ostatni?.harmonogram) ? ostatni.harmonogram : [];
+    const p = projMap[projektId];
+    const macierz = macierzCashflow(h);
+    const komorki = macierz.sumaMies;                       // { "YYYY-MM": kwota }
+    const kwotaUmowy = sumaWartosciUmowy(h);
+    const wykonana = wykonanaSprzedaz(h);
+    inwestycje.push({
+      klucz: projektId,
+      nazwa: p?.nazwa || ostatni?.nazwaProjektu || "(nieznana inwestycja)",
+      // brak wiersza w tabeli projekty (np. skasowany) traktujemy jak inwestycję w toku
+      wToku: p ? p.aktywna !== false : true,
+      wstrzymana: !!p?.wstrzymana,
+      liczbaRaportow: lista.length,
+      numer: ostatni?.numer ?? null,
+      dataRaportu: ostatni?.data_opracowania || ostatni?.okres_do || null,
+      kwotaUmowy,
+      wykonana,
+      postep: kwotaUmowy > 0 ? Math.round((wykonana / kwotaUmowy) * 100) : null,
+      komorki,
+      zadania: macierz.zadania,
+      // kwota wpisana bez kompletu dat nie wchodzi do rozkładu miesięcznego —
+      // taka inwestycja zaniża oś czasu i trzeba ją pokazać osobno
+      rozlozone: macierz.koniecNaras,
+      rozjazd: macierz.rozjazd,
+      brakKwot: !(kwotaUmowy > 0),
+    });
+  }
+
+  // Inwestycje bez ani jednego raportu — nie mają jak trafić do cashflow,
+  // ale zarząd musi wiedzieć, że ich w sumie NIE MA.
+  const bezRaportu = (projekty || [])
+    .filter((p) => !wgProjektu[p.id])
+    .map((p) => ({ klucz: p.id, nazwa: p.nazwa, wToku: p.aktywna !== false, wstrzymana: !!p.wstrzymana }));
+
+  return { inwestycje, bezRaportu };
+}
+
+// Przekrój do wyświetlenia: zakres inwestycji + zawężenie do roku.
+// Narastające liczymy zawsze od POCZĄTKU CAŁEJ OSI (nie od stycznia wybranego
+// roku) — filtr roku przycina tylko widoczne kolumny, więc „narastająco" nadal
+// odpowiada na pytanie „ile łącznie sprzedaliśmy do tego miesiąca".
+function przekrojCashflowu(dane, { tylkoWToku, rok }) {
+  const wiersze = (dane?.inwestycje || [])
+    .filter((i) => (tylkoWToku ? i.wToku : true))
+    .sort((a, b) => (b.kwotaUmowy - a.kwotaUmowy) || a.nazwa.localeCompare(b.nazwa, "pl"));
+
+  const osPelna = osMiesiecy(wiersze.flatMap((i) => Object.keys(i.komorki)));
+  const sumaMies = {};
+  for (const i of wiersze) {
+    for (const [k, v] of Object.entries(i.komorki)) sumaMies[k] = (sumaMies[k] || 0) + v;
+  }
+  const sumaNaras = {};
+  let bieg = 0;
+  for (const k of osPelna) { bieg += (sumaMies[k] || 0); sumaNaras[k] = bieg; }
+
+  const lata = Array.from(new Set(osPelna.map((k) => k.slice(0, 4)))).sort();
+  const widoczne = rok && rok !== "wszystkie" ? osPelna.filter((k) => k.startsWith(`${rok}-`)) : osPelna;
+  const miesiace = widoczne.map((k) => ({ klucz: k, etykieta: etykietaMiesiaca(k), rok: k.slice(0, 4) }));
+
+  const sumaUmow = wiersze.reduce((s, i) => s + i.kwotaUmowy, 0);
+  const sumaWykonana = wiersze.reduce((s, i) => s + i.wykonana, 0);
+
+  return {
+    wiersze, miesiace, osPelna, sumaMies, sumaNaras, lata,
+    sumaUmow, sumaWykonana,
+    // rozłożone kalendarzowo (bez kwot bez dat) — do wykrycia luki w danych
+    sumaRozlozona: osPelna.length ? sumaNaras[osPelna[osPelna.length - 1]] : 0,
+    // wiersze do tabeli cashflow: tylko te, które realnie coś wnoszą do osi
+    zKwotami: wiersze.filter((i) => Object.keys(i.komorki).length > 0),
+    bezCashflowu: wiersze.filter((i) => Object.keys(i.komorki).length === 0),
+    bezRaportu: (dane?.bezRaportu || []).filter((p) => (tylkoWToku ? p.wToku : true)),
+  };
+}
+
+// Plan sprzedaży narastająco „na dziś" — pełne miesiące zamknięte + bieżący
+// miesiąc proporcjonalnie do dni, które już minęły. Proporcja dzienna jest
+// dokładnie tym samym modelem, którym rozkładamy kwoty (rozlozKalendarzowo),
+// więc porównanie z wykonaną sprzedażą jest uczciwe.
+function planNaDzis(sumaMies, dzis) {
+  const [rok, mies, dzien] = (dzis || dzisISO()).split("-").map(Number);
+  const biezacy = `${rok}-${String(mies).padStart(2, "0")}`;
+  const dniWMies = new Date(rok, mies, 0).getDate();
+  let suma = 0;
+  for (const [k, v] of Object.entries(sumaMies || {})) {
+    if (k < biezacy) suma += v;
+    else if (k === biezacy) suma += v * (dzien / dniWMies);
+  }
+  return suma;
+}
+
+// Kwota w skrócie zarządczym: 12,4 mln / 830 tys / 512 zł.
+function fmtSkrot(n) {
+  const v = Math.round(Math.abs(n || 0));
+  const znak = (n || 0) < 0 ? "−" : "";
+  if (v >= 1e6) return `${znak}${(v / 1e6).toFixed(1).replace(".", ",").replace(/,0$/, "")} mln`;
+  if (v >= 1e4) return `${znak}${Math.round(v / 1e3)} tys`;
+  return `${znak}${v.toLocaleString("pl-PL")}`;
+}
+
 // Macierz cashflow: zadania × miesiące, żółte tło komórek z kwotą, sumy na dole.
 // fmtZ — formatowanie kwoty (pełne zł, spacje jako separator tysięcy).
 function MacierzCashflow({ dane }) {
@@ -1002,8 +1166,9 @@ function PigulkaPrzelacznik({ opcje, wartosc, onZmiana }) {
 }
 
 // Wspólny pasek nawigacji — jeden dla wszystkich widoków (formularz, archiwum, panel).
-// aktywny: "form" | "archiwum" | "admin". Zakładka panelu tylko dla admina.
-function PasekNawigacji({ aktywny, jestAdmin, email, onForm, onArchiwum, onKoordynacja, onAdmin, onWyloguj }) {
+// aktywny: "form" | "archiwum" | "cashflow" | "koordynacja-pm" | "admin".
+// Zakładka panelu tylko dla admina.
+function PasekNawigacji({ aktywny, jestAdmin, email, onForm, onArchiwum, onCashflow, onKoordynacja, onAdmin, onWyloguj }) {
   const zakl = (kod, etykieta, onClick) => {
     const akt = aktywny === kod;
     return (
@@ -1026,6 +1191,7 @@ function PasekNawigacji({ aktywny, jestAdmin, email, onForm, onArchiwum, onKoord
         <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
           {zakl("form", "Generator", onForm)}
           {zakl("archiwum", "Archiwum raportów", onArchiwum)}
+          {onCashflow && zakl("cashflow", "Cashflow globalny", onCashflow)}
           {onKoordynacja && zakl("koordynacja-pm", "Kto co prowadzi", onKoordynacja)}
           {jestAdmin && zakl("admin", "Panel admina", onAdmin)}
           <span style={{ color: "#8A867E", fontFamily: C.mono, fontSize: 11, display: "flex", alignItems: "center", gap: 8, marginLeft: 4 }}>
@@ -1292,6 +1458,120 @@ function eksportHarmonogramCashflow(form) {
     if (macierz.zadania.length && macierz.miesiace.length) arkusze.push(arkuszCashflow(form, macierz));
   }
   pobierzXlsx(arkusze, nazwaPlikuEksportu(form));
+}
+
+/* ==========================================================================
+   EKSPORT CASHFLOW GLOBALNEGO — zestawienie zarządcze do .xlsx
+   ----------------------------------------------------------------------------
+   Dwa arkusze:
+     „Cashflow globalny" — macierz inwestycje × miesiące + sumy miesięczne
+                           i narastająco (dokładnie to, co widać na ekranie),
+     „Inwestycje"        — jedna linia na budowę: wartość umowy, sprzedaż
+                           wykonana, zaawansowanie, numer i data raportu,
+                           z którego kwoty pochodzą.
+   Zawsze eksportujemy PEŁNĄ oś czasu (bez filtra roku) — plik ma być kompletem
+   danych do dalszej obróbki w Excelu, a nie zrzutem ekranu.
+========================================================================== */
+function eksportCashflowGlobalny(przekroj, { tylkoWToku }) {
+  const miesiace = przekroj.osPelna.map((k) => ({ klucz: k, etykieta: etykietaMiesiaca(k) }));
+  const inw = przekroj.zKwotami;
+  const opisZakresu = tylkoWToku ? "inwestycje w toku" : "wszystkie inwestycje";
+  const dzis = dzisISO();
+
+  // --- Arkusz 1: macierz inwestycje × miesiące ---
+  const nKol1 = 3 + miesiace.length;
+  const w1 = [];
+  w1.push([_txt("Cashflow globalny — prognoza sprzedaży w ujęciu miesięcznym", STYLE.TYTUL)]);
+  w1.push([_txt(`Stan na ${fmtPL(dzis)} · ${opisZakresu} (${inw.length}) · kwoty netto z najnowszego raportu każdej inwestycji`, STYLE.PODPIS)]);
+  w1.push([_txt(NOTA_PROGNOZY, STYLE.PODPIS)]);
+  w1.push([]);
+  w1.push([
+    _txt("Inwestycja", STYLE.NAGL_CIEMNY),
+    _txt("Wartość umowy", STYLE.NAGL_CIEMNY),
+    _txt("Sprzedaż wykonana", STYLE.NAGL_CIEMNY),
+    ...miesiace.map((m) => _txt(m.etykieta, STYLE.NAGL_MIES)),
+  ]);
+  for (const i of inw) {
+    w1.push([
+      _txt(i.nazwa, STYLE.TEKST),
+      _num(Math.round(i.kwotaUmowy), STYLE.LICZBA_ZL),
+      _num(Math.round(i.wykonana), STYLE.LICZBA_ZL),
+      ...miesiace.map((m) => (i.komorki[m.klucz] ? _num(Math.round(i.komorki[m.klucz]), STYLE.LICZBA_ZOLTA) : { s: STYLE.LICZBA })),
+    ]);
+  }
+  w1.push([
+    _txt("RAZEM miesięcznie", STYLE.STOPKA_TEKST),
+    _num(Math.round(przekroj.sumaUmow), STYLE.STOPKA_ZL),
+    _num(Math.round(przekroj.sumaWykonana), STYLE.STOPKA_ZL),
+    ...miesiace.map((m) => (przekroj.sumaMies[m.klucz] ? _num(Math.round(przekroj.sumaMies[m.klucz]), STYLE.STOPKA_LICZBA) : { s: STYLE.STOPKA_LICZBA })),
+  ]);
+  w1.push([
+    _txt("Narastająco", STYLE.NARAST_TEKST),
+    { s: STYLE.NARAST_TEKST }, { s: STYLE.NARAST_TEKST },
+    ...miesiace.map((m) => _num(Math.round(przekroj.sumaNaras[m.klucz] || 0), STYLE.NARAST_LICZBA)),
+  ]);
+
+  // --- Arkusz 2: jedna linia na inwestycję ---
+  const w2 = [];
+  w2.push([_txt("Inwestycje w cashflow globalnym", STYLE.TYTUL)]);
+  w2.push([_txt(`Stan na ${fmtPL(dzis)} · źródłem kwot jest NAJNOWSZY raport każdej inwestycji`, STYLE.PODPIS)]);
+  w2.push([_txt(NOTA_PROGNOZY, STYLE.PODPIS)]);
+  w2.push([]);
+  w2.push([
+    "Inwestycja", "Status", "Wartość umowy", "Sprzedaż wykonana", "Pozostało", "% zaawansowania",
+    "Raport nr", "Stan na dzień", "Uwagi",
+  ].map((t) => _txt(t, STYLE.NAGL_CIEMNY)));
+  for (const i of przekroj.wiersze) {
+    const uwagi = [];
+    if (i.brakKwot) uwagi.push("brak wartości umowy w harmonogramie");
+    else if (i.rozjazd) uwagi.push("kwota bez kompletu dat — nie weszła do rozkładu");
+    w2.push([
+      _txt(i.nazwa, STYLE.TEKST),
+      _txt(i.wstrzymana ? "wstrzymana" : i.wToku ? "w toku" : "zakończona", STYLE.TEKST),
+      _num(Math.round(i.kwotaUmowy), STYLE.LICZBA_ZL),
+      _num(Math.round(i.wykonana), STYLE.LICZBA_ZL),
+      _num(Math.round(i.kwotaUmowy - i.wykonana), STYLE.LICZBA_ZL),
+      i.postep == null ? _txt("—", STYLE.TEKST_SZARY) : _num(i.postep, STYLE.PROCENT),
+      i.numer == null ? _txt("—", STYLE.TEKST_SZARY) : _num(i.numer, STYLE.TEKST_SRODEK),
+      _dat(i.dataRaportu, STYLE.DATA),
+      _txt(uwagi.join("; ") || "—", uwagi.length ? STYLE.TEKST : STYLE.TEKST_SZARY),
+    ]);
+  }
+  for (const p of przekroj.bezRaportu) {
+    w2.push([
+      _txt(p.nazwa, STYLE.TEKST),
+      _txt(p.wstrzymana ? "wstrzymana" : p.wToku ? "w toku" : "zakończona", STYLE.TEKST),
+      _txt("—", STYLE.TEKST_SZARY), _txt("—", STYLE.TEKST_SZARY), _txt("—", STYLE.TEKST_SZARY),
+      _txt("—", STYLE.TEKST_SZARY), _txt("—", STYLE.TEKST_SZARY), _txt("—", STYLE.TEKST_SZARY),
+      _txt("brak raportu — inwestycja poza cashflow", STYLE.TEKST),
+    ]);
+  }
+  w2.push([
+    _txt("RAZEM", STYLE.STOPKA_TEKST),
+    { s: STYLE.STOPKA_TEKST },
+    _num(Math.round(przekroj.sumaUmow), STYLE.STOPKA_ZL),
+    _num(Math.round(przekroj.sumaWykonana), STYLE.STOPKA_ZL),
+    _num(Math.round(przekroj.sumaUmow - przekroj.sumaWykonana), STYLE.STOPKA_ZL),
+    { s: STYLE.STOPKA_TEKST }, { s: STYLE.STOPKA_TEKST }, { s: STYLE.STOPKA_TEKST }, { s: STYLE.STOPKA_TEKST },
+  ]);
+
+  pobierzXlsx([
+    {
+      nazwa: "Cashflow globalny",
+      kolumny: [{ szer: 40 }, { szer: 17 }, { szer: 18 }, ...miesiace.map(() => ({ szer: 11 }))],
+      // nagłówek tabeli stoi w 5. wierszu: tytuł, podpis, nota o prognozie, odstęp
+      zamrozenie: { wiersze: 5, kolumny: 3 },
+      scalenia: [1, 2, 3].map((w) => `${adres(1, w)}:${adres(nKol1, w)}`),
+      wiersze: w1,
+    },
+    {
+      nazwa: "Inwestycje",
+      kolumny: [{ szer: 40 }, { szer: 13 }, { szer: 17 }, { szer: 18 }, { szer: 15 }, { szer: 15 }, { szer: 10 }, { szer: 14 }, { szer: 46 }],
+      zamrozenie: { wiersze: 5 },
+      scalenia: [1, 2, 3].map((w) => `${adres(1, w)}:${adres(9, w)}`),
+      wiersze: w2,
+    },
+  ], `Cashflow_globalny_ABYARD_-_${dzis}`);
 }
 
 // Token z adresu (#r/<token>) — obecność przełącza aplikację w publiczny
@@ -2096,6 +2376,25 @@ export default function GeneratorRaportowABYARD() {
         jestAdmin={profil?.rola === "admin"}
         email={profil?.email}
         onForm={() => setWidok("form")}
+        onCashflow={() => setWidok("cashflow")}
+        onKoordynacja={() => setWidok("koordynacja-pm")}
+        onAdmin={() => setWidok("admin")}
+        onWyloguj={async () => { await wyloguj(); setWidok("form"); }}
+      />
+    );
+  }
+
+  // ==========================================================================
+  //  WIDOK CASHFLOW GLOBALNEGO (dla wszystkich zalogowanych)
+  // ==========================================================================
+  if (widok === "cashflow") {
+    return (
+      <WidokCashflowGlobalny
+        jestAdmin={profil?.rola === "admin"}
+        email={profil?.email}
+        pokazToast={pokazToast}
+        onForm={() => setWidok("form")}
+        onArchiwum={otworzArchiwum}
         onKoordynacja={() => setWidok("koordynacja-pm")}
         onAdmin={() => setWidok("admin")}
         onWyloguj={async () => { await wyloguj(); setWidok("form"); }}
@@ -2113,6 +2412,7 @@ export default function GeneratorRaportowABYARD() {
         email={profil?.email}
         onForm={() => setWidok("form")}
         onArchiwum={otworzArchiwum}
+        onCashflow={() => setWidok("cashflow")}
         onAdmin={() => setWidok("admin")}
         onWyloguj={async () => { await wyloguj(); setWidok("form"); }}
       />
@@ -2129,6 +2429,7 @@ export default function GeneratorRaportowABYARD() {
         email={profil?.email}
         onForm={() => setWidok("form")}
         onArchiwum={otworzArchiwum}
+        onCashflow={() => setWidok("cashflow")}
         onKoordynacja={() => setWidok("koordynacja-pm")}
         onWyloguj={async () => { await wyloguj(); setWidok("form"); }}
       />
@@ -2149,6 +2450,7 @@ export default function GeneratorRaportowABYARD() {
         email={profil?.email}
         onForm={() => setWidok("form")}
         onArchiwum={otworzArchiwum}
+        onCashflow={() => setWidok("cashflow")}
         onKoordynacja={() => setWidok("koordynacja-pm")}
         onAdmin={() => setWidok("admin")}
         onWyloguj={async () => { await wyloguj(); setWidok("form"); }}
@@ -2681,7 +2983,7 @@ function EkranLogowania({ pokazToast }) {
 const linkStyl = { color: "#FBC441", cursor: "pointer", textDecoration: "none" };
 
 /* ---------- PANEL ADMINISTRATORA ----------------------------------------- */
-function PanelAdmina({ pokazToast, email, onForm, onArchiwum, onKoordynacja, onWyloguj }) {
+function PanelAdmina({ pokazToast, email, onForm, onArchiwum, onCashflow, onKoordynacja, onWyloguj }) {
   const [uzytkownicy, setUzytkownicy] = useState([]);
   const [projektyAll, setProjektyAll] = useState([]); // wszystkie aktywne
   const [przypisania, setPrzypisania] = useState([]);
@@ -2839,6 +3141,7 @@ function PanelAdmina({ pokazToast, email, onForm, onArchiwum, onKoordynacja, onW
         email={email}
         onForm={onForm}
         onArchiwum={onArchiwum}
+        onCashflow={onCashflow}
         onKoordynacja={onKoordynacja}
         onAdmin={() => {}}
         onWyloguj={onWyloguj}
@@ -3602,7 +3905,7 @@ function ZakladkaKoordynacjaInwestycji({ projektyAll, przypisania, uzytkownicy, 
 
 /* ---------- ARCHIWUM ----------------------------------------------------- */
 /* ---------- WIDOK "KTO CO PROWADZI" (dla wszystkich zalogowanych) --------- */
-function WidokKtoCoProwadzi({ jestAdmin, email, onForm, onArchiwum, onAdmin, onWyloguj }) {
+function WidokKtoCoProwadzi({ jestAdmin, email, onForm, onArchiwum, onCashflow, onAdmin, onWyloguj }) {
   const [ladowanie, setLadowanie] = React.useState(true);
   const [grupy, setGrupy] = React.useState([]);          // po PM
   const [wgInwestycji, setWgInwestycji] = React.useState([]); // po inwestycji
@@ -3676,6 +3979,7 @@ function WidokKtoCoProwadzi({ jestAdmin, email, onForm, onArchiwum, onAdmin, onW
         email={email}
         onForm={onForm}
         onArchiwum={onArchiwum}
+        onCashflow={onCashflow}
         onKoordynacja={() => {}}
         onAdmin={onAdmin}
         onWyloguj={onWyloguj}
@@ -3779,6 +4083,355 @@ function WidokKtoCoProwadzi({ jestAdmin, email, onForm, onArchiwum, onAdmin, onW
   );
 }
 
+/* ---------- CASHFLOW GLOBALNY (dla wszystkich zalogowanych) --------------- */
+
+// Kafelek liczby zarządczej: mono etykieta, duża kwota, podpis pod spodem.
+// akcent nadaje kolor samej liczbie (zielony/czerwony przy odchyleniu od planu).
+function KafelekKPI({ etykieta, wartosc, jednostka = "zł", podpis, akcent, tytul }) {
+  return (
+    <div title={tytul} style={{ background: C.bialy, border: `1px solid ${C.linia}`, borderRadius: 8, padding: "14px 16px", minWidth: 0 }}>
+      <div style={{ fontFamily: C.mono, fontSize: 9.5, letterSpacing: "0.12em", textTransform: "uppercase", color: C.szary, marginBottom: 8 }}>
+        {etykieta}
+      </div>
+      <div style={{ fontFamily: "'Roboto', system-ui, sans-serif", fontWeight: 900, fontSize: 25, letterSpacing: "-0.02em", lineHeight: 1.1, color: akcent || C.czarny, whiteSpace: "nowrap" }}>
+        {wartosc}{jednostka && <span style={{ fontSize: 14, fontWeight: 700, color: C.szary, marginLeft: 4 }}>{jednostka}</span>}
+      </div>
+      {podpis && <div style={{ fontSize: 11.5, color: C.szary, marginTop: 6, lineHeight: 1.45 }}>{podpis}</div>}
+    </div>
+  );
+}
+
+// Cashflow globalny — sprzedaż wszystkich inwestycji w ujęciu miesięcznym.
+// Widok czyta się z góry na dół: liczby zarządcze → krzywa S → macierz
+// inwestycje × miesiące → czego w tej sumie NIE MA (luki w danych).
+function WidokCashflowGlobalny({ jestAdmin, email, onForm, onArchiwum, onKoordynacja, onAdmin, onWyloguj, pokazToast }) {
+  const [ladowanie, setLadowanie] = React.useState(true);
+  const [blad, setBlad] = React.useState("");
+  const [dane, setDane] = React.useState(null);
+  const [tylkoWToku, setTylkoWToku] = React.useState(false);
+  const [rok, setRok] = React.useState("wszystkie");
+  const [rozwiniete, setRozwiniete] = React.useState({}); // { klucz inwestycji: true }
+  const dzis = dzisISO();
+
+  const wczytaj = React.useCallback(async ({ ciche = false } = {}) => {
+    if (!ciche) setLadowanie(true);
+    try {
+      const [raporty, aktywne, nieaktywne] = await Promise.all([
+        listaWszystkichRaportow(),
+        listaAktywnychProjektow(),
+        listaNieaktywnychProjektow(),
+      ]);
+      const projekty = [
+        ...aktywne.map((p) => ({ ...p, aktywna: true })),
+        ...nieaktywne.map((p) => ({ ...p, aktywna: false })),
+      ];
+      setDane(cashflowGlobalny({ raporty, projekty }));
+      setBlad("");
+    } catch (e) {
+      console.error(e);
+      setBlad("Nie udało się wczytać danych do cashflow.");
+    } finally {
+      setLadowanie(false);
+    }
+  }, []);
+
+  React.useEffect(() => { wczytaj(); }, [wczytaj]);
+
+  const p = React.useMemo(
+    () => (dane ? przekrojCashflowu(dane, { tylkoWToku, rok }) : null),
+    [dane, tylkoWToku, rok]
+  );
+
+  // Rok zniknął z osi po zmianie zakresu (np. zostały same inwestycje w toku) —
+  // wracamy na pełną oś, żeby ekran nie został pusty bez wyjaśnienia.
+  React.useEffect(() => {
+    if (p && rok !== "wszystkie" && !p.lata.includes(rok)) setRok("wszystkie");
+  }, [p, rok]);
+
+  const wiersze = React.useMemo(() => {
+    if (!p) return [];
+    return p.miesiace.map((m) => ({
+      miesiac: m.klucz,
+      etykieta: m.etykieta,
+      kwota: p.sumaMies[m.klucz] || 0,
+      skumulowana: p.sumaNaras[m.klucz] || 0,
+    }));
+  }, [p]);
+
+  const fmtZ = (n) => (n ? Math.round(n).toLocaleString("pl-PL") : "");
+  const biezacyMies = dzis.slice(0, 7);
+  const rokBiezacy = dzis.slice(0, 4);
+
+  // --- Liczby zarządcze -------------------------------------------------------
+  const plan = p ? planNaDzis(p.sumaMies, dzis) : 0;
+  const odchylenie = p ? p.sumaWykonana - plan : 0;
+  const rokKPI = rok !== "wszystkie" ? rok : rokBiezacy;
+  const planRoku = p
+    ? Object.entries(p.sumaMies).reduce((s, [k, v]) => (k.startsWith(`${rokKPI}-`) ? s + v : s), 0)
+    : 0;
+  const planMies = p ? (p.sumaMies[biezacyMies] || 0) : 0;
+
+  const thBase = { padding: "6px 7px", border: "1px solid #D9D6CE", fontSize: 10, whiteSpace: "nowrap" };
+  const thOpis = { ...thBase, background: C.czarny, color: C.zolty, textAlign: "left" };
+  const thMies = { ...thBase, background: "#3A3A3A", color: "#FFF", textAlign: "right" };
+  const tdBase = { padding: "5px 7px", border: "1px solid #E6E3DB", fontSize: 10.5 };
+  const tdLepki = { position: "sticky", left: 0, background: C.bialy, zIndex: 1 };
+
+  return (
+    <div style={{ fontFamily: "'Segoe UI', system-ui, sans-serif", background: C.jasny, minHeight: "100vh", color: C.czarny }}>
+      <style>{globalCSS}</style>
+      <PasekNawigacji
+        aktywny="cashflow"
+        jestAdmin={jestAdmin}
+        email={email}
+        onForm={onForm}
+        onArchiwum={onArchiwum}
+        onCashflow={() => {}}
+        onKoordynacja={onKoordynacja}
+        onAdmin={onAdmin}
+        onWyloguj={onWyloguj}
+      />
+      <main style={{ maxWidth: 1080, margin: "0 auto", padding: "28px 24px 80px" }}>
+        <NaglowekEkranu
+          eyebrow="Finanse"
+          tytul="Cashflow globalny"
+          sub="Prognozowana sprzedaż wszystkich inwestycji w ujęciu miesięcznym — wartości umowy z harmonogramów rozłożone kalendarzowo. Z każdej inwestycji liczy się NAJNOWSZY raport, więc kwoty nie dublują się między kolejnymi raportami tej samej budowy. Kwoty netto."
+          akcje={<>
+            <button onClick={() => wczytaj()} style={{ ...miniBtn, padding: "8px 14px", fontWeight: 600 }}>↻ Odśwież</button>
+            <button
+              onClick={() => {
+                if (!p || p.zKwotami.length === 0) { pokazToast && pokazToast("Brak danych do eksportu"); return; }
+                try { eksportCashflowGlobalny(p, { tylkoWToku }); }
+                catch (e) { console.error(e); pokazToast && pokazToast("Nie udało się zbudować pliku XLSX"); }
+              }}
+              style={{ background: C.zolty, color: C.czarny, border: "none", padding: "9px 16px", borderRadius: 6, fontWeight: 700, fontSize: 12.5, cursor: "pointer", fontFamily: "inherit" }}>
+              ⤓ Pobierz XLSX
+            </button>
+          </>}
+        />
+
+        {/* Zastrzeżenie o charakterze liczby — nad wszystkim, także w trakcie
+            wczytywania i przy błędzie, żeby nikt nie zobaczył kwot bez kontekstu. */}
+        <div style={{ padding: "11px 15px", background: C.zoltyJasny, borderLeft: `4px solid ${C.zolty}`, borderRadius: 4, marginBottom: 18 }}>
+          <div style={{ fontFamily: C.mono, fontSize: 10, fontWeight: 700, letterSpacing: "0.1em", textTransform: "uppercase", color: C.zoltyDeep, marginBottom: 5 }}>
+            Charakter zestawienia
+          </div>
+          <div style={{ fontSize: 13, lineHeight: 1.55, color: C.czarny }}>
+            <strong>{NOTA_PROGNOZY}</strong>{" "}
+            <span style={{ color: C.szary }}>{NOTA_PROGNOZY_DLUGA}</span>
+          </div>
+        </div>
+
+        {ladowanie && <div style={{ textAlign: "center", padding: 40, color: C.szary }}>Wczytywanie z bazy…</div>}
+        {!ladowanie && blad && <div style={{ color: C.czerwony, fontSize: 14 }}>{blad}</div>}
+
+        {!ladowanie && !blad && p && (
+          <>
+            {/* --- Filtry: zakres inwestycji + rok --- */}
+            <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 10, marginBottom: 16 }}>
+              <PigulkaPrzelacznik
+                opcje={[[false, `Wszystkie (${dane.inwestycje.length})`], [true, `W toku (${dane.inwestycje.filter((i) => i.wToku).length})`]]}
+                wartosc={tylkoWToku}
+                onZmiana={setTylkoWToku}
+              />
+              {p.lata.length > 1 && (
+                <PigulkaPrzelacznik
+                  opcje={[["wszystkie", "Cała oś"], ...p.lata.map((r) => [r, r])]}
+                  wartosc={rok}
+                  onZmiana={setRok}
+                />
+              )}
+              <span style={{ fontFamily: C.mono, fontSize: 10, color: C.szary2, letterSpacing: "0.06em" }}>
+                stan na {fmtPL(dzis)}
+              </span>
+            </div>
+
+            {p.zKwotami.length === 0 ? (
+              <div style={{ ...card, textAlign: "center", padding: 50, color: C.szary }}>
+                <div style={{ fontSize: 16, marginBottom: 8 }}>Brak danych do cashflow</div>
+                <div style={{ fontSize: 13, lineHeight: 1.6 }}>
+                  Żadna inwestycja w tym zakresie nie ma raportu z wypełnionymi wartościami umowy
+                  przy pozycjach harmonogramu. Cashflow pojawi się, gdy kierownicy uzupełnią kwoty.
+                </div>
+              </div>
+            ) : (
+              <>
+                {/* --- Liczby zarządcze --- */}
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: 12, marginBottom: 20 }}>
+                  <KafelekKPI
+                    etykieta="Portfel — wartość umów"
+                    wartosc={fmtSkrot(p.sumaUmow)}
+                    podpis={`${p.wiersze.length} ${odmiana(p.wiersze.length, ["inwestycja", "inwestycje", "inwestycji"])} z raportem`}
+                    tytul={`${fmtZ(p.sumaUmow)} zł`}
+                  />
+                  <KafelekKPI
+                    etykieta="Sprzedaż wykonana"
+                    wartosc={fmtSkrot(p.sumaWykonana)}
+                    akcent={C.zoltyDeep}
+                    podpis={p.sumaUmow > 0 ? `${Math.round((p.sumaWykonana / p.sumaUmow) * 100)}% portfela · wg % zaawansowania zadań` : "—"}
+                    tytul={`${fmtZ(p.sumaWykonana)} zł`}
+                  />
+                  <KafelekKPI
+                    etykieta="Odchylenie od planu"
+                    wartosc={(odchylenie >= 0 ? "+" : "") + fmtSkrot(odchylenie)}
+                    akcent={odchylenie >= 0 ? C.zielony : C.czerwony}
+                    podpis={`plan narastająco na dziś: ${fmtSkrot(plan)} zł`}
+                    tytul="Sprzedaż wykonana minus plan narastająco na dziś (bieżący miesiąc liczony proporcjonalnie do minionych dni)"
+                  />
+                  <KafelekKPI
+                    etykieta={`Plan ${biezacyMies.slice(5)}.${rokBiezacy}`}
+                    wartosc={fmtSkrot(planMies)}
+                    podpis="sprzedaż planowana w tym miesiącu"
+                    tytul={`${fmtZ(planMies)} zł`}
+                  />
+                  <KafelekKPI
+                    etykieta={`Plan na rok ${rokKPI}`}
+                    wartosc={fmtSkrot(planRoku)}
+                    podpis={`pozostało do sprzedania: ${fmtSkrot(p.sumaUmow - p.sumaWykonana)} zł`}
+                    tytul={`${fmtZ(planRoku)} zł`}
+                  />
+                </div>
+
+                {/* --- Wykres: słupki miesięczne + krzywa S --- */}
+                <section style={card}>
+                  <TytulSekcji>
+                    Prognoza sprzedaży w miesiącach {rok === "wszystkie" ? "— cała oś" : `— rok ${rok}`}
+                  </TytulSekcji>
+                  <WykresCashflow wiersze={wiersze} />
+                  <div style={{ fontSize: 11.5, color: C.szary, marginTop: 8 }}>
+                    Każdy słupek to sprzedaż prognozowana w danym miesiącu, ze stanem na koniec miesiąca rozliczeniowego.
+                  </div>
+                  {rok !== "wszystkie" && (
+                    <div style={{ fontSize: 11.5, color: C.szary, marginTop: 8 }}>
+                      Krzywa narastająca liczona jest od początku całej osi (nie od stycznia {rok}) —
+                      pokazuje realny stan sprzedaży, a filtr roku przycina tylko widoczne miesiące.
+                    </div>
+                  )}
+                </section>
+
+                {/* --- Macierz: inwestycje × miesiące --- */}
+                <section style={{ ...card, padding: 18 }}>
+                  <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
+                    <TytulSekcji>Inwestycje × miesiące · {p.zKwotami.length}</TytulSekcji>
+                    <span style={{ fontSize: 11.5, color: C.szary, marginBottom: 14 }}>
+                      kliknij nazwę inwestycji, aby rozwinąć jej zadania
+                    </span>
+                  </div>
+                  <div className="tabela-scroll-own" style={{ width: "100%", overflowX: "auto" }}>
+                    <table style={{ borderCollapse: "collapse", minWidth: 720, width: "100%" }}>
+                      <thead>
+                        <tr>
+                          <th style={{ ...thOpis, position: "sticky", left: 0, zIndex: 2, minWidth: 210 }}>Inwestycja</th>
+                          <th style={{ ...thOpis, textAlign: "right" }}>Wartość umowy</th>
+                          <th style={{ ...thOpis, textAlign: "right" }}>Wykonana</th>
+                          {p.miesiace.map((m) => <th key={m.klucz} style={{ ...thMies, background: m.klucz === biezacyMies ? C.zoltyDeep : "#3A3A3A" }}>{m.etykieta}</th>)}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {p.zKwotami.map((i) => {
+                          const otwarta = !!rozwiniete[i.klucz];
+                          return (
+                            <React.Fragment key={i.klucz}>
+                              <tr>
+                                <td
+                                  style={{ ...tdBase, ...tdLepki, textAlign: "left", cursor: "pointer" }}
+                                  onClick={() => setRozwiniete((s) => ({ ...s, [i.klucz]: !s[i.klucz] }))}
+                                  title={i.dataRaportu ? `Raport nr ${i.numer} · stan na ${fmtPL(i.dataRaportu)}` : "Brak daty raportu"}
+                                >
+                                  <span style={{ color: C.zoltyDeep, fontFamily: C.mono, marginRight: 6 }}>{otwarta ? "▾" : "▸"}</span>
+                                  {i.nazwa}
+                                  {!i.wToku && <span style={{ ...odznakaWstrzymana, color: C.szary, background: C.jasny }}>ZAKOŃCZONA</span>}
+                                  {i.wstrzymana && <span style={odznakaWstrzymana}>WSTRZYMANA</span>}
+                                </td>
+                                <td style={{ ...tdBase, textAlign: "right", fontWeight: 600 }}>{fmtZ(i.kwotaUmowy)}</td>
+                                <td style={{ ...tdBase, textAlign: "right", color: C.zoltyDeep }}>
+                                  {fmtZ(i.wykonana)}
+                                  {i.postep != null && <span style={{ color: C.szary2, marginLeft: 5 }}>{i.postep}%</span>}
+                                </td>
+                                {p.miesiace.map((m) => {
+                                  const v = i.komorki[m.klucz];
+                                  return <td key={m.klucz} style={{ ...tdBase, textAlign: "right", background: v ? "#FFF9E6" : "transparent" }}>{v ? fmtZ(v) : "–"}</td>;
+                                })}
+                              </tr>
+                              {otwarta && i.zadania.map((z, j) => (
+                                <tr key={`${i.klucz}-${j}`} style={{ background: "#FBFAF7" }}>
+                                  <td style={{ ...tdBase, ...tdLepki, background: "#FBFAF7", textAlign: "left", paddingLeft: 26, color: C.szary }}>{z.nazwa}</td>
+                                  <td style={{ ...tdBase, textAlign: "right", color: C.szary }}>{fmtZ(z.kwota)}</td>
+                                  <td style={{ ...tdBase }}></td>
+                                  {p.miesiace.map((m) => {
+                                    const v = z.komorki[m.klucz];
+                                    return <td key={m.klucz} style={{ ...tdBase, textAlign: "right", color: C.szary }}>{v ? fmtZ(v) : "–"}</td>;
+                                  })}
+                                </tr>
+                              ))}
+                            </React.Fragment>
+                          );
+                        })}
+                      </tbody>
+                      <tfoot>
+                        <tr>
+                          <td style={{ ...tdBase, ...tdLepki, background: "#F3F0E8", textAlign: "left", fontWeight: 700, border: "1px solid #C9C6BE" }}>RAZEM miesięcznie</td>
+                          <td style={{ ...tdBase, textAlign: "right", fontWeight: 700, background: "#F3F0E8", border: "1px solid #C9C6BE" }}>{fmtZ(p.sumaUmow)}</td>
+                          <td style={{ ...tdBase, textAlign: "right", fontWeight: 700, background: "#F3F0E8", border: "1px solid #C9C6BE" }}>{fmtZ(p.sumaWykonana)}</td>
+                          {p.miesiace.map((m) => <td key={m.klucz} style={{ ...tdBase, textAlign: "right", fontWeight: 700, background: "#F3F0E8", border: "1px solid #C9C6BE" }}>{fmtZ(p.sumaMies[m.klucz])}</td>)}
+                        </tr>
+                        <tr>
+                          <td style={{ ...tdBase, ...tdLepki, background: C.zolty, color: C.czarny, textAlign: "left", fontWeight: 700, border: "1px solid #C9C6BE" }}>Narastająco</td>
+                          <td colSpan={2} style={{ background: C.zolty, border: "1px solid #C9C6BE" }}></td>
+                          {p.miesiace.map((m) => <td key={m.klucz} style={{ ...tdBase, textAlign: "right", fontWeight: 700, background: C.zolty, color: C.czarny, border: "1px solid #C9C6BE" }}>{fmtZ(p.sumaNaras[m.klucz])}</td>)}
+                        </tr>
+                      </tfoot>
+                    </table>
+                  </div>
+                  <div style={{ fontSize: 11.5, color: C.szary, marginTop: 10 }}>
+                    Kolumny miesięcy to prognoza ze stanem na koniec miesiąca rozliczeniowego.
+                    „Wykonana" to wartość umowy przemnożona przez % zaawansowania zadań z najnowszego raportu — również szacunek z budowy, nie faktura.
+                  </div>
+                </section>
+
+                {/* --- Czego w tej sumie NIE MA --- */}
+                {(p.bezCashflowu.length > 0 || p.bezRaportu.length > 0 || p.wiersze.some((i) => i.rozjazd)) && (
+                  <section style={{ ...card, borderColor: "#E8D9A8", background: "#FFFDF6" }}>
+                    <TytulSekcji>Czego w tej sumie nie ma</TytulSekcji>
+                    <div style={{ fontSize: 12.5, color: C.szary, marginBottom: 12, lineHeight: 1.55 }}>
+                      Cashflow globalny jest tak kompletny, jak raporty, z których powstaje. Poniżej inwestycje,
+                      które do sumy nie weszły w całości — warto je domknąć, zanim ktoś oprze na tej liczbie decyzję.
+                    </div>
+                    {p.bezRaportu.length > 0 && (
+                      <div style={{ marginBottom: 10, fontSize: 13 }}>
+                        <strong>Bez ani jednego raportu ({p.bezRaportu.length}):</strong>{" "}
+                        <span style={{ color: C.szary }}>{p.bezRaportu.map((x) => x.nazwa).join(" · ")}</span>
+                      </div>
+                    )}
+                    {p.bezCashflowu.length > 0 && (
+                      <div style={{ marginBottom: 10, fontSize: 13 }}>
+                        <strong>Raport bez wartości umowy ({p.bezCashflowu.length}):</strong>{" "}
+                        <span style={{ color: C.szary }}>{p.bezCashflowu.map((x) => x.nazwa).join(" · ")}</span>
+                      </div>
+                    )}
+                    {p.wiersze.filter((i) => i.rozjazd).length > 0 && (
+                      <div style={{ fontSize: 13 }}>
+                        <strong>Kwota bez kompletu dat — nie weszła do rozkładu miesięcznego:</strong>
+                        <ul style={{ margin: "6px 0 0", paddingLeft: 20, color: C.szary }}>
+                          {p.wiersze.filter((i) => i.rozjazd).map((i) => (
+                            <li key={i.klucz} style={{ marginBottom: 2 }}>
+                              {i.nazwa} — poza osią czasu {fmtZ(i.kwotaUmowy - i.rozlozone)} zł
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                  </section>
+                )}
+              </>
+            )}
+          </>
+        )}
+      </main>
+    </div>
+  );
+}
+
 /* ---------- ARCHIWUM ----------------------------------------------------- */
 
 // Kafel jednej inwestycji w przeglądzie archiwum. Czyta się w dwóch osiach:
@@ -3870,7 +4523,7 @@ function KafelInwestycji({ kafel: k, aktywny, status, onKlik }) {
   );
 }
 
-function WidokArchiwum({ raporty, inwestycje, przypisania, uzytkownicy, ladowanie, filtr, setFiltr, onOdswiez, onOtworz, onEdytuj, onUsun, mozeEdytowac, godzinyDoEdycji, onPozwolEdycje, onCofnijEdycje, onNowyRaport, jestAdmin, email, onForm, onKoordynacja, onAdmin, onWyloguj }) {
+function WidokArchiwum({ raporty, inwestycje, przypisania, uzytkownicy, ladowanie, filtr, setFiltr, onOdswiez, onOtworz, onEdytuj, onUsun, mozeEdytowac, godzinyDoEdycji, onPozwolEdycje, onCofnijEdycje, onNowyRaport, jestAdmin, email, onForm, onCashflow, onKoordynacja, onAdmin, onWyloguj }) {
   // Status na plakietce (zagrożenie terminu) — ta sama logika, co w kokpicie koordynacji:
   // harmonogram opóźniający zakończenie całości ma pierwszeństwo, dalej pole „Podsumowanie".
   const statusInwestycji = (raport) => {
@@ -3923,6 +4576,7 @@ function WidokArchiwum({ raporty, inwestycje, przypisania, uzytkownicy, ladowani
         email={email}
         onForm={onForm}
         onArchiwum={() => {}}
+        onCashflow={onCashflow}
         onKoordynacja={onKoordynacja}
         onAdmin={onAdmin}
         onWyloguj={onWyloguj}
