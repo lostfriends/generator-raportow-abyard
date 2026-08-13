@@ -680,6 +680,17 @@ function macierzCashflow(harmonogram) {
    zgadza się z sumą cashflow z poszczególnych raportów.
 --------------------------------------------------------------------------- */
 
+// Zastrzeżenie o charakterze liczby — POWTARZANE na ekranie i w eksporcie XLSX
+// z jednego miejsca. Plik wychodzi z aplikacji mailem i zaczyna żyć własnym
+// życiem, więc musi nieść ten sam kontekst, co ekran: to prognoza z raportów,
+// a nie zafakturowana sprzedaż z księgowości.
+const NOTA_PROGNOZY =
+  "PROGNOZA na podstawie raportów z budów, ze stanem na koniec miesiąca rozliczeniowego — nie są to dane księgowe ani sprzedaż zafakturowana.";
+const NOTA_PROGNOZY_DLUGA =
+  "Kwoty pochodzą z harmonogramów raportów i zmieniają się z każdym kolejnym raportem — " +
+  "wartość umowy każdego zadania jest rozkładana kalendarzowo na miesiące, a stan zaawansowania " +
+  "przyjmuje się na koniec miesiąca rozliczeniowego. To narzędzie do planowania, nie podstawa rozliczeń.";
+
 // Ciągła oś miesięcy "YYYY-MM" od najwcześniejszego do najpóźniejszego klucza.
 // Miesiące bez sprzedaży MUSZĄ być widoczne jako zera — inaczej wykres ściskałby
 // przerwy w robocie i krzywa S kłamałaby o tempie sprzedaży.
@@ -1470,8 +1481,9 @@ function eksportCashflowGlobalny(przekroj, { tylkoWToku }) {
   // --- Arkusz 1: macierz inwestycje × miesiące ---
   const nKol1 = 3 + miesiace.length;
   const w1 = [];
-  w1.push([_txt("Cashflow globalny — sprzedaż w ujęciu miesięcznym", STYLE.TYTUL)]);
+  w1.push([_txt("Cashflow globalny — prognoza sprzedaży w ujęciu miesięcznym", STYLE.TYTUL)]);
   w1.push([_txt(`Stan na ${fmtPL(dzis)} · ${opisZakresu} (${inw.length}) · kwoty netto z najnowszego raportu każdej inwestycji`, STYLE.PODPIS)]);
+  w1.push([_txt(NOTA_PROGNOZY, STYLE.PODPIS)]);
   w1.push([]);
   w1.push([
     _txt("Inwestycja", STYLE.NAGL_CIEMNY),
@@ -1503,6 +1515,7 @@ function eksportCashflowGlobalny(przekroj, { tylkoWToku }) {
   const w2 = [];
   w2.push([_txt("Inwestycje w cashflow globalnym", STYLE.TYTUL)]);
   w2.push([_txt(`Stan na ${fmtPL(dzis)} · źródłem kwot jest NAJNOWSZY raport każdej inwestycji`, STYLE.PODPIS)]);
+  w2.push([_txt(NOTA_PROGNOZY, STYLE.PODPIS)]);
   w2.push([]);
   w2.push([
     "Inwestycja", "Status", "Wartość umowy", "Sprzedaż wykonana", "Pozostało", "% zaawansowania",
@@ -1546,15 +1559,16 @@ function eksportCashflowGlobalny(przekroj, { tylkoWToku }) {
     {
       nazwa: "Cashflow globalny",
       kolumny: [{ szer: 40 }, { szer: 17 }, { szer: 18 }, ...miesiace.map(() => ({ szer: 11 }))],
-      zamrozenie: { wiersze: 4, kolumny: 3 },
-      scalenia: [`${adres(1, 1)}:${adres(nKol1, 1)}`, `${adres(1, 2)}:${adres(nKol1, 2)}`],
+      // nagłówek tabeli stoi w 5. wierszu: tytuł, podpis, nota o prognozie, odstęp
+      zamrozenie: { wiersze: 5, kolumny: 3 },
+      scalenia: [1, 2, 3].map((w) => `${adres(1, w)}:${adres(nKol1, w)}`),
       wiersze: w1,
     },
     {
       nazwa: "Inwestycje",
       kolumny: [{ szer: 40 }, { szer: 13 }, { szer: 17 }, { szer: 18 }, { szer: 15 }, { szer: 15 }, { szer: 10 }, { szer: 14 }, { szer: 46 }],
-      zamrozenie: { wiersze: 4 },
-      scalenia: [`${adres(1, 1)}:${adres(9, 1)}`, `${adres(1, 2)}:${adres(9, 2)}`],
+      zamrozenie: { wiersze: 5 },
+      scalenia: [1, 2, 3].map((w) => `${adres(1, w)}:${adres(9, w)}`),
       wiersze: w2,
     },
   ], `Cashflow_globalny_ABYARD_-_${dzis}`);
@@ -4181,7 +4195,7 @@ function WidokCashflowGlobalny({ jestAdmin, email, onForm, onArchiwum, onKoordyn
         <NaglowekEkranu
           eyebrow="Finanse"
           tytul="Cashflow globalny"
-          sub="Sprzedaż wszystkich inwestycji w ujęciu miesięcznym — wartości umowy z harmonogramów rozłożone kalendarzowo. Z każdej inwestycji liczy się NAJNOWSZY raport, więc kwoty nie dublują się między kolejnymi raportami tej samej budowy. Kwoty netto."
+          sub="Prognozowana sprzedaż wszystkich inwestycji w ujęciu miesięcznym — wartości umowy z harmonogramów rozłożone kalendarzowo. Z każdej inwestycji liczy się NAJNOWSZY raport, więc kwoty nie dublują się między kolejnymi raportami tej samej budowy. Kwoty netto."
           akcje={<>
             <button onClick={() => wczytaj()} style={{ ...miniBtn, padding: "8px 14px", fontWeight: 600 }}>↻ Odśwież</button>
             <button
@@ -4195,6 +4209,18 @@ function WidokCashflowGlobalny({ jestAdmin, email, onForm, onArchiwum, onKoordyn
             </button>
           </>}
         />
+
+        {/* Zastrzeżenie o charakterze liczby — nad wszystkim, także w trakcie
+            wczytywania i przy błędzie, żeby nikt nie zobaczył kwot bez kontekstu. */}
+        <div style={{ padding: "11px 15px", background: C.zoltyJasny, borderLeft: `4px solid ${C.zolty}`, borderRadius: 4, marginBottom: 18 }}>
+          <div style={{ fontFamily: C.mono, fontSize: 10, fontWeight: 700, letterSpacing: "0.1em", textTransform: "uppercase", color: C.zoltyDeep, marginBottom: 5 }}>
+            Charakter zestawienia
+          </div>
+          <div style={{ fontSize: 13, lineHeight: 1.55, color: C.czarny }}>
+            <strong>{NOTA_PROGNOZY}</strong>{" "}
+            <span style={{ color: C.szary }}>{NOTA_PROGNOZY_DLUGA}</span>
+          </div>
+        </div>
 
         {ladowanie && <div style={{ textAlign: "center", padding: 40, color: C.szary }}>Wczytywanie z bazy…</div>}
         {!ladowanie && blad && <div style={{ color: C.czerwony, fontSize: 14 }}>{blad}</div>}
@@ -4269,9 +4295,12 @@ function WidokCashflowGlobalny({ jestAdmin, email, onForm, onArchiwum, onKoordyn
                 {/* --- Wykres: słupki miesięczne + krzywa S --- */}
                 <section style={card}>
                   <TytulSekcji>
-                    Sprzedaż w miesiącach {rok === "wszystkie" ? "— cała oś" : `— rok ${rok}`}
+                    Prognoza sprzedaży w miesiącach {rok === "wszystkie" ? "— cała oś" : `— rok ${rok}`}
                   </TytulSekcji>
                   <WykresCashflow wiersze={wiersze} />
+                  <div style={{ fontSize: 11.5, color: C.szary, marginTop: 8 }}>
+                    Każdy słupek to sprzedaż prognozowana w danym miesiącu, ze stanem na koniec miesiąca rozliczeniowego.
+                  </div>
                   {rok !== "wszystkie" && (
                     <div style={{ fontSize: 11.5, color: C.szary, marginTop: 8 }}>
                       Krzywa narastająca liczona jest od początku całej osi (nie od stycznia {rok}) —
@@ -4353,6 +4382,10 @@ function WidokCashflowGlobalny({ jestAdmin, email, onForm, onArchiwum, onKoordyn
                         </tr>
                       </tfoot>
                     </table>
+                  </div>
+                  <div style={{ fontSize: 11.5, color: C.szary, marginTop: 10 }}>
+                    Kolumny miesięcy to prognoza ze stanem na koniec miesiąca rozliczeniowego.
+                    „Wykonana" to wartość umowy przemnożona przez % zaawansowania zadań z najnowszego raportu — również szacunek z budowy, nie faktura.
                   </div>
                 </section>
 
