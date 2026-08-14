@@ -1463,55 +1463,141 @@ function eksportHarmonogramCashflow(form) {
 /* ==========================================================================
    EKSPORT CASHFLOW GLOBALNEGO — zestawienie zarządcze do .xlsx
    ----------------------------------------------------------------------------
-   Dwa arkusze:
-     „Cashflow globalny" — macierz inwestycje × miesiące + sumy miesięczne
-                           i narastająco (dokładnie to, co widać na ekranie),
-     „Inwestycje"        — jedna linia na budowę: wartość umowy, sprzedaż
-                           wykonana, zaawansowanie, numer i data raportu,
-                           z którego kwoty pochodzą.
-   Zawsze eksportujemy PEŁNĄ oś czasu (bez filtra roku) — plik ma być kompletem
-   danych do dalszej obróbki w Excelu, a nie zrzutem ekranu.
+   Arkusze:
+     „Całość"     — macierz inwestycje × miesiące na PEŁNEJ osi czasu,
+     „2025", „2026", … — ten sam przekrój zawężony do roku kalendarzowego,
+                    po jednym arkuszu na rok obecny w danych,
+     „Inwestycje" — jedna linia na budowę: wartość umowy, sprzedaż wykonana,
+                    zaawansowanie, numer i data raportu, z którego kwoty pochodzą.
+   Plik zawsze niesie KOMPLET danych, niezależnie od roku wybranego na ekranie —
+   ma być materiałem do dalszej obróbki w Excelu, a nie zrzutem ekranu.
 ========================================================================== */
-function eksportCashflowGlobalny(przekroj, { tylkoWToku }) {
+
+// Arkusz „Całość": pełna oś czasu. Kolumny kontraktowe (wartość umowy, sprzedaż
+// wykonana) mają tu sens, bo cały kontrakt mieści się w widocznych miesiącach.
+function arkuszCashflowCalosc(przekroj, opisZakresu, dzis) {
   const miesiace = przekroj.osPelna.map((k) => ({ klucz: k, etykieta: etykietaMiesiaca(k) }));
   const inw = przekroj.zKwotami;
-  const opisZakresu = tylkoWToku ? "inwestycje w toku" : "wszystkie inwestycje";
-  const dzis = dzisISO();
-
-  // --- Arkusz 1: macierz inwestycje × miesiące ---
-  const nKol1 = 3 + miesiace.length;
-  const w1 = [];
-  w1.push([_txt("Cashflow globalny — prognoza sprzedaży w ujęciu miesięcznym", STYLE.TYTUL)]);
-  w1.push([_txt(`Stan na ${fmtPL(dzis)} · ${opisZakresu} (${inw.length}) · kwoty netto z najnowszego raportu każdej inwestycji`, STYLE.PODPIS)]);
-  w1.push([_txt(NOTA_PROGNOZY, STYLE.PODPIS)]);
-  w1.push([]);
-  w1.push([
+  const nKol = 3 + miesiace.length;
+  const w = [];
+  w.push([_txt("Cashflow globalny — prognoza sprzedaży w ujęciu miesięcznym", STYLE.TYTUL)]);
+  w.push([_txt(`Stan na ${fmtPL(dzis)} · ${opisZakresu} (${inw.length}) · kwoty netto z najnowszego raportu każdej inwestycji`, STYLE.PODPIS)]);
+  w.push([_txt(NOTA_PROGNOZY, STYLE.PODPIS)]);
+  w.push([]);
+  w.push([
     _txt("Inwestycja", STYLE.NAGL_CIEMNY),
     _txt("Wartość umowy", STYLE.NAGL_CIEMNY),
     _txt("Sprzedaż wykonana", STYLE.NAGL_CIEMNY),
     ...miesiace.map((m) => _txt(m.etykieta, STYLE.NAGL_MIES)),
   ]);
   for (const i of inw) {
-    w1.push([
+    w.push([
       _txt(i.nazwa, STYLE.TEKST),
       _num(Math.round(i.kwotaUmowy), STYLE.LICZBA_ZL),
       _num(Math.round(i.wykonana), STYLE.LICZBA_ZL),
       ...miesiace.map((m) => (i.komorki[m.klucz] ? _num(Math.round(i.komorki[m.klucz]), STYLE.LICZBA_ZOLTA) : { s: STYLE.LICZBA })),
     ]);
   }
-  w1.push([
+  w.push([
     _txt("RAZEM miesięcznie", STYLE.STOPKA_TEKST),
     _num(Math.round(przekroj.sumaUmow), STYLE.STOPKA_ZL),
     _num(Math.round(przekroj.sumaWykonana), STYLE.STOPKA_ZL),
     ...miesiace.map((m) => (przekroj.sumaMies[m.klucz] ? _num(Math.round(przekroj.sumaMies[m.klucz]), STYLE.STOPKA_LICZBA) : { s: STYLE.STOPKA_LICZBA })),
   ]);
-  w1.push([
+  w.push([
     _txt("Narastająco", STYLE.NARAST_TEKST),
     { s: STYLE.NARAST_TEKST }, { s: STYLE.NARAST_TEKST },
     ...miesiace.map((m) => _num(Math.round(przekroj.sumaNaras[m.klucz] || 0), STYLE.NARAST_LICZBA)),
   ]);
 
-  // --- Arkusz 2: jedna linia na inwestycję ---
+  return {
+    nazwa: "Całość",
+    kolumny: [{ szer: 40 }, { szer: 17 }, { szer: 18 }, ...miesiace.map(() => ({ szer: 11 }))],
+    // nagłówek tabeli stoi w 5. wierszu: tytuł, podpis, nota o prognozie, odstęp
+    zamrozenie: { wiersze: 5, kolumny: 3 },
+    scalenia: [1, 2, 3].map((r) => `${adres(1, r)}:${adres(nKol, r)}`),
+    wiersze: w,
+  };
+}
+
+// Arkusz jednego roku kalendarzowego.
+// ŚWIADOMA RÓŻNICA wobec arkusza „Całość": zamiast wartości umowy (całego
+// kontraktu, często rozłożonego na kilka lat) wiersz podsumowuje SPRZEDAŻ W TYM
+// ROKU. Dzięki temu arkusz spina się sam w sobie — suma wiersza równa się sumie
+// jego miesięcy, a suma kolumny „sprzedaż w roku" równa się sumie RAZEM. Wchodzą
+// tylko inwestycje, które w tym roku cokolwiek sprzedają; reszta byłaby wierszem
+// samych zer. Narastające podajemy dwoma wierszami: w obrębie roku (naturalne
+// czytanie arkusza) i od początku całej osi (spięcie z arkuszem „Całość").
+// Wszystkie sumy w tym arkuszu liczymy z JUŻ ZAOKRĄGLONYCH komórek. Excel to
+// arkusz kalkulacyjny — ktoś zaznaczy wiersz i spojrzy na sumę na pasku stanu
+// albo dopisze SUMA(). Gdyby suma wiersza pochodziła z wartości niezaokrąglonych,
+// potrafiłaby różnić się od widocznych komórek o kilka złotych i budzić
+// niepotrzebne pytania. Tu wszystko spina się co do złotówki.
+function arkuszCashflowRoku(przekroj, rok, dzis) {
+  const klucze = przekroj.osPelna.filter((k) => k.startsWith(`${rok}-`));
+  const miesiace = klucze.map((k) => ({ klucz: k, etykieta: etykietaMiesiaca(k) }));
+  const inw = przekroj.zKwotami
+    .map((i) => {
+      const komorki = klucze.map((k) => Math.round(i.komorki[k] || 0));
+      return { nazwa: i.nazwa, komorki, suma: komorki.reduce((a, b) => a + b, 0) };
+    })
+    .filter((i) => i.suma > 0)
+    .sort((a, b) => b.suma - a.suma);
+  const sumaKolumn = klucze.map((_, j) => inw.reduce((s, i) => s + i.komorki[j], 0));
+  const sumaRoku = sumaKolumn.reduce((a, b) => a + b, 0);
+  const nKol = 3 + miesiace.length;
+
+  const w = [];
+  w.push([_txt(`Cashflow globalny — rok ${rok}`, STYLE.TYTUL)]);
+  w.push([_txt(`Stan na ${fmtPL(dzis)} · ${inw.length} ${odmiana(inw.length, ["inwestycja", "inwestycje", "inwestycji"])} ze sprzedażą w ${rok} · kwoty netto`, STYLE.PODPIS)]);
+  w.push([_txt(NOTA_PROGNOZY, STYLE.PODPIS)]);
+  w.push([]);
+  w.push([
+    _txt("Inwestycja", STYLE.NAGL_CIEMNY),
+    _txt(`Sprzedaż w ${rok}`, STYLE.NAGL_CIEMNY),
+    _txt("Udział w roku", STYLE.NAGL_CIEMNY),
+    ...miesiace.map((m) => _txt(m.etykieta, STYLE.NAGL_MIES)),
+  ]);
+  for (const i of inw) {
+    w.push([
+      _txt(i.nazwa, STYLE.TEKST),
+      _num(i.suma, STYLE.LICZBA_ZL),
+      sumaRoku > 0 ? _num(Math.round((i.suma / sumaRoku) * 100), STYLE.PROCENT) : _txt("—", STYLE.TEKST_SZARY),
+      ...i.komorki.map((v) => (v ? _num(v, STYLE.LICZBA_ZOLTA) : { s: STYLE.LICZBA })),
+    ]);
+  }
+  w.push([
+    _txt("RAZEM miesięcznie", STYLE.STOPKA_TEKST),
+    _num(sumaRoku, STYLE.STOPKA_ZL),
+    { s: STYLE.STOPKA_TEKST },
+    ...sumaKolumn.map((v) => (v ? _num(v, STYLE.STOPKA_LICZBA) : { s: STYLE.STOPKA_LICZBA })),
+  ]);
+  let bieg = 0;
+  w.push([
+    _txt(`Narastająco w ${rok}`, STYLE.STOPKA_TEKST),
+    { s: STYLE.STOPKA_TEKST }, { s: STYLE.STOPKA_TEKST },
+    ...sumaKolumn.map((v) => { bieg += v; return _num(bieg, STYLE.STOPKA_LICZBA); }),
+  ]);
+  w.push([
+    _txt("Narastająco od początku", STYLE.NARAST_TEKST),
+    { s: STYLE.NARAST_TEKST }, { s: STYLE.NARAST_TEKST },
+    ...miesiace.map((m) => _num(Math.round(przekroj.sumaNaras[m.klucz] || 0), STYLE.NARAST_LICZBA)),
+  ]);
+
+  return {
+    nazwa: String(rok),
+    kolumny: [{ szer: 40 }, { szer: 17 }, { szer: 13 }, ...miesiace.map(() => ({ szer: 12 }))],
+    zamrozenie: { wiersze: 5, kolumny: 3 },
+    scalenia: [1, 2, 3].map((r) => `${adres(1, r)}:${adres(nKol, r)}`),
+    wiersze: w,
+  };
+}
+
+function eksportCashflowGlobalny(przekroj, { tylkoWToku }) {
+  const opisZakresu = tylkoWToku ? "inwestycje w toku" : "wszystkie inwestycje";
+  const dzis = dzisISO();
+
+  // --- Arkusz podsumowania: jedna linia na inwestycję ---
   const w2 = [];
   w2.push([_txt("Inwestycje w cashflow globalnym", STYLE.TYTUL)]);
   w2.push([_txt(`Stan na ${fmtPL(dzis)} · źródłem kwot jest NAJNOWSZY raport każdej inwestycji`, STYLE.PODPIS)]);
@@ -1555,23 +1641,23 @@ function eksportCashflowGlobalny(przekroj, { tylkoWToku }) {
     { s: STYLE.STOPKA_TEKST }, { s: STYLE.STOPKA_TEKST }, { s: STYLE.STOPKA_TEKST }, { s: STYLE.STOPKA_TEKST },
   ]);
 
-  pobierzXlsx([
-    {
-      nazwa: "Cashflow globalny",
-      kolumny: [{ szer: 40 }, { szer: 17 }, { szer: 18 }, ...miesiace.map(() => ({ szer: 11 }))],
-      // nagłówek tabeli stoi w 5. wierszu: tytuł, podpis, nota o prognozie, odstęp
-      zamrozenie: { wiersze: 5, kolumny: 3 },
-      scalenia: [1, 2, 3].map((w) => `${adres(1, w)}:${adres(nKol1, w)}`),
-      wiersze: w1,
-    },
-    {
-      nazwa: "Inwestycje",
-      kolumny: [{ szer: 40 }, { szer: 13 }, { szer: 17 }, { szer: 18 }, { szer: 15 }, { szer: 15 }, { szer: 10 }, { szer: 14 }, { szer: 46 }],
-      zamrozenie: { wiersze: 5 },
-      scalenia: [1, 2, 3].map((w) => `${adres(1, w)}:${adres(9, w)}`),
-      wiersze: w2,
-    },
-  ], `Cashflow_globalny_ABYARD_-_${dzis}`);
+  const arkuszInwestycje = {
+    nazwa: "Inwestycje",
+    kolumny: [{ szer: 40 }, { szer: 13 }, { szer: 17 }, { szer: 18 }, { szer: 15 }, { szer: 15 }, { szer: 10 }, { szer: 14 }, { szer: 46 }],
+    zamrozenie: { wiersze: 5 },
+    scalenia: [1, 2, 3].map((r) => `${adres(1, r)}:${adres(9, r)}`),
+    wiersze: w2,
+  };
+
+  // Kolejność zakładek: całość → kolejne lata rosnąco → podsumowanie inwestycji.
+  pobierzXlsx(
+    [
+      arkuszCashflowCalosc(przekroj, opisZakresu, dzis),
+      ...przekroj.lata.map((rok) => arkuszCashflowRoku(przekroj, rok, dzis)),
+      arkuszInwestycje,
+    ],
+    `Cashflow_globalny_ABYARD_-_${dzis}`
+  );
 }
 
 // Token z adresu (#r/<token>) — obecność przełącza aplikację w publiczny
@@ -4230,7 +4316,7 @@ function WidokCashflowGlobalny({ jestAdmin, email, onForm, onArchiwum, onKoordyn
                 try { eksportCashflowGlobalny(p, { tylkoWToku }); }
                 catch (e) { console.error(e); pokazToast && pokazToast("Nie udało się zbudować pliku XLSX"); }
               }}
-              title="Plik zawiera pełną oś czasu — wszystkie lata, niezależnie od roku wybranego na ekranie."
+              title={`Arkusze: „Całość" (pełna oś czasu), osobny arkusz na każdy rok (${p && p.lata.length ? p.lata.join(", ") : "wg danych"}) oraz „Inwestycje". Plik nie zależy od roku wybranego na ekranie.`}
               style={{ background: C.zolty, color: C.czarny, border: "none", padding: "9px 16px", borderRadius: 6, fontWeight: 700, fontSize: 12.5, cursor: "pointer", fontFamily: "inherit" }}>
               ⤓ Pobierz XLSX
             </button>
