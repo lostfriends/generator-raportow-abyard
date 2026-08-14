@@ -4109,7 +4109,10 @@ function WidokCashflowGlobalny({ jestAdmin, email, onForm, onArchiwum, onKoordyn
   const [blad, setBlad] = React.useState("");
   const [dane, setDane] = React.useState(null);
   const [tylkoWToku, setTylkoWToku] = React.useState(false);
-  const [rok, setRok] = React.useState("wszystkie");
+  // Domyślnie ROK KALENDARZOWY (bieżący) — tak się planuje i rozlicza sprzedaż,
+  // a 12 kolumn czyta się bez przewijania. „Cała oś" zostaje jako opcja do
+  // spojrzenia na całe życie portfela.
+  const [rok, setRok] = React.useState(() => dzisISO().slice(0, 4));
   const [rozwiniete, setRozwiniete] = React.useState({}); // { klucz inwestycji: true }
   const dzis = dzisISO();
 
@@ -4142,10 +4145,14 @@ function WidokCashflowGlobalny({ jestAdmin, email, onForm, onArchiwum, onKoordyn
     [dane, tylkoWToku, rok]
   );
 
-  // Rok zniknął z osi po zmianie zakresu (np. zostały same inwestycje w toku) —
-  // wracamy na pełną oś, żeby ekran nie został pusty bez wyjaśnienia.
+  // Wybrany rok wypadł z osi — bo dane jeszcze go nie obejmują (bieżący rok na
+  // starcie) albo zmiana zakresu go usunęła. Przeskakujemy na NAJBLIŻSZY rok
+  // z danymi, a nie na pełną oś: ekran ma zostać rocznym przekrojem, tylko innego
+  // roku. Pusty ekran bez wyjaśnienia byłby najgorszą z opcji.
   React.useEffect(() => {
-    if (p && rok !== "wszystkie" && !p.lata.includes(rok)) setRok("wszystkie");
+    if (!p || rok === "wszystkie" || p.lata.length === 0 || p.lata.includes(rok)) return;
+    const najblizszy = p.lata.reduce((a, b) => (Math.abs(Number(b) - Number(rok)) < Math.abs(Number(a) - Number(rok)) ? b : a));
+    setRok(najblizszy);
   }, [p, rok]);
 
   const wiersze = React.useMemo(() => {
@@ -4157,6 +4164,21 @@ function WidokCashflowGlobalny({ jestAdmin, email, onForm, onArchiwum, onKoordyn
       skumulowana: p.sumaNaras[m.klucz] || 0,
     }));
   }, [p]);
+
+  // Kolejność wierszy macierzy: najpierw inwestycje, które w WIDOCZNYCH miesiącach
+  // realnie coś sprzedają. Przy przekroju rocznym budowa zamknięta w poprzednim
+  // roku ma same kreski — niech nie zajmuje góry tabeli. Rzędów nie ukrywamy,
+  // bo kolumna „Wartość umowy" jest sumą całego kontraktu i musi się spinać
+  // z wierszem RAZEM.
+  const wierszeMacierzy = React.useMemo(() => {
+    if (!p) return [];
+    const wWidoku = (i) => (p.miesiace.some((m) => i.komorki[m.klucz]) ? 1 : 0);
+    return [...p.zKwotami].sort((a, b) => (wWidoku(b) - wWidoku(a)) || (b.kwotaUmowy - a.kwotaUmowy));
+  }, [p]);
+  const ileWWidoku = React.useMemo(
+    () => (p ? wierszeMacierzy.filter((i) => p.miesiace.some((m) => i.komorki[m.klucz])).length : 0),
+    [p, wierszeMacierzy]
+  );
 
   const fmtZ = (n) => (n ? Math.round(n).toLocaleString("pl-PL") : "");
   const biezacyMies = dzis.slice(0, 7);
@@ -4170,6 +4192,10 @@ function WidokCashflowGlobalny({ jestAdmin, email, onForm, onArchiwum, onKoordyn
     ? Object.entries(p.sumaMies).reduce((s, [k, v]) => (k.startsWith(`${rokKPI}-`) ? s + v : s), 0)
     : 0;
   const planMies = p ? (p.sumaMies[biezacyMies] || 0) : 0;
+  // Gdzie portfel będzie na koniec wybranego roku — narastająco z całej osi,
+  // czyli razem ze sprzedażą z lat wcześniejszych.
+  const ostatniMiesRoku = p ? p.osPelna.filter((k) => k.startsWith(`${rokKPI}-`)).pop() : null;
+  const narastajacoKoniecRoku = ostatniMiesRoku ? p.sumaNaras[ostatniMiesRoku] : null;
 
   const thBase = { padding: "6px 7px", border: "1px solid #D9D6CE", fontSize: 10, whiteSpace: "nowrap" };
   const thOpis = { ...thBase, background: C.czarny, color: C.zolty, textAlign: "left" };
@@ -4204,6 +4230,7 @@ function WidokCashflowGlobalny({ jestAdmin, email, onForm, onArchiwum, onKoordyn
                 try { eksportCashflowGlobalny(p, { tylkoWToku }); }
                 catch (e) { console.error(e); pokazToast && pokazToast("Nie udało się zbudować pliku XLSX"); }
               }}
+              title="Plik zawiera pełną oś czasu — wszystkie lata, niezależnie od roku wybranego na ekranie."
               style={{ background: C.zolty, color: C.czarny, border: "none", padding: "9px 16px", borderRadius: 6, fontWeight: 700, fontSize: 12.5, cursor: "pointer", fontFamily: "inherit" }}>
               ⤓ Pobierz XLSX
             </button>
@@ -4234,9 +4261,11 @@ function WidokCashflowGlobalny({ jestAdmin, email, onForm, onArchiwum, onKoordyn
                 wartosc={tylkoWToku}
                 onZmiana={setTylkoWToku}
               />
-              {p.lata.length > 1 && (
+              {/* Rok kalendarzowy jest domyślnym przekrojem, więc lata idą pierwsze,
+                  a „Cała oś" zamyka listę jako wyjście poza pojedynczy rok. */}
+              {p.lata.length > 0 && (
                 <PigulkaPrzelacznik
-                  opcje={[["wszystkie", "Cała oś"], ...p.lata.map((r) => [r, r])]}
+                  opcje={[...p.lata.map((r) => [r, r]), ["wszystkie", "Cała oś"]]}
                   wartosc={rok}
                   onZmiana={setRok}
                 />
@@ -4261,8 +4290,8 @@ function WidokCashflowGlobalny({ jestAdmin, email, onForm, onArchiwum, onKoordyn
                   <KafelekKPI
                     etykieta="Portfel — wartość umów"
                     wartosc={fmtSkrot(p.sumaUmow)}
-                    podpis={`${p.wiersze.length} ${odmiana(p.wiersze.length, ["inwestycja", "inwestycje", "inwestycji"])} z raportem`}
-                    tytul={`${fmtZ(p.sumaUmow)} zł`}
+                    podpis={`${p.wiersze.length} ${odmiana(p.wiersze.length, ["inwestycja", "inwestycje", "inwestycji"])} z raportem · pozostało ${fmtSkrot(p.sumaUmow - p.sumaWykonana)} zł`}
+                    tytul={`${fmtZ(p.sumaUmow)} zł · cały portfel, niezależnie od wybranego roku`}
                   />
                   <KafelekKPI
                     etykieta="Sprzedaż wykonana"
@@ -4287,7 +4316,10 @@ function WidokCashflowGlobalny({ jestAdmin, email, onForm, onArchiwum, onKoordyn
                   <KafelekKPI
                     etykieta={`Plan na rok ${rokKPI}`}
                     wartosc={fmtSkrot(planRoku)}
-                    podpis={`pozostało do sprzedania: ${fmtSkrot(p.sumaUmow - p.sumaWykonana)} zł`}
+                    akcent={C.zoltyDeep}
+                    podpis={narastajacoKoniecRoku != null
+                      ? `sprzedaż w roku kalendarzowym · narastająco na koniec ${rokKPI}: ${fmtSkrot(narastajacoKoniecRoku)} zł`
+                      : "sprzedaż w roku kalendarzowym"}
                     tytul={`${fmtZ(planRoku)} zł`}
                   />
                 </div>
@@ -4312,7 +4344,11 @@ function WidokCashflowGlobalny({ jestAdmin, email, onForm, onArchiwum, onKoordyn
                 {/* --- Macierz: inwestycje × miesiące --- */}
                 <section style={{ ...card, padding: 18 }}>
                   <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
-                    <TytulSekcji>Inwestycje × miesiące · {p.zKwotami.length}</TytulSekcji>
+                    <TytulSekcji>
+                      Inwestycje × miesiące · {rok === "wszystkie"
+                        ? p.zKwotami.length
+                        : `${ileWWidoku} ze sprzedażą w ${rok}`}
+                    </TytulSekcji>
                     <span style={{ fontSize: 11.5, color: C.szary, marginBottom: 14 }}>
                       kliknij nazwę inwestycji, aby rozwinąć jej zadania
                     </span>
@@ -4328,7 +4364,7 @@ function WidokCashflowGlobalny({ jestAdmin, email, onForm, onArchiwum, onKoordyn
                         </tr>
                       </thead>
                       <tbody>
-                        {p.zKwotami.map((i) => {
+                        {wierszeMacierzy.map((i) => {
                           const otwarta = !!rozwiniete[i.klucz];
                           return (
                             <React.Fragment key={i.klucz}>
@@ -4385,7 +4421,11 @@ function WidokCashflowGlobalny({ jestAdmin, email, onForm, onArchiwum, onKoordyn
                   </div>
                   <div style={{ fontSize: 11.5, color: C.szary, marginTop: 10 }}>
                     Kolumny miesięcy to prognoza ze stanem na koniec miesiąca rozliczeniowego.
-                    „Wykonana" to wartość umowy przemnożona przez % zaawansowania zadań z najnowszego raportu — również szacunek z budowy, nie faktura.
+                    „Wartość umowy" i „Wykonana" dotyczą całego kontraktu, nie wybranego roku — „Wykonana" to wartość umowy
+                    przemnożona przez % zaawansowania zadań z najnowszego raportu, czyli też szacunek z budowy, a nie faktura.
+                    {rok !== "wszystkie" && p.zKwotami.length > ileWWidoku && (
+                      <> Inwestycje z samymi kreskami nie sprzedają nic w {rok} — ich sprzedaż wypada w innych latach.</>
+                    )}
                   </div>
                 </section>
 
