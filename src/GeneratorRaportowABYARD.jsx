@@ -42,6 +42,7 @@ import {
   ustawDanePM,
   listaNieaktywnychProjektow,
   terminyZHarmonogramu,
+  terminyZRaportow,
   // udostępnianie raportów linkiem:
   utworzUdostepnienie,
   listaUdostepnien,
@@ -1660,6 +1661,38 @@ function eksportCashflowGlobalny(przekroj, { tylkoWToku }) {
   );
 }
 
+/* ---------- XLSX „KTO CO PROWADZI" — prosta tabela do notatki z narady ---- */
+// Jedna zakładka, cztery kolumny, jeden wiersz na inwestycję. Gdy inwestycję
+// prowadzi kilka osób — kolejne nazwiska w następnych wierszach, bez powielania
+// nazwy inwestycji i dat. Zaznaczasz zakres w Excelu i wklejasz do notatki.
+function eksportKtoCoProwadzi({ wgInwestycji }) {
+  const dzis = dzisISO();
+  const wiersze = [];
+  wiersze.push(["Inwestycja", "Kto prowadzi", "Rozpoczęcie", "Zakończenie"].map((t) => _txt(t, STYLE.NAGL_CIEMNY)));
+  for (const inw of wgInwestycji) {
+    const osoby = inw.pmowie.length ? inw.pmowie : ["brak przypisanego kierownika"];
+    osoby.forEach((osoba, k) => {
+      wiersze.push([
+        // Nazwa i daty tylko w PIERWSZYM wierszu inwestycji — kolejne osoby idą
+        // jedna pod drugą w pustych komórkach (czyta się jak blok).
+        k === 0 ? _txt(inw.nazwa + (inw.wstrzymana ? " (wstrzymana)" : ""), STYLE.TEKST_POGR) : { s: STYLE.TEKST },
+        _txt(osoba, STYLE.TEKST),
+        k === 0 ? _dat(inw.start, STYLE.DATA) : { s: STYLE.TEKST },
+        k === 0 ? _dat(inw.termin, STYLE.DATA) : { s: STYLE.TEKST },
+      ]);
+    });
+  }
+  pobierzXlsx(
+    [{
+      nazwa: "Kto co prowadzi",
+      kolumny: [{ szer: 44 }, { szer: 30 }, { szer: 14 }, { szer: 14 }],
+      zamrozenie: { wiersze: 1 },
+      wiersze,
+    }],
+    `Kto_co_prowadzi_ABYARD_-_${dzis}`
+  );
+}
+
 // Token z adresu (#r/<token>) — obecność przełącza aplikację w publiczny
 // podgląd raportu bez logowania. Czytany raz, przy załadowaniu strony.
 const TOKEN_PUBLICZNY = (() => {
@@ -2496,6 +2529,7 @@ export default function GeneratorRaportowABYARD() {
       <WidokKtoCoProwadzi
         jestAdmin={profil?.rola === "admin"}
         email={profil?.email}
+        pokazToast={pokazToast}
         onForm={() => setWidok("form")}
         onArchiwum={otworzArchiwum}
         onCashflow={() => setWidok("cashflow")}
@@ -3991,7 +4025,7 @@ function ZakladkaKoordynacjaInwestycji({ projektyAll, przypisania, uzytkownicy, 
 
 /* ---------- ARCHIWUM ----------------------------------------------------- */
 /* ---------- WIDOK "KTO CO PROWADZI" (dla wszystkich zalogowanych) --------- */
-function WidokKtoCoProwadzi({ jestAdmin, email, onForm, onArchiwum, onCashflow, onAdmin, onWyloguj }) {
+function WidokKtoCoProwadzi({ jestAdmin, email, onForm, onArchiwum, onCashflow, onAdmin, onWyloguj, pokazToast }) {
   const [ladowanie, setLadowanie] = React.useState(true);
   const [grupy, setGrupy] = React.useState([]);          // po PM
   const [wgInwestycji, setWgInwestycji] = React.useState([]); // po inwestycji
@@ -4005,7 +4039,7 @@ function WidokKtoCoProwadzi({ jestAdmin, email, onForm, onArchiwum, onCashflow, 
           listaUzytkownikow(),
           listaPrzypisan(),
           listaAktywnychProjektow(),
-          terminyZHarmonogramu(),
+          terminyZRaportow(),
         ]);
         const uzytMap = Object.fromEntries(uzyt.map((u) => [u.id, u]));
         const projMap = Object.fromEntries(projekty.map((p) => [p.id, p]));
@@ -4015,7 +4049,7 @@ function WidokKtoCoProwadzi({ jestAdmin, email, onForm, onArchiwum, onCashflow, 
         for (const x of przyp) {
           const p = projMap[x.projekt_id];
           if (!p) continue; // nieaktywna/zakończona
-          const termin = (p.termin_zakonczenia) || (terminy?.[p.id]) || null;
+          const termin = (p.termin_zakonczenia) || (terminy?.[p.id]?.koniec) || null;
           (wg[x.uzytkownik] ||= []).push({ nazwa: p.nazwa, termin, wstrzymana: !!p.wstrzymana });
         }
         const listaPM = Object.entries(wg)
@@ -4038,7 +4072,8 @@ function WidokKtoCoProwadzi({ jestAdmin, email, onForm, onArchiwum, onCashflow, 
         const listaInw = projekty
           .map((p) => ({
             nazwa: p.nazwa,
-            termin: (p.termin_zakonczenia) || (terminy?.[p.id]) || null,
+            start: (terminy?.[p.id]?.start) || null,
+            termin: (p.termin_zakonczenia) || (terminy?.[p.id]?.koniec) || null,
             wstrzymana: !!p.wstrzymana,
             pmowie: (pmWgProjektu[p.id] || []).sort((a, b) => a.localeCompare(b, "pl")),
           }))
@@ -4052,6 +4087,14 @@ function WidokKtoCoProwadzi({ jestAdmin, email, onForm, onArchiwum, onCashflow, 
       }
     })();
   }, []);
+
+  // Eksport XLSX — zawsze przekrój WG INWESTYCJI (tak się to czyta na naradzie),
+  // niezależnie od przełącznika na ekranie.
+  function pobierzZestawienieXLSX() {
+    if (wgInwestycji.length === 0) { pokazToast && pokazToast("Brak danych do eksportu"); return; }
+    try { eksportKtoCoProwadzi({ wgInwestycji }); }
+    catch (e) { console.error(e); pokazToast && pokazToast("Nie udało się zbudować pliku XLSX"); }
+  }
 
   const th = { textAlign: "left", padding: "9px 12px", color: C.szary, fontFamily: C.mono, fontSize: 9.5, fontWeight: 400, textTransform: "uppercase", letterSpacing: "0.1em", borderBottom: `2px solid ${C.linia}` };
   const td = { padding: "9px 12px", borderBottom: `1px solid ${C.jasny}`, fontSize: 13.5 };
@@ -4077,7 +4120,7 @@ function WidokKtoCoProwadzi({ jestAdmin, email, onForm, onArchiwum, onCashflow, 
           sub={tryb === "pm"
             ? "Zestawienie kierowników i przypisanych im inwestycji. Data zakończenia pochodzi z harmonogramu (najpóźniejsza z terminów) lub z ręcznego wpisu w panelu koordynacji."
             : "Zestawienie inwestycji i przypisanych do nich kierowników. Data zakończenia pochodzi z harmonogramu (najpóźniejsza z terminów) lub z ręcznego wpisu w panelu koordynacji."}
-          akcje={
+          akcje={<>
             <div style={{ display: "inline-flex", border: `1px solid ${C.linia}`, borderRadius: 999, overflow: "hidden", fontFamily: C.mono, fontSize: 10.5, letterSpacing: "0.06em", textTransform: "uppercase" }}>
               {[["pm", "Wg kierownika"], ["inwestycje", "Wg inwestycji"]].map(([kod, et]) => (
                 <button key={kod} onClick={() => setTryb(kod)}
@@ -4087,7 +4130,13 @@ function WidokKtoCoProwadzi({ jestAdmin, email, onForm, onArchiwum, onCashflow, 
                 </button>
               ))}
             </div>
-          }
+            <button
+              onClick={pobierzZestawienieXLSX}
+              title={`Prosta tabela: inwestycja, kto prowadzi, rozpoczęcie, zakończenie — do wklejenia w notatkę z narady`}
+              style={{ background: C.zolty, color: C.czarny, border: "none", padding: "9px 16px", borderRadius: 6, fontWeight: 700, fontSize: 12.5, cursor: "pointer", fontFamily: "inherit" }}>
+              ⤓ Pobierz XLSX
+            </button>
+          </>}
         />
 
         {ladowanie ? (

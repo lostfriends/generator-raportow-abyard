@@ -239,32 +239,42 @@ export async function listaNieaktywnychProjektow() {
   return data || [];
 }
 
-// Domyślne terminy zakończenia liczone z NAJNOWSZEGO raportu każdej inwestycji:
-// najpóźniejsza data z harmonogramu (dowolna kolumna: koniec/rzecz/start),
-// a gdy harmonogram pusty — pole zakonczenie_robot. Zwraca mapę { projekt_id: "YYYY-MM-DD" }.
-export async function terminyZHarmonogramu() {
+// Daty inwestycji liczone z NAJNOWSZEGO raportu każdej z nich — JEDNO zapytanie
+// obsługujące oba końce osi (harmonogram bywa duży, więc nie czytamy go dwa razy):
+//   koniec — najpóźniejsza data z harmonogramu (koniec/rzecz/start), a gdy
+//            harmonogram pusty: pole zakonczenie_robot,
+//   start  — pole rozpoczecie, a gdy puste: najwcześniejszy start z harmonogramu.
+// Zwraca mapę { projekt_id: { start, koniec } } (wartości: "YYYY-MM-DD" | null).
+export async function terminyZRaportow() {
   const { data, error } = await supabase
     .from("raporty")
-    .select("projekt_id, data_opracowania, zakonczenie_robot, harmonogram")
+    .select("projekt_id, data_opracowania, rozpoczecie, zakonczenie_robot, harmonogram")
     .order("data_opracowania", { ascending: false });
   if (error) throw error;
   const mapa = {};
   for (const r of (data || [])) {
     if (mapa[r.projekt_id] !== undefined) continue; // mamy już najnowszy (sortowanie malejące)
-    let najp = "";
-    const h = Array.isArray(r.harmonogram) ? r.harmonogram : [];
+    let najp = "", najw = "";
     const zbierz = (w) => {
       for (const key of ["koniec", "rzecz", "start"]) {
         const v = w?.[key];
         if (v && v > najp) najp = v;
       }
+      if (w?.start && (!najw || w.start < najw)) najw = w.start;
       if (Array.isArray(w?.pod)) w.pod.forEach(zbierz);
     };
-    h.forEach(zbierz);
+    (Array.isArray(r.harmonogram) ? r.harmonogram : []).forEach(zbierz);
     if (!najp && r.zakonczenie_robot) najp = r.zakonczenie_robot;
-    mapa[r.projekt_id] = najp || null;
+    mapa[r.projekt_id] = { start: r.rozpoczecie || najw || null, koniec: najp || null };
   }
   return mapa;
+}
+
+// Same terminy ZAKOŃCZENIA (mapa { projekt_id: "YYYY-MM-DD" }) — wygodne tam,
+// gdzie start nie jest potrzebny (panel koordynacji).
+export async function terminyZHarmonogramu() {
+  const pelne = await terminyZRaportow();
+  return Object.fromEntries(Object.entries(pelne).map(([id, t]) => [id, t.koniec]));
 }
 
 /* ---------------------------------------------------------------------------
