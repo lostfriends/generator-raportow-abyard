@@ -3503,9 +3503,18 @@ function ZakladkaKoordynacja({ uzytkownicy, projektyAll, przypisania, zakresy, t
   const zakresMap = React.useMemo(() => Object.fromEntries(zakresy.map((z) => [z.kod, z])), [zakresy]);
   const uzytMap = React.useMemo(() => Object.fromEntries(uzytkownicy.map((u) => [u.id, u])), [uzytkownicy]);
 
-  // Tylko konta z co najmniej jednym przypisaniem — reguła widoczności w koordynacji
+  // Reguła widoczności w koordynacji: konto pokazujemy tylko wtedy, gdy ma co
+  // najmniej jedno przypisanie do inwestycji AKTYWNEJ lub WSTRZYMANEJ (obie są
+  // aktywny=true, więc siedzą w projektyAll). Samo istnienie wiersza w tabeli
+  // przypisania nie wystarcza — przypisania do zakończonych inwestycji zostają
+  // w bazie i wciągały na listę osoby bez bieżących inwestycji (m.in. konta
+  // projektantów), pokazując ich z zerowym obciążeniem.
+  const idProjektowWidocznych = React.useMemo(
+    () => new Set(projektyAll.map((p) => p.id)), [projektyAll]
+  );
   const idZPrzypisaniem = React.useMemo(
-    () => new Set(przypisania.map((p) => p.uzytkownik)), [przypisania]
+    () => new Set(przypisania.filter((p) => idProjektowWidocznych.has(p.projekt_id)).map((p) => p.uzytkownik)),
+    [przypisania, idProjektowWidocznych]
   );
   const kierownicy = uzytkownicy.filter((u) => idZPrzypisaniem.has(u.id));
 
@@ -3655,7 +3664,7 @@ function ZakladkaKoordynacja({ uzytkownicy, projektyAll, przypisania, zakresy, t
         <TytulSekcji>Kierownicy — pojemność i inne obowiązki</TytulSekcji>
         <p style={{ fontSize: 12.5, color: C.szary, marginTop: 6, marginBottom: 16, lineHeight: 1.5 }}>
           Pojemność to punkty odpowiadające pełnemu obłożeniu (100%). „Inne obowiązki" to punkty za zadania spoza inwestycji
-          (gwarancje, usterki itp.). Widoczni są tylko kierownicy z przypisanymi inwestycjami.
+          (gwarancje, usterki itp.). Widoczni są tylko kierownicy z przypisanymi inwestycjami aktywnymi lub wstrzymanymi — konta bez bieżących inwestycji nie są pokazywane.
         </p>
         <table style={{ width: "100%", borderCollapse: "collapse" }}>
           <thead>
