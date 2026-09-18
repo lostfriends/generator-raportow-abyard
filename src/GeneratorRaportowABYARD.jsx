@@ -184,13 +184,17 @@ function najpozniejszePlanowaneZakonczenie(harmonogram) {
 //  - planowany koniec = najpóźniejsza planowana data zakończenia ze wszystkich pozycji
 //  - gdy są rzeczywiste zakończenia: najpóźniejsze rzeczywiste − najpóźniejsze planowane
 //  - gdy inwestycja trwa (brak rzecz.): dziś − planowany koniec (jeśli już minął)
+// Pozycje BEZ terminu umownego (pusty „koniec") są pomijane w całości — sama
+// prognoza, bez planu do którego ją porównać, nie świadczy o opóźnieniu i nie
+// może przesuwać zakończenia inwestycji.
 // Zwraca { dni, wToku } albo null gdy brak danych. dni <= 0 => brak opóźnienia.
 function opoznienieInwestycji(harmonogram, dataOdniesienia) {
   if (!Array.isArray(harmonogram) || harmonogram.length === 0) return null;
   const planKonce = [], rzeczKonce = [];
   for (const w of harmonogram) {
     const ef = efektywnyWiersz(w);
-    if (ef.koniec) planKonce.push(ef.koniec);
+    if (!ef.koniec) continue; // bez terminu umownego nie ma czego przesuwać — pomijamy cały wiersz
+    planKonce.push(ef.koniec);
     if (ef.rzecz) rzeczKonce.push(ef.rzecz);
   }
   if (planKonce.length === 0) return null;
@@ -1716,6 +1720,9 @@ export default function GeneratorRaportowABYARD() {
   // ustawiane przy PROGRAMOWYM wczytaniu formularza (wybór budowy, edycja z archiwum,
   // wersja robocza, wyczyszczenie), żeby nie nadpisać wczytanej/ręcznie ustawionej daty.
   const harmProgRef = useRef(false);
+  // Czy bieżące „zagrożenie" w podsumowaniu ustawiła aplikacja (a nie kierownik) —
+  // tylko takie cofamy automatycznie, gdy harmonogram przestaje je uzasadniać.
+  const zagrozenieAutoRef = useRef(false);
   const [przywroconoDraft, setPrzywroconoDraft] = useState(null); // {ts} — pasek „przywrócono wersję roboczą"
   const [selectKey, setSelectKey] = useState(0); // wymusza odświeżenie selecta po anulowaniu zmiany budowy
   const [toast, setToast] = useState("");
@@ -1802,9 +1809,13 @@ export default function GeneratorRaportowABYARD() {
   function updHarm(i, key, val) {
     setForm((f) => {
       const h = (f.harmonogram || pustyHarmonogram()).map((r) => ({ ...r }));
+      const poprzedniKoniec = h[i].koniec;
       h[i][key] = val;
       // Autopodpowiedź: po wpisaniu końca z umowy, gdy prognoza pusta — ustaw ją na tę datę.
       if (key === "koniec" && val && !h[i].rzecz) h[i].rzecz = val;
+      // Skasowanie końca z umowy zabiera ze sobą prognozę, jeśli była tylko jego kopią —
+      // inaczej zostaje sierota: prognoza na pozycji bez terminu umownego.
+      if (key === "koniec" && !val && h[i].rzecz && h[i].rzecz === poprzedniKoniec) h[i].rzecz = "";
       return { ...f, harmonogram: h };
     });
   }
@@ -1830,13 +1841,20 @@ export default function GeneratorRaportowABYARD() {
 
   // Gdy opóźnienie w harmonogramie opóźnia zakończenie CAŁEGO projektu — wymuś status
   // „zagrożenie" (w formularzu opcja „nie powoduje zagrożenia" jest wtedy zablokowana).
+  // Wymuszenie działa w OBIE strony: gdy harmonogram przestaje je uzasadniać, wracamy
+  // do „brak zagrożenia" — ale tylko wtedy, gdy to my ustawiliśmy je automatycznie.
+  // Świadomy wybór kierownika (zagrożenie z innego powodu niż harmonogram) zostaje.
   useEffect(() => {
-    if (harmonogramWymuszaZagrozenie(form.harmonogram, form.dataOpracowania)
-        && form.podsumowanie !== PODSUMOWANIE_OPCJE[1]) {
+    const wymusza = harmonogramWymuszaZagrozenie(form.harmonogram, form.dataOpracowania);
+    if (wymusza && form.podsumowanie !== PODSUMOWANIE_OPCJE[1]) {
+      zagrozenieAutoRef.current = true;
       setForm((f) => ({ ...f, podsumowanie: PODSUMOWANIE_OPCJE[1] }));
+    } else if (!wymusza && zagrozenieAutoRef.current && form.podsumowanie === PODSUMOWANIE_OPCJE[1]) {
+      zagrozenieAutoRef.current = false;
+      setForm((f) => ({ ...f, podsumowanie: PODSUMOWANIE_OPCJE[0] }));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [form.harmonogram, form.dataOpracowania]);
+  }, [form.harmonogram, form.dataOpracowania, form.podsumowanie]);
 
   // Śledzenie niezapisanych zmian: każda zmiana formularza (pola, harmonogram,
   // zdjęcia, grafika) idzie przez setForm, więc wystarczy obserwować `form`.
@@ -1938,9 +1956,12 @@ export default function GeneratorRaportowABYARD() {
   function updPodpozycje(i, j, key, val) {
     setForm((f) => {
       const h = (f.harmonogram || pustyHarmonogram()).map((r) => ({ ...r, pod: Array.isArray(r.pod) ? r.pod.map((p) => ({ ...p })) : [] }));
+      const poprzedniKoniec = h[i].pod[j].koniec;
       h[i].pod[j][key] = val;
       // Autopodpowiedź prognozy dla podpozycji.
       if (key === "koniec" && val && !h[i].pod[j].rzecz) h[i].pod[j].rzecz = val;
+      // Jak wyżej: skasowany koniec zabiera prognozę będącą jego kopią.
+      if (key === "koniec" && !val && h[i].pod[j].rzecz && h[i].pod[j].rzecz === poprzedniKoniec) h[i].pod[j].rzecz = "";
       return { ...f, harmonogram: h };
     });
   }
@@ -2013,6 +2034,13 @@ export default function GeneratorRaportowABYARD() {
       if (ost) {
         const bazowy = mapWierszNaForm(ost);
         const nowyNumer = String((parseInt(ost.numer, 10) || 0) + 1);
+        // Podsumowanie NIE jest dziedziczone w ciemno: zagrożenie z poprzedniego raportu
+        // potrafiło wędrować przez kolejne raporty długo po tym, jak harmonogram przestał
+        // je uzasadniać. Liczymy je od nowa z wczytanego harmonogramu; gdy zdejmujemy
+        // odziedziczone zagrożenie, mówimy o tym kierownikowi wprost.
+        const wymuszaZagr = harmonogramWymuszaZagrozenie(bazowy.harmonogram, dzisISO());
+        const zdjetoZagr = !wymuszaZagr && bazowy.podsumowanie === PODSUMOWANIE_OPCJE[1];
+        zagrozenieAutoRef.current = wymuszaZagr;
         // Pogrubienie oznacza „nowe informacje w tym raporcie". Treść odziedziczona po
         // poprzednim raporcie nie jest już nowa — czyścimy pogrubienia w polach opisowych,
         // by PM pogrubiał od zera to, co dopisze w bieżącym raporcie.
@@ -2028,6 +2056,7 @@ export default function GeneratorRaportowABYARD() {
           okresOd: ost.okres_do || "",
           okresDo: dzisISO(),
           dataOpracowania: dzisISO(),
+          podsumowanie: wymuszaZagr ? PODSUMOWANIE_OPCJE[1] : PODSUMOWANIE_OPCJE[0],
           opracowal: nazwaZalogowanego || bazowy.opracowal,
           zdjecia: [],
           harmonogramObrazy: [],
@@ -2035,7 +2064,9 @@ export default function GeneratorRaportowABYARD() {
         plikiRef.current = { grafika: null, harm: [], zdjecia: [] };
         // Kolejny raport: cashflow włączony tylko, gdy poprzedni raport miał kwoty.
         setCashflowWlaczony(harmonogramMaKwoty(bazowy.harmonogram));
-        pokazToast(`Wczytano dane z raportu nr ${ost.numer} — do aktualizacji`);
+        pokazToast(zdjetoZagr
+          ? `Wczytano dane z raportu nr ${ost.numer}. Podsumowanie ustawiono na „brak zagrożenia" — harmonogram nie wskazuje opóźnienia zakończenia. Zweryfikuj przed zapisem.`
+          : `Wczytano dane z raportu nr ${ost.numer} — do aktualizacji`);
       } else {
         // pierwszy raport tej budowy — czysty formularz (nie zostawiamy danych z poprzedniej budowy)
         harmProgRef.current = true; // pusty formularz — nie wywołuj auto-daty zakończenia
