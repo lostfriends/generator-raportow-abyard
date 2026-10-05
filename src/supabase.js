@@ -25,6 +25,37 @@ const SUPABASE_KEY = "sb_publishable_oCBaIHLyv0PTRn48lVQbGQ_SOw8vG7d";
 // Nazwa bucketu na zdjęcia — musi być identyczna jak utworzony w panelu Storage.
 const BUCKET = "raporty-zdjecia";
 
+// Link „resetu hasła" z e-maila (wysłany z aplikacji albo ręcznie z panelu
+// Supabase → Authentication) wraca do aplikacji z `type=recovery` w adresie
+// i loguje użytkownika sesją odzyskiwania. Klient Supabase czyści adres zaraz
+// po starcie, a zdarzenie PASSWORD_RECOVERY może przyjść, zanim komponent
+// zdąży się zapisać na nasłuch — dlatego odczytujemy to synchronicznie TU,
+// przed createClient. Flaga w sessionStorage przetrwa odświeżenie strony,
+// żeby nie dało się „przeskoczyć" ustawienia nowego hasła.
+const KLUCZ_ODZYSKIWANIA = "abyard_odzyskiwanie_hasla";
+const adresStartowy = typeof window !== "undefined" ? window.location.hash + "&" + window.location.search : "";
+if (/[#&?]type=recovery\b/.test(adresStartowy)) {
+  try { sessionStorage.setItem(KLUCZ_ODZYSKIWANIA, "1"); } catch {}
+}
+// Link wygasły / już użyty: Supabase dokleja error_code (np. otp_expired).
+export const bladLinkuAuth = (() => {
+  const m = adresStartowy.match(/error_description=([^&]*)/);
+  if (!m) return "";
+  return /otp_expired|expired/i.test(adresStartowy)
+    ? "Link z e-maila wygasł lub został już użyty. Wyślij nowy link do resetu hasła."
+    : "Link z e-maila jest nieprawidłowy. Wyślij nowy link do resetu hasła.";
+})();
+
+export function czyOdzyskiwanieHasla() {
+  try { return sessionStorage.getItem(KLUCZ_ODZYSKIWANIA) === "1"; } catch { return false; }
+}
+export function oznaczOdzyskiwanieHasla(wl) {
+  try {
+    if (wl) sessionStorage.setItem(KLUCZ_ODZYSKIWANIA, "1");
+    else sessionStorage.removeItem(KLUCZ_ODZYSKIWANIA);
+  } catch {}
+}
+
 export const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
 /* ===========================================================================
@@ -52,10 +83,20 @@ export async function wyloguj() {
   if (error) throw error;
 }
 
-// Reset hasła (wysyła e-mail z linkiem).
+// Reset hasła (wysyła e-mail z linkiem). Link wraca na bieżący adres aplikacji
+// (musi być na liście Redirect URLs w Supabase, inaczej użyty zostanie Site URL).
 export async function resetHasla(email) {
-  const { error } = await supabase.auth.resetPasswordForEmail(email);
+  const { error } = await supabase.auth.resetPasswordForEmail(email, {
+    redirectTo: window.location.origin + window.location.pathname,
+  });
   if (error) throw error;
+}
+
+// Ustawienie nowego hasła dla zalogowanego użytkownika (po linku resetu).
+export async function ustawNoweHaslo(haslo) {
+  const { error } = await supabase.auth.updateUser({ password: haslo });
+  if (error) throw error;
+  oznaczOdzyskiwanieHasla(false);
 }
 
 // Bieżąca sesja (lub null).
@@ -64,9 +105,13 @@ export async function biezacaSesja() {
   return data?.session || null;
 }
 
-// Nasłuch zmian logowania/wylogowania. cb(session) wołane przy każdej zmianie.
+// Nasłuch zmian logowania/wylogowania. cb(session, event) wołane przy każdej zmianie.
 export function naZmianeAuth(cb) {
-  const { data } = supabase.auth.onAuthStateChange((_event, session) => cb(session));
+  const { data } = supabase.auth.onAuthStateChange((event, session) => {
+    if (event === "PASSWORD_RECOVERY") oznaczOdzyskiwanieHasla(true);
+    if (event === "SIGNED_OUT") oznaczOdzyskiwanieHasla(false);
+    cb(session, event);
+  });
   return () => data?.subscription?.unsubscribe?.();
 }
 
