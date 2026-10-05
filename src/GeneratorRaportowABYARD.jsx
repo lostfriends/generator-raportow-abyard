@@ -22,6 +22,9 @@ import {
   zarejestruj,
   wyloguj,
   resetHasla,
+  ustawNoweHaslo,
+  czyOdzyskiwanieHasla,
+  bladLinkuAuth,
   biezacaSesja,
   naZmianeAuth,
   mojProfil,
@@ -1738,6 +1741,8 @@ export default function GeneratorRaportowABYARD() {
   const [podgladForm, setPodgladForm] = useState(null); // dane raportu otwartego z archiwum
   // Auth + role:
   const [sesja, setSesja] = useState(undefined); // undefined = sprawdzanie; null = niezalogowany; obj = zalogowany
+  // Wejście z linku „reset hasła" — sesja jest, ale najpierw wymuszamy nowe hasło.
+  const [odzyskiwanie, setOdzyskiwanie] = useState(() => czyOdzyskiwanieHasla());
   const [profil, setProfil] = useState(null); // {id, email, rola}
   const [mojePrzypisania, setMojePrzypisania] = useState([]);
   const photoInputRef = useRef(null);
@@ -1756,7 +1761,11 @@ export default function GeneratorRaportowABYARD() {
   // --- Sprawdzenie sesji przy starcie + nasłuch zmian logowania ---
   useEffect(() => {
     biezacaSesja().then((s) => setSesja(s));
-    const odsub = naZmianeAuth((s) => setSesja(s));
+    const odsub = naZmianeAuth((s, ev) => {
+      if (ev === "PASSWORD_RECOVERY") setOdzyskiwanie(true);
+      if (ev === "SIGNED_OUT") setOdzyskiwanie(false);
+      setSesja(s);
+    });
     return odsub;
   }, []);
 
@@ -2483,7 +2492,17 @@ export default function GeneratorRaportowABYARD() {
     );
   }
   if (!sesja) {
-    return <EkranLogowania pokazToast={pokazToast} />;
+    return <EkranLogowania pokazToast={pokazToast} infoStartowe={bladLinkuAuth} />;
+  }
+  if (odzyskiwanie) {
+    return (
+      <EkranLogowania
+        pokazToast={pokazToast}
+        trybStartowy="noweHaslo"
+        email={sesja.user?.email}
+        onHasloUstawione={() => { setOdzyskiwanie(false); pokazToast("Hasło zostało zmienione."); }}
+      />
+    );
   }
 
   // ==========================================================================
@@ -3031,20 +3050,26 @@ export default function GeneratorRaportowABYARD() {
 }
 
 /* ---------- EKRAN LOGOWANIA / REJESTRACJI -------------------------------- */
-function EkranLogowania({ pokazToast }) {
-  const [tryb, setTryb] = useState("login"); // login | rejestracja | reset
-  const [email, setEmail] = useState("");
+function EkranLogowania({ pokazToast, trybStartowy = "login", infoStartowe = "", email: emailSesji = "", onHasloUstawione }) {
+  const [tryb, setTryb] = useState(trybStartowy); // login | rejestracja | reset | noweHaslo
+  const [email, setEmail] = useState(emailSesji);
   const [haslo, setHaslo] = useState("");
+  const [haslo2, setHaslo2] = useState("");
   const [busy, setBusy] = useState(false);
-  const [info, setInfo] = useState("");
+  const [info, setInfo] = useState(infoStartowe);
 
   async function submit() {
     setInfo("");
-    if (!email.trim()) { setInfo("Podaj adres e-mail."); return; }
+    if (tryb !== "noweHaslo" && !email.trim()) { setInfo("Podaj adres e-mail."); return; }
     if (tryb !== "reset" && haslo.length < 6) { setInfo("Hasło musi mieć min. 6 znaków."); return; }
+    if (tryb === "noweHaslo" && haslo !== haslo2) { setInfo("Hasła nie są identyczne — popraw powtórzenie."); return; }
     setBusy(true);
     try {
-      if (tryb === "login") {
+      if (tryb === "noweHaslo") {
+        await ustawNoweHaslo(haslo);
+        onHasloUstawione?.();
+        return;
+      } else if (tryb === "login") {
         await zaloguj(email.trim(), haslo);
         // onAuthStateChange w komponencie głównym przejmie dalej
       } else if (tryb === "rejestracja") {
@@ -3061,13 +3086,15 @@ function EkranLogowania({ pokazToast }) {
       if (m.includes("Invalid login")) setInfo("Błędny e-mail lub hasło.");
       else if (m.includes("Email not confirmed")) setInfo("Potwierdź najpierw adres e-mail (link aktywacyjny).");
       else if (m.includes("already registered")) setInfo("Ten e-mail jest już zarejestrowany — zaloguj się.");
+      else if (m.includes("should be different")) setInfo("Hasło musi różnić się od dotychczasowego.");
+      else if (/password/i.test(m) && /weak|least|character/i.test(m)) setInfo("Hasło jest za słabe — wymagania Supabase: " + m);
       else setInfo("Wystąpił błąd. Spróbuj ponownie.");
     } finally {
       setBusy(false);
     }
   }
 
-  const tytul = tryb === "login" ? "Zaloguj się" : tryb === "rejestracja" ? "Załóż konto" : "Reset hasła";
+  const tytul = tryb === "login" ? "Zaloguj się" : tryb === "rejestracja" ? "Załóż konto" : tryb === "noweHaslo" ? "Ustaw nowe hasło" : "Reset hasła";
 
   const loginInp = { ...inp, background: C.ink2, border: "1px solid rgba(255,255,255,0.12)", color: C.bialy, marginBottom: 0 };
   const loginLab = { ...lbl, color: C.zoltyDeep };
@@ -3084,12 +3111,12 @@ function EkranLogowania({ pokazToast }) {
 
         <div style={{ marginBottom: 16 }}>
           <label style={loginLab}>Adres e-mail</label>
-          <input style={loginInp} type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="np. jkowalski@abyard.pl" autoComplete="username" />
+          <input style={{ ...loginInp, opacity: tryb === "noweHaslo" ? 0.6 : 1 }} type="email" value={email} readOnly={tryb === "noweHaslo"} onChange={(e) => setEmail(e.target.value)} placeholder="np. jkowalski@abyard.pl" autoComplete="username" />
         </div>
 
         {tryb !== "reset" && (
           <div style={{ marginBottom: 16 }}>
-            <label style={loginLab}>Hasło</label>
+            <label style={loginLab}>{tryb === "noweHaslo" ? "Nowe hasło" : "Hasło"}</label>
             <input
               style={loginInp}
               type="password"
@@ -3102,8 +3129,22 @@ function EkranLogowania({ pokazToast }) {
           </div>
         )}
 
+        {tryb === "noweHaslo" && (
+          <div style={{ marginBottom: 16 }}>
+            <label style={loginLab}>Powtórz nowe hasło</label>
+            <input
+              style={loginInp}
+              type="password"
+              value={haslo2}
+              onChange={(e) => setHaslo2(e.target.value)}
+              autoComplete="new-password"
+              onKeyDown={(e) => { if (e.key === "Enter") submit(); }}
+            />
+          </div>
+        )}
+
         {info && (
-          <div style={{ fontSize: 13, color: info.includes("błąd") || info.includes("Błędny") || info.includes("Podaj") || info.includes("Hasło musi") ? "#F0A79E" : "#7DDBA0", marginBottom: 14, lineHeight: 1.4 }}>
+          <div style={{ fontSize: 13, color: info.includes("błąd") || info.includes("Błędny") || info.includes("Podaj") || info.includes("Hasło musi") || info.includes("Hasła nie") || info.includes("Hasło jest") || info.includes("Link z e-maila") ? "#F0A79E" : "#7DDBA0", marginBottom: 14, lineHeight: 1.4 }}>
             {info}
           </div>
         )}
@@ -3125,6 +3166,9 @@ function EkranLogowania({ pokazToast }) {
           )}
           {tryb === "reset" && (
             <span onClick={() => { setTryb("login"); setInfo(""); }} style={linkStyl}>← Wróć do logowania</span>
+          )}
+          {tryb === "noweHaslo" && (
+            <span onClick={() => { wyloguj().catch(console.error); }} style={linkStyl}>Anuluj i wyloguj</span>
           )}
         </div>
       </div>
