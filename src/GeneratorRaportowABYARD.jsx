@@ -58,6 +58,7 @@ import {
   generujAnalizePortfela,
   ostatnieAnalizyPortfela,
   ustawResetAnalizyPortfela,
+  odbierzAnalizePortfela,
   zuzycieAIMiesiac,
   raportyDoAnalizy,
   poprzedniRaportDoAnalizy,
@@ -5275,7 +5276,10 @@ const OPIS_KONDYCJI_AI = {
   nowa: "świeżo dodana, termin pierwszego raportu jeszcze nie minął",
   wstrzymana: "inwestycja wstrzymana",
 };
-const PRZETERMINOWANIE_AI_MS = 15 * 60 * 1000; // spójne z Edge Function
+// Spójne z Edge Function: „w_toku" bez zleconego batcha po 15 min = przerwana;
+// zlecony batch czekamy do 6 h (zwykle kończy się w kilka minut).
+const PRZETERMINOWANIE_AI_MS = 15 * 60 * 1000;
+const MAKS_CZAS_BATCHA_AI_MS = 6 * 3600 * 1000;
 
 function fmtDataGodz(iso) {
   if (!iso) return "";
@@ -5300,18 +5304,25 @@ function PanelAnalizyPortfela({ kafle, zKafliInwestycji }) {
   useEffect(() => { wczytaj(); }, [wczytaj]);
 
   const dzis = dzisPL();
-  const swieza = (a) => Date.now() - new Date(a.utworzono).getTime() < PRZETERMINOWANIE_AI_MS;
+  const swieza = (a) => Date.now() - new Date(a.utworzono).getTime() < (a.batch_id ? MAKS_CZAS_BATCHA_AI_MS : PRZETERMINOWANIE_AI_MS);
   const wToku = (analizy || []).find((a) => a.status === "w_toku" && !a.uniewazniona && swieza(a));
   const ostatnia = (analizy || []).find((a) => a.status === "gotowa");
   const blokujeDzis = (analizy || []).some((a) => a.dzien === dzis && !a.uniewazniona && (a.status === "gotowa" || (a.status === "w_toku" && swieza(a))));
   const ostatniBlad = analizy?.[0]?.status === "blad" ? analizy[0] : null;
   const mozna = analizy !== null && !blokujeDzis && zKafliInwestycji && kafle.length > 0 && !startuje;
 
-  // Odpytywanie, dopóki analiza się generuje.
+  // Odpytywanie, dopóki analiza się generuje: Edge Function sprawdza zadanie
+  // w Batch API i zapisuje wynik, a my wczytujemy tabelę na nowo.
   useEffect(() => {
     if (!wToku) return undefined;
-    const t = setInterval(wczytaj, 5000);
-    return () => clearInterval(t);
+    let aktywny = true;
+    const krok = async () => {
+      try { await odbierzAnalizePortfela(); } catch (e) { console.error(e); }
+      if (aktywny) await wczytaj();
+    };
+    krok();
+    const t = setInterval(krok, 15000);
+    return () => { aktywny = false; clearInterval(t); };
   }, [wToku?.id, wczytaj]);
 
   async function generuj() {
@@ -5364,7 +5375,7 @@ function PanelAnalizyPortfela({ kafle, zKafliInwestycji }) {
 
       {analizy === null && <PracaAI tekst="Wczytywanie…" />}
       {blad && <div style={{ marginBottom: 12 }}><BladAI tekst={blad} /></div>}
-      {wToku && <PracaAI tekst={`Analiza generuje się od ${fmtDataGodz(wToku.utworzono)} (${wToku.utworzyl_nazwa || "—"}). To trwa zwykle 1–3 minuty — wynik pojawi się tutaj sam.`} />}
+      {wToku && <PracaAI tekst={`Analiza generuje się od ${fmtDataGodz(wToku.utworzono)} (${wToku.utworzyl_nazwa || "—"}). Zwykle trwa to kilka minut, wyjątkowo dłużej — wynik pojawi się tutaj sam. Możesz zamknąć stronę, analiza liczy się dalej.`} />}
       {ostatniBlad && !wToku && (
         <div style={{ marginBottom: 12 }}><BladAI tekst={`Ostatnia próba (${fmtDataGodz(ostatniBlad.utworzono)}) nie powiodła się: ${ostatniBlad.blad || "nieznany błąd"}. Można spróbować ponownie.`} /></div>
       )}
