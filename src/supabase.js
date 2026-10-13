@@ -854,11 +854,16 @@ export async function generujAnalizePortfela(dane) {
   return wywolajAsystenta({ tryb: "portfel", dane });
 }
 
+// Odbiór wyniku analizy liczonej w tle (Batch API) — Edge Function zapisuje go w bazie.
+export async function odbierzAnalizePortfela() {
+  return wywolajAsystenta({ tryb: "portfel_status" });
+}
+
 // Ostatnie analizy portfela (RLS: tylko admin) — najnowsze na górze.
 export async function ostatnieAnalizyPortfela() {
   const { data, error } = await supabase
     .from("analizy_portfela")
-    .select("id, dzien, status, uniewazniona, utworzono, zakonczono, utworzyl_nazwa, liczba_inwestycji, tresc, model, blad, zresetowano")
+    .select("id, dzien, status, uniewazniona, utworzono, zakonczono, utworzyl_nazwa, liczba_inwestycji, tresc, model, blad, zresetowano, batch_id")
     .order("utworzono", { ascending: false })
     .limit(5);
   if (error) throw error;

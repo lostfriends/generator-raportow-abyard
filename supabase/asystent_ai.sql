@@ -65,6 +65,11 @@ create table if not exists public.analizy_portfela (
 create unique index if not exists analizy_portfela_jedna_na_dzien
   on public.analizy_portfela (dzien) where not uniewazniona;
 
+-- Id zadania w Message Batches API (analiza liczy się po stronie Anthropic,
+-- Edge Function tylko ją zleca i potem odbiera wynik).
+alter table public.analizy_portfela
+  add column if not exists batch_id text;
+
 create index if not exists analizy_portfela_utworzono_idx
   on public.analizy_portfela (utworzono desc);
 

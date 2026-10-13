@@ -9,9 +9,13 @@
 //   - "portfel"  — analiza portfela inwestycji dla kierownictwa. TYLKO admin.
 //                  Najwyżej raz na dzień (czas PL) — pilnuje tego unikalny indeks
 //                  w tabeli analizy_portfela (patrz supabase/asystent_ai.sql).
-//                  Generowanie trwa do kilku minut, więc biegnie w tle
-//                  (EdgeRuntime.waitUntil): funkcja od razu zwraca id wiersza
-//                  „w_toku", a aplikacja odpytuje tabelę, aż status = „gotowa".
+//                  Analiza całego portfela trwa dłużej, niż Supabase pozwala żyć
+//                  Edge Function (limit czasu ubija ją bez śladu), dlatego idzie
+//                  przez Message Batches API: funkcja tylko ZLECA zadanie i od razu
+//                  kończy, zapisując batch_id w wierszu „w_toku".
+//   - "portfel_status" — odbiór wyniku: aplikacja woła ten tryb co kilkanaście
+//                  sekund, dopóki analiza jest „w_toku"; gdy batch się zakończy,
+//                  funkcja zapisuje wynik (status „gotowa") albo błąd. TYLKO admin.
 //   - "kontrola" — kontrola spójności raportu przed zapisem. Każdy zalogowany.
 //   - "styl"     — redakcja stylu jednego pola opisowego. Każdy zalogowany.
 //
@@ -30,14 +34,16 @@
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import Anthropic from "npm:@anthropic-ai/sdk@0.128.0";
 
-declare const EdgeRuntime: { waitUntil(p: Promise<unknown>): void };
-
 // --- Konfiguracja (do ewentualnej edycji) -----------------------------------
 const MODEL = "claude-opus-5-5";
 // Limit wywołań „kontrola" + „styl" na osobę w ciągu 24 h — bezpiecznik budżetu.
 const LIMIT_DZIENNY_NA_OSOBE = 60;
-// Analiza „w_toku" starsza niż tyle minut jest uznawana za przerwaną.
+// Analiza „w_toku" BEZ zleconego batcha starsza niż tyle minut = przerwana.
 const PRZETERMINOWANIE_MIN = 15;
+// Batch, który nie skończył się w tym czasie, anulujemy (API pozwala do 24 h).
+const MAKS_CZAS_BATCHA_GODZ = 6;
+// Batch API kosztuje 50% ceny standardowej.
+const RABAT_BATCH = 0.5;
 // Szacunek kosztu: USD za 1 mln tokenów [wejście, wyjście] (cennik API Anthropic).
 const CENNIK: Record<string, [number, number]> = {
   "claude-opus-5-5": [4, 20],
@@ -189,6 +195,22 @@ const anthropic = new Anthropic({ apiKey: Deno.env.get("ANTHROPIC_API_KEY") });
 
 type WynikModelu = { dane: any; model: string; tokenyWe: number; tokenyWy: number; koszt: number };
 
+function parametryZapytania(
+  system: string,
+  tresc: string,
+  schemat: unknown,
+  effort: "low" | "medium" | "high",
+  maxTokens: number,
+) {
+  return {
+    model: MODEL,
+    max_tokens: maxTokens,
+    system,
+    output_config: { effort, format: { type: "json_schema", schema: schemat } },
+    messages: [{ role: "user", content: tresc }],
+  };
+}
+
 async function zapytajClaude(
   system: string,
   tresc: string,
@@ -200,16 +222,16 @@ async function zapytajClaude(
   // API samo ponawia je na modelu zastępczym (beta server-side-fallback).
   // Parametry beta przekazujemy jako `any`, bo typy SDK nie zawsze je znają.
   const parametry: any = {
-    model: MODEL,
-    max_tokens: maxTokens,
+    ...parametryZapytania(system, tresc, schemat, effort, maxTokens),
     betas: ["server-side-fallback-2026-07-01"],
     fallbacks: "default",
-    system,
-    output_config: { effort, format: { type: "json_schema", schema: schemat } },
-    messages: [{ role: "user", content: tresc }],
   };
   const odp: any = await anthropic.beta.messages.stream(parametry).finalMessage();
+  return odczytajOdpowiedz(odp, 1);
+}
 
+// Wspólny odczyt odpowiedzi modelu (zwykłe wywołanie i wynik batcha).
+function odczytajOdpowiedz(odp: any, mnoznikCeny: number): WynikModelu {
   if (odp.stop_reason === "refusal") {
     throw new Error("Model odmówił przetworzenia tych danych. Spróbuj ponownie lub skontaktuj się z administratorem.");
   }
@@ -230,7 +252,7 @@ async function zapytajClaude(
   const tokenyWe = (odp.usage?.input_tokens || 0) + (odp.usage?.cache_read_input_tokens || 0) + (odp.usage?.cache_creation_input_tokens || 0);
   const tokenyWy = odp.usage?.output_tokens || 0;
   const [cWe, cWy] = CENNIK[model] || CENNIK[MODEL];
-  const koszt = (tokenyWe * cWe + tokenyWy * cWy) / 1_000_000;
+  const koszt = ((tokenyWe * cWe + tokenyWy * cWy) / 1_000_000) * mnoznikCeny;
   return { dane, model, tokenyWe, tokenyWy, koszt };
 }
 
@@ -293,11 +315,7 @@ async function trybPortfel(u: { id: string; admin: boolean; nazwa: string }, bod
   const tresc = JSON.stringify(dane);
   if (tresc.length > 2_000_000) throw new BladUzytkownika("Zbyt dużo danych do analizy.");
 
-  // Przerwane generowania (np. restart funkcji) zwalniają blokadę dnia.
-  const granica = new Date(Date.now() - PRZETERMINOWANIE_MIN * 60 * 1000).toISOString();
-  await supa.from("analizy_portfela")
-    .update({ status: "blad", uniewazniona: true, blad: "Generowanie przerwane (przekroczony czas)." })
-    .eq("status", "w_toku").lt("utworzono", granica);
+  await sprzatnijPrzerwane();
 
   // Rezerwacja dnia: unikalny indeks przepuści tylko jeden wiersz na dzień.
   const { data: wiersz, error } = await supa.from("analizy_portfela")
@@ -310,29 +328,94 @@ async function trybPortfel(u: { id: string; admin: boolean; nazwa: string }, bod
     throw error;
   }
 
-  const zadanie = (async () => {
-    try {
-      const w = await zapytajClaude(
-        SYSTEM_PORTFEL,
-        `Dane portfela (JSON):\n${tresc}`,
-        SCHEMAT_PORTFEL,
-        "medium",
-        32000,
-      );
-      const { error: e2 } = await supa.from("analizy_portfela")
-        .update({ status: "gotowa", tresc: w.dane, model: w.model, zakonczono: new Date().toISOString() })
-        .eq("id", wiersz.id);
-      if (e2) throw e2;
-      await zapiszUzycie(u.id, "portfel", w);
-    } catch (err) {
-      console.error("analiza portfela", err);
-      await supa.from("analizy_portfela")
-        .update({ status: "blad", uniewazniona: true, blad: String((err as Error)?.message || err).slice(0, 500), zakonczono: new Date().toISOString() })
-        .eq("id", wiersz.id);
-    }
-  })();
-  EdgeRuntime.waitUntil(zadanie);
+  // Zlecenie batcha trwa sekundę — długie liczenie odbywa się po stronie Anthropic.
+  // (Batches API nie przyjmuje parametru `fallbacks` — odmowę obsługuje odczyt wyniku.)
+  try {
+    const batch = await anthropic.messages.batches.create({
+      requests: [{
+        custom_id: wiersz.id,
+        params: parametryZapytania(SYSTEM_PORTFEL, `Dane portfela (JSON):\n${tresc}`, SCHEMAT_PORTFEL, "medium", 32000) as any,
+      }],
+    });
+    const { error: e2 } = await supa.from("analizy_portfela").update({ batch_id: batch.id }).eq("id", wiersz.id);
+    if (e2) throw e2;
+  } catch (err) {
+    await oznaczBlad(wiersz.id, `Nie udało się zlecić analizy: ${String((err as Error)?.message || err)}`);
+    throw err;
+  }
   return { ok: true, id: wiersz.id, status: "w_toku" };
+}
+
+async function oznaczBlad(id: string, blad: string) {
+  await supa.from("analizy_portfela")
+    .update({ status: "blad", uniewazniona: true, blad: blad.slice(0, 500), zakonczono: new Date().toISOString() })
+    .eq("id", id);
+}
+
+// Zwalnia blokadę dnia po generowaniach, które utknęły: bez batcha po 15 min
+// (zlecenie się nie udało / stara wersja funkcji), z batchem po MAKS_CZAS_BATCHA_GODZ.
+async function sprzatnijPrzerwane() {
+  const teraz = Date.now();
+  const granicaBez = new Date(teraz - PRZETERMINOWANIE_MIN * 60 * 1000).toISOString();
+  await supa.from("analizy_portfela")
+    .update({ status: "blad", uniewazniona: true, blad: "Generowanie przerwane (przekroczony czas).", zakonczono: new Date().toISOString() })
+    .eq("status", "w_toku").is("batch_id", null).lt("utworzono", granicaBez);
+}
+
+// Odbiór wyników zleconych batchy. Idempotentne — może wołać kilku adminów naraz.
+async function trybPortfelStatus(u: { admin: boolean }) {
+  if (!u.admin) throw new BladUzytkownika("Analiza portfela jest dostępna tylko dla administratorów.", 403);
+  await sprzatnijPrzerwane();
+  const { data: wiersze, error } = await supa.from("analizy_portfela")
+    .select("id, batch_id, utworzono, utworzyl")
+    .eq("status", "w_toku").not("batch_id", "is", null)
+    .order("utworzono", { ascending: false }).limit(5);
+  if (error) throw error;
+
+  const statusy: Record<string, string> = {};
+  for (const w of wiersze || []) {
+    const batch = await anthropic.messages.batches.retrieve(w.batch_id);
+    if (batch.processing_status !== "ended") {
+      const wiek = Date.now() - new Date(w.utworzono).getTime();
+      if (wiek > MAKS_CZAS_BATCHA_GODZ * 3600 * 1000) {
+        await anthropic.messages.batches.cancel(w.batch_id).catch(() => {});
+        await oznaczBlad(w.id, `Analiza nie zakończyła się w ${MAKS_CZAS_BATCHA_GODZ} h — anulowano.`);
+        statusy[w.id] = "blad";
+      } else {
+        statusy[w.id] = "w_toku";
+      }
+      continue;
+    }
+    let zapisano = false;
+    for await (const r of await anthropic.messages.batches.results(w.batch_id)) {
+      if (r.custom_id !== w.id) continue;
+      zapisano = true;
+      if (r.result.type !== "succeeded") {
+        const opis = r.result.type === "errored" ? `błąd API: ${JSON.stringify((r.result as any).error?.error?.message || (r.result as any).error || "")}` : r.result.type;
+        await oznaczBlad(w.id, `Analiza nie powiodła się (${opis}).`);
+        statusy[w.id] = "blad";
+        continue;
+      }
+      try {
+        const wynik = odczytajOdpowiedz(r.result.message, RABAT_BATCH);
+        // Warunek status = w_toku: drugi równoległy odbiór nie zapisze wyniku dwa razy.
+        const { data: zm, error: e2 } = await supa.from("analizy_portfela")
+          .update({ status: "gotowa", tresc: wynik.dane, model: wynik.model, zakonczono: new Date().toISOString() })
+          .eq("id", w.id).eq("status", "w_toku").select("id");
+        if (e2) throw e2;
+        if (zm && zm.length > 0 && w.utworzyl) await zapiszUzycie(w.utworzyl, "portfel", wynik);
+        statusy[w.id] = "gotowa";
+      } catch (err) {
+        await oznaczBlad(w.id, String((err as Error)?.message || err));
+        statusy[w.id] = "blad";
+      }
+    }
+    if (!zapisano) {
+      await oznaczBlad(w.id, "Brak wyniku w zakończonym zadaniu.");
+      statusy[w.id] = "blad";
+    }
+  }
+  return { ok: true, statusy };
 }
 
 async function trybKontrola(u: { id: string }, body: any) {
@@ -373,6 +456,7 @@ Deno.serve(async (req) => {
     const body = await req.json().catch(() => null);
     switch (body?.tryb) {
       case "portfel": return odpowiedz(await trybPortfel(u, body));
+      case "portfel_status": return odpowiedz(await trybPortfelStatus(u));
       case "kontrola": return odpowiedz(await trybKontrola(u, body));
       case "styl": return odpowiedz(await trybStyl(u, body));
       default: throw new BladUzytkownika("Nieznany tryb asystenta.");
