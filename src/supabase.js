@@ -811,3 +811,115 @@ export async function raportPoTokenie(token) {
   if (error) throw error;
   return data;
 }
+
+/* ===========================================================================
+   ASYSTENT AI (Claude API przez Edge Function `asystent-ai`)
+   Klucz API jest wyłącznie w sekretach Supabase — przeglądarka woła funkcję
+   z sesją zalogowanego użytkownika. Schemat bazy: supabase/asystent_ai.sql.
+   =========================================================================== */
+
+// Dzisiejsza data w czasie polskim ("YYYY-MM-DD") — ta sama granica dnia, której
+// używa baza przy limicie „jedna analiza portfela dziennie".
+export function dzisPL() {
+  return new Intl.DateTimeFormat("sv-SE", { timeZone: "Europe/Warsaw" }).format(new Date());
+}
+
+async function wywolajAsystenta(body) {
+  const { data, error } = await supabase.functions.invoke("asystent-ai", { body });
+  if (error) {
+    // Przy kodzie błędu HTTP komunikat funkcji siedzi w treści odpowiedzi (error.context).
+    let msg = error.message || "Błąd asystenta AI";
+    try {
+      const j = await error.context?.json?.();
+      if (j?.blad) msg = j.blad;
+    } catch { /* treść nie-JSON — zostaje komunikat ogólny */ }
+    throw new Error(msg);
+  }
+  if (data?.blad) throw new Error(data.blad);
+  return data;
+}
+
+// Kontrola spójności raportu (dane przygotowane przez aplikację). Zwraca { ocena, uwagi[] }.
+export async function kontrolaRaportuAI(raport) {
+  return (await wywolajAsystenta({ tryb: "kontrola", raport })).wynik;
+}
+
+// Redakcja stylu jednego pola. Zwraca { html, zmiany }.
+export async function poprawStylAI(pole, html) {
+  return (await wywolajAsystenta({ tryb: "styl", pole, html })).wynik;
+}
+
+// Start generowania analizy portfela (tylko admin). Zwraca { id, status: "w_toku" }.
+export async function generujAnalizePortfela(dane) {
+  return wywolajAsystenta({ tryb: "portfel", dane });
+}
+
+// Ostatnie analizy portfela (RLS: tylko admin) — najnowsze na górze.
+export async function ostatnieAnalizyPortfela() {
+  const { data, error } = await supabase
+    .from("analizy_portfela")
+    .select("id, dzien, status, uniewazniona, utworzono, zakonczono, utworzyl_nazwa, liczba_inwestycji, tresc, model, blad, zresetowano")
+    .order("utworzono", { ascending: false })
+    .limit(5);
+  if (error) throw error;
+  return data || [];
+}
+
+// Przełącznik resetu dziennej analizy (panel admina).
+export async function ustawResetAnalizyPortfela(wlacz) {
+  const { error } = await supabase.rpc("ustaw_reset_analizy_portfela", { wlacz });
+  if (error) throw error;
+}
+
+// Szacowany koszt AI od początku bieżącego miesiąca (RLS: tylko admin).
+export async function zuzycieAIMiesiac() {
+  const teraz = new Date();
+  const od = new Date(teraz.getFullYear(), teraz.getMonth(), 1).toISOString();
+  const { data, error } = await supabase
+    .from("ai_uzycie")
+    .select("tryb, koszt_usd")
+    .gte("utworzono", od);
+  if (error) throw error;
+  const wgTrybu = {};
+  let suma = 0;
+  for (const r of data || []) {
+    const k = Number(r.koszt_usd) || 0;
+    suma += k;
+    wgTrybu[r.tryb] = (wgTrybu[r.tryb] || { liczba: 0, koszt: 0 });
+    wgTrybu[r.tryb].liczba += 1;
+    wgTrybu[r.tryb].koszt += k;
+  }
+  return { suma, wgTrybu, liczba: (data || []).length };
+}
+
+// Dwa najnowsze raporty (pełna treść, bez zdjęć) każdej z podanych inwestycji —
+// materiał do analizy portfela. Zwraca { projekt_id: [najnowszy, poprzedni] }.
+const POLA_DO_ANALIZY =
+  "id, projekt_id, numer, okres_od, okres_do, data_opracowania, opracowal, rozpoczecie, zakonczenie_robot, pnu, pnu_nie_dotyczy, info_ogolne, opoznienia, wykonawcy, przetargi, sprawy_budowy, sprawy_inwestora, plac_budowy, podsumowanie, harmonogram";
+export async function raportyDoAnalizy(projektIds) {
+  const wyniki = await Promise.all(projektIds.map(async (id) => {
+    const { data, error } = await supabase
+      .from("raporty")
+      .select(POLA_DO_ANALIZY)
+      .eq("projekt_id", id)
+      .order("numer", { ascending: false })
+      .limit(2);
+    if (error) throw error;
+    return [id, data || []];
+  }));
+  return Object.fromEntries(wyniki);
+}
+
+// Raport poprzedzający raport o numerze `numer` tej samej budowy (do kontroli zmian).
+export async function poprzedniRaportDoAnalizy(projektId, numer) {
+  if (!projektId) return null;
+  const { data, error } = await supabase
+    .from("raporty")
+    .select(POLA_DO_ANALIZY)
+    .eq("projekt_id", projektId)
+    .lt("numer", parseInt(numer, 10) || 0)
+    .order("numer", { ascending: false })
+    .limit(1);
+  if (error) throw error;
+  return data && data.length > 0 ? data[0] : null;
+}

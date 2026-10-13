@@ -80,13 +80,54 @@ supabase/
 ├── edycja_raportu.sql        ← okno edycji raportu przyznawane przez admina
 ├── wstrzymane_inwestycje.sql ← flaga projekty.wstrzymana
 ├── kartoteka_sync.sql        ← raporty.zaktualizowano, sync_wydania, kartoteka_eksport()
+├── asystent_ai.sql           ← analizy_portfela, ai_uzycie, reset dziennej analizy (asystent AI)
 └── functions/
     ├── przypomnienia-raporty/ ← cykliczne przypomnienia mailowe do PM i adminów
-    └── kartoteka-sync/        ← eksport bazy mailem do Kartoteki (README w katalogu)
+    ├── kartoteka-sync/        ← eksport bazy mailem do Kartoteki (README w katalogu)
+    └── asystent-ai/           ← asystent AI (Claude API): analiza portfela, kontrola, styl
 ```
 
 Obie funkcje wysyłają pocztę przez Microsoft 365 (SMTP + nodemailer) i korzystają z tych
 samych sekretów `M365_USER` / `M365_PASS`, ustawianych w Supabase → Edge Functions → Secrets.
+
+---
+
+## Asystent AI (Claude API)
+
+Trzy funkcje oparte na Claude API, obsługiwane przez Edge Function `asystent-ai`:
+
+1. **Analiza portfela** — Archiwum raportów → przycisk „✦ Analiza portfela (AI)” (widoczny
+   tylko dla administratorów). Przegląd wszystkich inwestycji w toku: ocena ryzyka, zmiany
+   względem poprzedniego raportu, sprawy czekające na decyzję, jakość raportowania.
+   Generowana **najwyżej raz dziennie** (czas polski). Wynik widzą wszyscy administratorzy,
+   dopóki ktoś nie wygeneruje kolejnej. W Panelu admina (zakładka „Zarządzanie” → „Asystent AI”)
+   jest **przełącznik resetu**, który pozwala wygenerować nową analizę jeszcze tego samego dnia.
+2. **Kontrola raportu** — formularz → „✦ Sprawdź raport (AI)” (wszyscy). Wskazuje sprzeczności
+   (podsumowanie vs opóźnienia/harmonogram), nieopisane opóźnienia, treść przepisaną bez zmian
+   z poprzedniego raportu. **Nie blokuje zapisu.**
+3. **Redakcja stylu** — przycisk „✦ Popraw styl (AI)” przy każdym polu opisowym (wszyscy).
+   Propozycja pokazuje się obok oryginału; zmiana wchodzi do formularza dopiero po kliknięciu
+   „Zastosuj propozycję”, a do bazy — przy zapisie raportu.
+
+Klucz API **nie trafia do przeglądarki** — jest wyłącznie w sekretach Supabase.
+
+### Instalacja (jednorazowo)
+
+1. **SQL:** uruchom `supabase/asystent_ai.sql` w SQL Editor (idempotentny).
+2. **Klucz API:** w [console.anthropic.com](https://console.anthropic.com) → API keys → utwórz klucz.
+   Wpisz go w Supabase → Edge Functions → Secrets jako `ANTHROPIC_API_KEY`.
+   Zalecenie: **nie włączaj „auto-reload”** w konsoli Anthropic — wtedy miesięczny kredyt
+   jest twardym limitem wydatków.
+3. **Deploy:** `supabase functions deploy asystent-ai --no-verify-jwt`
+   (sesję zalogowanego użytkownika i rolę admina funkcja weryfikuje sama w kodzie).
+
+### Koszty i limity
+
+- Model: Claude Opus 5.5. Kontrola i redakcja: limit 60 wywołań na osobę na 24 h
+  (stała `LIMIT_DZIENNY_NA_OSOBE` w `index.ts`).
+- Każde wywołanie zapisuje się w tabeli `ai_uzycie` (tokeny + szacowany koszt w USD).
+  Suma za bieżący miesiąc jest widoczna w Panelu admina. Faktyczne rozliczenie — w konsoli Anthropic.
+- Do modelu trafiają treści raportów i imiona i nazwiska kierowników (bez zdjęć).
 
 ---
 
