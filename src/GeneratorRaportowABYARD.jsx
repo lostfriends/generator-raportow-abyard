@@ -51,6 +51,16 @@ import {
   listaUdostepnien,
   wylaczUdostepnienie,
   raportPoTokenie,
+  // asystent AI (Claude API przez Edge Function):
+  dzisPL,
+  kontrolaRaportuAI,
+  poprawStylAI,
+  generujAnalizePortfela,
+  ostatnieAnalizyPortfela,
+  ustawResetAnalizyPortfela,
+  zuzycieAIMiesiac,
+  raportyDoAnalizy,
+  poprzedniRaportDoAnalizy,
 } from "./supabase";
 import { pobierzXlsx, adres, STYLE } from "./xlsx";
 
@@ -1729,6 +1739,7 @@ export default function GeneratorRaportowABYARD() {
   const [przywroconoDraft, setPrzywroconoDraft] = useState(null); // {ts} — pasek „przywrócono wersję roboczą"
   const [selectKey, setSelectKey] = useState(0); // wymusza odświeżenie selecta po anulowaniu zmiany budowy
   const [toast, setToast] = useState("");
+  const [kontrolaAI, setKontrolaAI] = useState(null); // okno „Sprawdź raport (AI)": {trwa} | {wynik} | {blad}
   // Archiwum:
   const [archRaporty, setArchRaporty] = useState(null); // null = nie wczytano; [] = wczytano puste
   // Tło kafli archiwum: aktywne inwestycje + przypisania + użytkownicy (nazwiska PM).
@@ -2137,6 +2148,26 @@ export default function GeneratorRaportowABYARD() {
   }
 
   // ---- Zapis: upload zdjęć do Storage + insert raportu do bazy ----------------
+  // Kontrola spójności raportu przez asystenta AI — tylko podpowiedź, nie blokuje zapisu.
+  async function sprawdzRaportAI() {
+    if (!form.projekt) { pokazToast("Najpierw wybierz inwestycję"); return; }
+    setKontrolaAI({ trwa: true });
+    try {
+      const projektId = await idProjektuPoNazwie(form.projekt);
+      const poprzedni = await poprzedniRaportDoAnalizy(projektId, form.numer).catch(() => null);
+      const wynik = await kontrolaRaportuAI({
+        inwestycja: form.projekt,
+        data_kontroli: dzisISO(),
+        raport: raportDlaAI(form),
+        poprzedni_raport: poprzedni ? raportDlaAI(mapWierszNaForm(poprzedni)) : null,
+      });
+      setKontrolaAI({ wynik });
+    } catch (e) {
+      console.error(e);
+      setKontrolaAI({ blad: e.message || "Nie udało się sprawdzić raportu." });
+    }
+  }
+
   async function zapiszArchiwum() {
     if (!form.projekt) {
       pokazToast("Najpierw wybierz inwestycję");
@@ -2726,31 +2757,31 @@ export default function GeneratorRaportowABYARD() {
 
         <Sekcja tytul="Informacje ogólne">
           <Pole label="Stan zaawansowania względem harmonogramu">
-            <RichEdytor value={form.infoOgolne} onChange={(v) => upd("infoOgolne", v)} placeholder="Rzetelny opis stanu zaawansowania robót w odniesieniu do harmonogramu..." minHeight={120} />
+            <RichEdytor value={form.infoOgolne} onChange={(v) => upd("infoOgolne", v)} poleAI={NAZWA_SEKCJI_AI.infoOgolne} placeholder="Rzetelny opis stanu zaawansowania robót w odniesieniu do harmonogramu..." minHeight={120} />
           </Pole>
           <Pole label="Opóźnienia (pozycja / liczba dni / termin i sposób nadrobienia)">
-            <RichEdytor value={form.opoznienia} onChange={(v) => upd("opoznienia", v)} placeholder="Jeśli występuje opóźnienie: która pozycja, ile dni, jak i do kiedy zostanie nadrobione..." />
+            <RichEdytor value={form.opoznienia} onChange={(v) => upd("opoznienia", v)} poleAI={NAZWA_SEKCJI_AI.opoznienia} placeholder="Jeśli występuje opóźnienie: która pozycja, ile dni, jak i do kiedy zostanie nadrobione..." />
           </Pole>
         </Sekcja>
 
         <Sekcja tytul="Wykonawcy prac">
-          <RichEdytor value={form.wykonawcy} onChange={(v) => upd("wykonawcy", v)} placeholder="Lista wykonawców i status prac każdego z nich..." minHeight={120} />
+          <RichEdytor value={form.wykonawcy} onChange={(v) => upd("wykonawcy", v)} poleAI={NAZWA_SEKCJI_AI.wykonawcy} placeholder="Lista wykonawców i status prac każdego z nich..." minHeight={120} />
         </Sekcja>
 
         <Sekcja tytul="Przetargi">
-          <RichEdytor value={form.przetargi} onChange={(v) => upd("przetargi", v)} placeholder="Rozstrzygnięte i prowadzone przetargi..." />
+          <RichEdytor value={form.przetargi} onChange={(v) => upd("przetargi", v)} poleAI={NAZWA_SEKCJI_AI.przetargi} placeholder="Rozstrzygnięte i prowadzone przetargi..." />
         </Sekcja>
 
         <Sekcja tytul="Sprawy ogólne budowy">
-          <RichEdytor value={form.sprawyBudowy} onChange={(v) => upd("sprawyBudowy", v)} placeholder="Cash flow, roboty dodatkowe, umowy/aneksy, ustalenia z narad, BHP..." />
+          <RichEdytor value={form.sprawyBudowy} onChange={(v) => upd("sprawyBudowy", v)} poleAI={NAZWA_SEKCJI_AI.sprawyBudowy} placeholder="Cash flow, roboty dodatkowe, umowy/aneksy, ustalenia z narad, BHP..." />
         </Sekcja>
 
         <Sekcja tytul="Sprawy dotyczące Inwestora">
-          <RichEdytor value={form.sprawyInwestora} onChange={(v) => upd("sprawyInwestora", v)} placeholder="Projekt, zmiany lokatorskie, optymalizacje, zgody/pozwolenia, rozliczenia..." />
+          <RichEdytor value={form.sprawyInwestora} onChange={(v) => upd("sprawyInwestora", v)} poleAI={NAZWA_SEKCJI_AI.sprawyInwestora} placeholder="Projekt, zmiany lokatorskie, optymalizacje, zgody/pozwolenia, rozliczenia..." />
         </Sekcja>
 
         <Sekcja tytul="Teren placu budowy">
-          <RichEdytor value={form.placBudowy} onChange={(v) => upd("placBudowy", v)} placeholder="Organizacja, ochrona, inne..." />
+          <RichEdytor value={form.placBudowy} onChange={(v) => upd("placBudowy", v)} poleAI={NAZWA_SEKCJI_AI.placBudowy} placeholder="Organizacja, ochrona, inne..." />
         </Sekcja>
 
         {/* Harmonogram */}
@@ -3027,6 +3058,10 @@ export default function GeneratorRaportowABYARD() {
             <button style={{ ...btnGhost, borderColor: C.linia, color: C.szary }} onClick={wyczyscFormularz} disabled={zapisywanie} title="Wyczyść widoczny formularz (i wersję roboczą). Zapisane raporty w bazie zostają.">
               Wyczyść
             </button>
+            <button style={{ ...btnGhost, borderColor: C.zoltyDeep }} onClick={sprawdzRaportAI} disabled={zapisywanie || kontrolaAI?.trwa}
+              title="Asystent AI sprawdzi spójność raportu (opóźnienia, podsumowanie, harmonogram, zmiany względem poprzedniego). Nie blokuje zapisu.">
+              ✦ Sprawdź raport (AI)
+            </button>
             <button style={btnGhost} onClick={zapiszArchiwum} disabled={zapisywanie}>
               {zapisywanie ? "Zapisywanie…" : zapisanyId ? "Aktualizuj raport" : "Zapisz raport w bazie"}
             </button>
@@ -3039,6 +3074,8 @@ export default function GeneratorRaportowABYARD() {
           </div>
         </div>
       </footer>
+
+      {kontrolaAI && <OknoKontroliAI stan={kontrolaAI} onZamknij={() => setKontrolaAI(null)} />}
 
       {toast && (
         <div style={{ position: "fixed", bottom: 80, left: "50%", transform: "translateX(-50%)", background: C.czarny, color: C.bialy, padding: "12px 22px", borderRadius: 8, fontSize: 14, zIndex: 50, boxShadow: "0 4px 20px rgba(0,0,0,0.25)" }}>
@@ -3448,6 +3485,9 @@ function PanelAdmina({ pokazToast, email, onForm, onArchiwum, onCashflow, onKoor
                 })}
               </div>
             </section>
+
+            {/* Asystent AI — reset dziennej analizy portfela + szacowany koszt */}
+            <SekcjaAsystentaAI pokazToast={pokazToast} />
 
             {/* Konserwacja — jednorazowa kompresja zdjęć już zapisanych w bazie */}
             <section style={card}>
@@ -4791,6 +4831,7 @@ function WidokArchiwum({ raporty, inwestycje, przypisania, uzytkownicy, ladowani
   };
 
   const [tylkoZalegajace, setTylkoZalegajace] = React.useState(false);
+  const [pokazAnalize, setPokazAnalize] = React.useState(false); // panel „Analiza portfela (AI)" — tylko admin
   const lista = raporty || [];
   const widoczne = filtr ? lista.filter((r) => r.nazwaProjektu === filtr) : lista;
 
@@ -4846,12 +4887,23 @@ function WidokArchiwum({ raporty, inwestycje, przypisania, uzytkownicy, ladowani
           tytul="Raporty z budów"
           sub={`Kafle to inwestycje w toku: najpierw te z aktualnym raportem, niżej realnie zalegające ponad ${PROG_ZALEGANIA_DNI} dni — z nazwiskiem kierownika. Kafla nie mają inwestycje zakończone ani świeżo dodane (mają ${PROG_ZALEGANIA_DNI} dni na pierwszy raport), a raporty zakończonych zostają na liście poniżej. Kliknij kafel, aby zawęzić listę.`}
           akcje={<>
+            {jestAdmin && (
+              <button onClick={() => setPokazAnalize((v) => !v)} aria-expanded={pokazAnalize}
+                title="Przegląd portfela inwestycji przygotowany przez AI — widoczny dla administratorów"
+                style={{ ...miniBtn, padding: "8px 14px", fontWeight: 700, background: pokazAnalize ? C.czarny : C.bialy, color: pokazAnalize ? C.zoltyBright : C.czarny, border: `1px solid ${pokazAnalize ? C.czarny : C.linia}` }}>
+                ✦ Analiza portfela (AI)
+              </button>
+            )}
             <button onClick={onOdswiez} style={{ ...miniBtn, padding: "8px 14px", fontWeight: 600 }}>↻ Odśwież</button>
             <button onClick={onNowyRaport} style={{ background: C.zolty, color: C.czarny, border: "none", padding: "9px 16px", borderRadius: 6, fontWeight: 700, fontSize: 12.5, cursor: "pointer", fontFamily: "inherit" }}>+ Nowy raport</button>
           </>}
         />
         {ladowanie && (
           <div style={{ textAlign: "center", padding: 40, color: C.szary }}>Wczytywanie z bazy…</div>
+        )}
+
+        {jestAdmin && pokazAnalize && !ladowanie && (
+          <PanelAnalizyPortfela kafle={kafle} zKafliInwestycji={!!(inwestycje && inwestycje.length > 0)} />
         )}
 
         {!ladowanie && lista.length === 0 && kafle.length === 0 && (
@@ -5005,6 +5057,458 @@ function WidokArchiwum({ raporty, inwestycje, przypisania, uzytkownicy, ladowani
         )}
       </main>
     </div>
+  );
+}
+
+/* ---------- ASYSTENT AI (Claude API przez Edge Function `asystent-ai`) -----
+   1) Analiza portfela — archiwum, tylko admin, raz dziennie (reset w panelu admina).
+   2) Kontrola raportu przed zapisem — formularz, wszyscy.
+   3) Redakcja stylu pól opisowych — przycisk w edytorze, wszyscy.
+   Dane dla modelu przygotowujemy TU, tymi samymi funkcjami, które liczą
+   opóźnienia i statusy na ekranie — model dostaje gotowe wskaźniki i ich nie
+   przelicza. Wynik AI to zawsze propozycja: nic nie zapisuje się samo. */
+
+// Sekcje opisowe raportu: [pole formularza, nazwa dla PM i dla modelu].
+const SEKCJE_AI = [
+  ["infoOgolne", "Stan zaawansowania względem harmonogramu"],
+  ["opoznienia", "Opóźnienia"],
+  ["wykonawcy", "Wykonawcy prac"],
+  ["przetargi", "Przetargi"],
+  ["sprawyBudowy", "Sprawy ogólne budowy"],
+  ["sprawyInwestora", "Sprawy dotyczące Inwestora"],
+  ["placBudowy", "Teren placu budowy"],
+];
+const NAZWA_SEKCJI_AI = Object.fromEntries(SEKCJE_AI);
+
+const RE_POGRUBIENIE = /font-weight\s*:\s*(bold|[6-9]00)/i;
+
+// HTML pola rich-text -> zwykły tekst dla modelu. Pogrubienie („nowe w tym
+// raporcie") zostaje jako **...**. DOMParser tworzy dokument bezczynny —
+// nic się nie ładuje ani nie wykonuje.
+function htmlNaTekstAI(html) {
+  if (!html) return "";
+  const doc = new DOMParser().parseFromString(`<div>${html}</div>`, "text/html");
+  const wynik = [];
+  const nowaLinia = () => { if (wynik.length && !wynik[wynik.length - 1].endsWith("\n")) wynik.push("\n"); };
+  const przejdz = (n) => {
+    if (n.nodeType === 3) { wynik.push(n.nodeValue); return; }
+    if (n.nodeType !== 1) return;
+    if (n.nodeName === "BR") { wynik.push("\n"); return; }
+    const blok = ["DIV", "P", "LI"].includes(n.nodeName);
+    const pogr = n.nodeName === "B" || n.nodeName === "STRONG" || RE_POGRUBIENIE.test(n.getAttribute("style") || "");
+    if (blok) nowaLinia();
+    if (pogr) wynik.push("**");
+    n.childNodes.forEach(przejdz);
+    if (pogr) wynik.push("**");
+    if (blok) nowaLinia();
+  };
+  doc.body.firstChild.childNodes.forEach(przejdz);
+  return wynik.join("")
+    .replace(/ /g, " ")
+    .replace(/\*\*(\s*)\*\*/g, "$1")
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+// Sanitizer HTML dla edytora: zostawia wyłącznie <b>, <i>, <u>, <br> i tekst.
+// Używany na wejściu (to, co wysyłamy) i — obowiązkowo — na odpowiedzi modelu,
+// zanim trafi do formularza i do podglądu raportu (dangerouslySetInnerHTML).
+function oczyscHtmlAI(html) {
+  if (!html) return "";
+  const doc = new DOMParser().parseFromString(`<div>${html}</div>`, "text/html");
+  const esc = (t) => t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const ZNACZNIK = { B: "b", STRONG: "b", I: "i", EM: "i", U: "u" };
+  const wyjscie = (n) => {
+    if (n.nodeType === 3) return esc(n.nodeValue);
+    if (n.nodeType !== 1) return "";
+    if (n.nodeName === "BR") return "<br>";
+    if (["SCRIPT", "STYLE", "TEMPLATE"].includes(n.nodeName)) return "";
+    let w = Array.from(n.childNodes).map(wyjscie).join("");
+    const styl = n.getAttribute("style") || "";
+    if (RE_POGRUBIENIE.test(styl)) w = `<b>${w}</b>`;
+    if (/font-style\s*:\s*italic/i.test(styl)) w = `<i>${w}</i>`;
+    if (/text-decoration[^;]*underline/i.test(styl)) w = `<u>${w}</u>`;
+    const t = ZNACZNIK[n.nodeName];
+    if (t) return w ? `<${t}>${w}</${t}>` : "";
+    if (["DIV", "P", "LI"].includes(n.nodeName)) return `${w}<br>`;
+    return w;
+  };
+  return Array.from(doc.body.firstChild.childNodes).map(wyjscie).join("").replace(/(<br>)+$/, "");
+}
+
+// Harmonogram jako fakty dla modelu: tylko pozycje z danymi, z opóźnieniem
+// policzonym tak samo jak w tabeli harmonogramu.
+function harmonogramDlaAI(harmonogram, dataOdn) {
+  if (!Array.isArray(harmonogram) || harmonogram.length === 0) return null;
+  const pozycje = [];
+  for (const w of harmonogram) {
+    const ef = efektywnyWiersz(w);
+    const proc = parseInt(ef.proc, 10);
+    if (!(ef.start || ef.koniec || ef.rzecz || !isNaN(proc))) continue;
+    pozycje.push({
+      zadanie: ef.zadanie || "(bez nazwy)",
+      start: ef.start || null,
+      koniec_wg_umowy: ef.koniec || null,
+      koniec_prognoza_lub_rzeczywisty: ef.rzecz || null,
+      zaawansowanie_proc: isNaN(proc) ? null : proc,
+      opoznienie_dni: opoznienieDni(ef, dataOdn),
+    });
+  }
+  if (pozycje.length === 0) return null;
+  const opoz = opoznienieInwestycji(harmonogram, dataOdn);
+  return {
+    srednie_zaawansowanie_proc: sredniPostep(harmonogram),
+    planowane_zakonczenie_wg_harmonogramu: najpozniejszePlanowaneZakonczenie(harmonogram) || null,
+    opoznienie_zakonczenia_inwestycji_dni: opoz ? Math.max(0, opoz.dni) : null,
+    termin_zakonczenia_zagrozony_wg_harmonogramu: harmonogramWymuszaZagrozenie(harmonogram, dataOdn),
+    pozycje,
+  };
+}
+
+// Raport (w kształcie formularza) -> dane dla modelu.
+function raportDlaAI(f) {
+  const sekcje = {};
+  for (const [pole, nazwa] of SEKCJE_AI) sekcje[nazwa] = htmlNaTekstAI(f[pole]) || "(puste)";
+  return {
+    numer: f.numer,
+    okres_od: f.okresOd || null,
+    okres_do: f.okresDo || null,
+    data_opracowania: f.dataOpracowania || null,
+    opracowal: f.opracowal || null,
+    rozpoczecie_budowy: f.rozpoczecie || null,
+    zakonczenie_robot: f.zakonczenieRobot || null,
+    pozwolenie_na_uzytkowanie: f.pnuNieDotyczy ? "nie dotyczy" : (f.pnu || null),
+    sekcje,
+    podsumowanie_pm: f.podsumowanie || null,
+    harmonogram: harmonogramDlaAI(f.harmonogram, f.dataOpracowania),
+  };
+}
+
+// Okno dialogowe asystenta. onZamknij = null blokuje zamykanie (np. w trakcie pracy).
+function ModalAI({ tytul, onZamknij, children, stopka, szer = 760 }) {
+  return (
+    <div onClick={onZamknij || undefined}
+      style={{ position: "fixed", inset: 0, background: "rgba(15,15,14,0.55)", zIndex: 60, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "6vh 16px", overflowY: "auto" }}>
+      <div role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}
+        style={{ background: C.bialy, borderRadius: 10, width: "100%", maxWidth: szer, boxShadow: "0 12px 40px rgba(0,0,0,0.25)", fontFamily: "'Segoe UI', system-ui, sans-serif", color: C.czarny }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "16px 20px", borderBottom: `1px solid ${C.linia}` }}>
+          <div>
+            <div style={{ fontFamily: C.mono, fontSize: 10, letterSpacing: "0.14em", textTransform: "uppercase", color: C.zoltyDeep }}>
+              <span style={{ color: C.zolty, fontWeight: 700 }}>/</span> Asystent AI
+            </div>
+            <div style={{ fontWeight: 700, fontSize: 16, marginTop: 3 }}>{tytul}</div>
+          </div>
+          {onZamknij && (
+            <button onClick={onZamknij} aria-label="Zamknij" style={{ ...miniBtn, fontSize: 16, lineHeight: 1, padding: "4px 10px" }}>×</button>
+          )}
+        </div>
+        <div style={{ padding: "18px 20px" }}>{children}</div>
+        {stopka && (
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, flexWrap: "wrap", padding: "14px 20px", borderTop: `1px solid ${C.linia}` }}>{stopka}</div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function PracaAI({ tekst }) {
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "18px 0", color: C.szary, fontSize: 13.5 }}>
+      <span className="ai-kolko" style={{ width: 18, height: 18, borderRadius: "50%", border: `2.5px solid ${C.linia}`, borderTopColor: C.zolty, flexShrink: 0 }} />
+      {tekst}
+    </div>
+  );
+}
+
+function BladAI({ tekst }) {
+  return (
+    <div style={{ padding: "10px 12px", background: "#FDECEA", border: "1px solid #F3C7C1", borderRadius: 6, fontSize: 13, color: "#8A2018" }}>{tekst}</div>
+  );
+}
+
+const NOTA_AI = "Wynik wygenerowany przez AI na podstawie treści raportów — traktuj jako podpowiedź i weryfikuj przed przekazaniem dalej.";
+
+/* ---- 2) Kontrola raportu przed zapisem (okno wyniku) --------------------- */
+function OknoKontroliAI({ stan, onZamknij }) {
+  const wynik = stan?.wynik;
+  const uwagi = wynik?.uwagi || [];
+  return (
+    <ModalAI tytul="Kontrola raportu" onZamknij={stan?.trwa ? null : onZamknij}
+      stopka={stan?.trwa ? null : <button style={btnPrimary} onClick={onZamknij}>Zamknij</button>}>
+      {stan?.trwa && <PracaAI tekst="Sprawdzam spójność raportu… (zwykle do minuty)" />}
+      {stan?.blad && <BladAI tekst={stan.blad} />}
+      {wynik && (
+        <>
+          <p style={{ fontSize: 14, lineHeight: 1.55, margin: "0 0 14px" }}>{wynik.ocena}</p>
+          {uwagi.length === 0 ? (
+            <div style={{ padding: "10px 12px", background: "#E6F3EA", borderRadius: 6, fontSize: 13.5, color: C.zielony, fontWeight: 600 }}>
+              ✓ Asystent nie znalazł problemów do poprawy.
+            </div>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              {uwagi.map((u, i) => (
+                <div key={i} style={{ padding: "10px 12px", border: `1px solid ${C.linia}`, borderLeft: `4px solid ${u.waga === "istotna" ? C.czerwony : C.zolty}`, borderRadius: 6 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 4 }}>
+                    <Chip wariant={u.waga === "istotna" ? "warn" : "hold"}>{u.waga}</Chip>
+                    <span style={{ fontFamily: C.mono, fontSize: 10.5, color: C.szary, textTransform: "uppercase", letterSpacing: "0.06em" }}>{u.pole}</span>
+                  </div>
+                  <div style={{ fontSize: 13.5, lineHeight: 1.5 }}>{u.uwaga}</div>
+                </div>
+              ))}
+            </div>
+          )}
+          <p style={{ fontSize: 11.5, color: C.szary2, margin: "14px 0 0", lineHeight: 1.5 }}>
+            Uwagi nie blokują zapisu. {NOTA_AI}
+          </p>
+        </>
+      )}
+    </ModalAI>
+  );
+}
+
+/* ---- 1) Analiza portfela (archiwum, tylko admin) ------------------------- */
+const OPIS_KONDYCJI_AI = {
+  aktualny: "raport aktualny",
+  zalega: `zalega z raportem (ponad ${PROG_ZALEGANIA_DNI} dni)`,
+  brak: "brak jakiegokolwiek raportu",
+  nowa: "świeżo dodana, termin pierwszego raportu jeszcze nie minął",
+  wstrzymana: "inwestycja wstrzymana",
+};
+const PRZETERMINOWANIE_AI_MS = 15 * 60 * 1000; // spójne z Edge Function
+
+function fmtDataGodz(iso) {
+  if (!iso) return "";
+  return new Date(iso).toLocaleString("pl-PL", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
+}
+
+function PanelAnalizyPortfela({ kafle, zKafliInwestycji }) {
+  const [analizy, setAnalizy] = useState(null); // null = wczytywanie
+  const [blad, setBlad] = useState("");
+  const [startuje, setStartuje] = useState(false);
+
+  const wczytaj = useCallback(async () => {
+    try {
+      setAnalizy(await ostatnieAnalizyPortfela());
+      setBlad("");
+    } catch (e) {
+      console.error(e);
+      setBlad("Nie udało się wczytać analiz (czy skrypt supabase/asystent_ai.sql jest zainstalowany?).");
+      setAnalizy([]);
+    }
+  }, []);
+  useEffect(() => { wczytaj(); }, [wczytaj]);
+
+  const dzis = dzisPL();
+  const swieza = (a) => Date.now() - new Date(a.utworzono).getTime() < PRZETERMINOWANIE_AI_MS;
+  const wToku = (analizy || []).find((a) => a.status === "w_toku" && !a.uniewazniona && swieza(a));
+  const ostatnia = (analizy || []).find((a) => a.status === "gotowa");
+  const blokujeDzis = (analizy || []).some((a) => a.dzien === dzis && !a.uniewazniona && (a.status === "gotowa" || (a.status === "w_toku" && swieza(a))));
+  const ostatniBlad = analizy?.[0]?.status === "blad" ? analizy[0] : null;
+  const mozna = analizy !== null && !blokujeDzis && zKafliInwestycji && kafle.length > 0 && !startuje;
+
+  // Odpytywanie, dopóki analiza się generuje.
+  useEffect(() => {
+    if (!wToku) return undefined;
+    const t = setInterval(wczytaj, 5000);
+    return () => clearInterval(t);
+  }, [wToku?.id, wczytaj]);
+
+  async function generuj() {
+    if (!mozna) return;
+    if (!window.confirm(`Wygenerować analizę portfela (${kafle.length} ${odmiana(kafle.length, ["inwestycja", "inwestycje", "inwestycji"])})?\n\nAnaliza będzie widoczna dla wszystkich administratorów. Kolejną można wygenerować dopiero jutro (albo po resecie w panelu admina).`)) return;
+    setStartuje(true);
+    setBlad("");
+    try {
+      const pelne = await raportyDoAnalizy(kafle.map((k) => k.klucz));
+      const inwestycje = kafle.map((k) => {
+        const [ost, pop] = pelne[k.klucz] || [];
+        return {
+          nazwa: k.nazwa,
+          kierownicy: k.pmy,
+          kondycja_raportowania: OPIS_KONDYCJI_AI[k.kondycja] || k.kondycja,
+          dni_od_ostatniego_raportu: k.dniOd,
+          status_terminu: ost ? statusZRaportu(ost).txt : "brak raportu",
+          najnowszy_raport: ost ? raportDlaAI(mapWierszNaForm(ost)) : null,
+          poprzedni_raport: pop ? raportDlaAI(mapWierszNaForm(pop)) : null,
+        };
+      });
+      await generujAnalizePortfela({ data_analizy: dzis, inwestycje });
+      await wczytaj();
+    } catch (e) {
+      console.error(e);
+      setBlad(e.message || "Nie udało się uruchomić analizy.");
+      await wczytaj();
+    } finally {
+      setStartuje(false);
+    }
+  }
+
+  const t = ostatnia?.tresc;
+  const KOLOR_OCENY = { krytyczna: "warn", uwaga: "hold", stabilna: "ok" };
+
+  return (
+    <section style={{ ...card, borderTop: `3px solid ${C.zolty}` }}>
+      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 14, flexWrap: "wrap", marginBottom: 12 }}>
+        <div>
+          <TytulSekcji>Analiza portfela (AI)</TytulSekcji>
+          <div style={{ fontSize: 12.5, color: C.szary, marginTop: -6, lineHeight: 1.5, maxWidth: 620 }}>
+            Przegląd wszystkich inwestycji w toku na podstawie najnowszych raportów. Widoczna dla administratorów. Generowana raz dziennie — kolejną można utworzyć następnego dnia albo po resecie w panelu admina.
+          </div>
+        </div>
+        <button style={mozna ? btnPrimary : { ...btnPrimary, opacity: 0.45, cursor: "not-allowed" }} onClick={generuj} disabled={!mozna}
+          title={mozna ? "" : wToku ? "Analiza właśnie się generuje" : blokujeDzis ? "Dzisiejsza analiza już istnieje — kolejna jutro albo po resecie w panelu admina" : !zKafliInwestycji ? "Brak listy inwestycji — odśwież archiwum" : ""}>
+          {startuje ? "Przygotowuję dane…" : wToku ? "Generowanie…" : "Wygeneruj analizę"}
+        </button>
+      </div>
+
+      {analizy === null && <PracaAI tekst="Wczytywanie…" />}
+      {blad && <div style={{ marginBottom: 12 }}><BladAI tekst={blad} /></div>}
+      {wToku && <PracaAI tekst={`Analiza generuje się od ${fmtDataGodz(wToku.utworzono)} (${wToku.utworzyl_nazwa || "—"}). To trwa zwykle 1–3 minuty — wynik pojawi się tutaj sam.`} />}
+      {ostatniBlad && !wToku && (
+        <div style={{ marginBottom: 12 }}><BladAI tekst={`Ostatnia próba (${fmtDataGodz(ostatniBlad.utworzono)}) nie powiodła się: ${ostatniBlad.blad || "nieznany błąd"}. Można spróbować ponownie.`} /></div>
+      )}
+
+      {analizy !== null && !ostatnia && !wToku && (
+        <div style={{ fontSize: 13, color: C.szary, fontStyle: "italic" }}>Nie wygenerowano jeszcze żadnej analizy.</div>
+      )}
+
+      {ostatnia && t && (
+        <div>
+          <div style={{ fontFamily: C.mono, fontSize: 10.5, color: C.szary2, letterSpacing: "0.03em", textTransform: "uppercase", marginBottom: 10 }}>
+            Wygenerowano {fmtDataGodz(ostatnia.zakonczono || ostatnia.utworzono)} · {ostatnia.utworzyl_nazwa || "—"} · {ostatnia.liczba_inwestycji ?? "?"} inw.
+            {ostatnia.dzien !== dzis && <span style={{ color: C.zoltyDeep }}> · analiza z poprzedniego dnia</span>}
+            {ostatnia.dzien === dzis && ostatnia.uniewazniona && <span style={{ color: C.zoltyDeep }}> · zresetowana — można wygenerować nową</span>}
+          </div>
+          <p style={{ fontSize: 14, lineHeight: 1.6, margin: "0 0 16px" }}>{t.podsumowanie}</p>
+
+          <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 18 }}>
+            {(t.inwestycje || []).map((i, idx) => (
+              <div key={idx} style={{ padding: "11px 13px", border: `1px solid ${C.linia}`, borderRadius: 7, background: C.bialy }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 5 }}>
+                  <strong style={{ fontSize: 14.5 }}>{i.nazwa}</strong>
+                  <Chip wariant={KOLOR_OCENY[i.ocena] || "neutral"}>{i.ocena}</Chip>
+                </div>
+                <div style={{ fontSize: 13.5, lineHeight: 1.55 }}>{i.kluczowe}</div>
+                {i.zmiany && <div style={{ fontSize: 12.5, lineHeight: 1.5, color: C.szary, marginTop: 5 }}><strong style={{ color: C.czarny, fontWeight: 600 }}>Zmiany: </strong>{i.zmiany}</div>}
+              </div>
+            ))}
+          </div>
+
+          {(t.decyzje || []).length > 0 && (
+            <div style={{ marginBottom: 18 }}>
+              <div style={lbl}>Sprawy czekające na decyzję</div>
+              <div className="tabela-scroll-own" style={{ overflowX: "auto" }}>
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13, minWidth: 520 }}>
+                  <thead><tr><th style={thAdm}>Inwestycja</th><th style={thAdm}>Kto</th><th style={thAdm}>Sprawa</th></tr></thead>
+                  <tbody>
+                    {t.decyzje.map((d, idx) => (
+                      <tr key={idx} style={{ borderBottom: `1px solid ${C.linia}` }}>
+                        <td style={{ padding: "8px 12px", fontWeight: 600, verticalAlign: "top" }}>{d.inwestycja}</td>
+                        <td style={{ padding: "8px 12px", whiteSpace: "nowrap", verticalAlign: "top" }}>{d.kto}</td>
+                        <td style={{ padding: "8px 12px", lineHeight: 1.5 }}>{d.sprawa}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {(t.jakosc_raportowania || []).length > 0 && (
+            <div style={{ marginBottom: 12 }}>
+              <div style={lbl}>Jakość raportowania</div>
+              <ul style={{ margin: 0, paddingLeft: 18, fontSize: 13, lineHeight: 1.6 }}>
+                {t.jakosc_raportowania.map((j, idx) => <li key={idx}><strong>{j.inwestycja}:</strong> {j.uwaga}</li>)}
+              </ul>
+            </div>
+          )}
+          <p style={{ fontSize: 11.5, color: C.szary2, margin: "10px 0 0", lineHeight: 1.5 }}>{NOTA_AI}</p>
+        </div>
+      )}
+    </section>
+  );
+}
+
+/* ---- Panel admina: reset dziennej analizy + koszt AI w miesiącu ---------- */
+function SekcjaAsystentaAI({ pokazToast }) {
+  const [analizy, setAnalizy] = useState(null);
+  const [zuzycie, setZuzycie] = useState(null);
+  const [blad, setBlad] = useState("");
+  const [zapis, setZapis] = useState(false);
+
+  const wczytaj = useCallback(async () => {
+    try {
+      const [a, z] = await Promise.all([ostatnieAnalizyPortfela(), zuzycieAIMiesiac()]);
+      setAnalizy(a);
+      setZuzycie(z);
+      setBlad("");
+    } catch (e) {
+      console.error(e);
+      setBlad("Nie udało się wczytać danych asystenta (czy skrypt supabase/asystent_ai.sql jest zainstalowany?).");
+    }
+  }, []);
+  useEffect(() => { wczytaj(); }, [wczytaj]);
+
+  const dzis = dzisPL();
+  const dzisiejsze = (analizy || []).filter((a) => a.dzien === dzis && a.status === "gotowa");
+  const aktywnaDzis = dzisiejsze.find((a) => !a.uniewazniona);
+  const zresetowanaDzis = dzisiejsze.find((a) => a.uniewazniona && a.zresetowano);
+  // Przełącznik „włączony" = dzisiejsza analiza zresetowana i nikt jeszcze nie wygenerował nowej.
+  const wlaczony = !aktywnaDzis && !!zresetowanaDzis;
+  const dostepny = !!aktywnaDzis || !!zresetowanaDzis;
+
+  async function przelacz() {
+    if (!dostepny || zapis) return;
+    const nowy = !wlaczony;
+    if (nowy && !window.confirm("Zresetować dzisiejszą analizę portfela?\n\nAnaliza zostanie w archiwum do wglądu, ale każdy administrator będzie mógł od razu wygenerować nową.")) return;
+    setZapis(true);
+    try {
+      await ustawResetAnalizyPortfela(nowy);
+      pokazToast(nowy ? "Reset włączony — można wygenerować nową analizę" : "Reset cofnięty — obowiązuje dzisiejsza analiza");
+      await wczytaj();
+    } catch (e) {
+      console.error(e);
+      pokazToast("Błąd zmiany ustawienia: " + (e.message || e));
+    } finally {
+      setZapis(false);
+    }
+  }
+
+  const fmtUSD = (n) => `${(Number(n) || 0).toLocaleString("pl-PL", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USD`;
+  const NAZWY_TRYBOW = { portfel: "analiza portfela", kontrola: "kontrola raportu", styl: "redakcja stylu" };
+
+  return (
+    <section style={card}>
+      <div style={secTitle}><span style={{ color: C.zolty, fontWeight: 700 }}>/ </span>Asystent AI</div>
+      {blad && <div style={{ marginBottom: 12 }}><BladAI tekst={blad} /></div>}
+      <div style={{ display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap", paddingBottom: 14, borderBottom: `1px solid ${C.linia}` }}>
+        <button type="button" role="switch" aria-checked={wlaczony} onClick={przelacz} disabled={!dostepny || zapis}
+          style={{ width: 46, height: 26, borderRadius: 999, border: "none", padding: 3, cursor: dostepny ? "pointer" : "not-allowed", background: wlaczony ? C.zolty : C.linia, display: "flex", justifyContent: wlaczony ? "flex-end" : "flex-start", flexShrink: 0 }}>
+          <span style={{ width: 20, height: 20, borderRadius: "50%", background: C.bialy, boxShadow: "0 1px 3px rgba(0,0,0,0.25)" }} />
+        </button>
+        <div style={{ flex: "1 1 320px", fontSize: 13, lineHeight: 1.5 }}>
+          <strong>Reset dziennej analizy portfela</strong>
+          <div style={{ color: C.szary, fontSize: 12.5 }}>
+            {analizy === null ? "Wczytywanie…"
+              : wlaczony ? "Włączony — dzisiejsza analiza jest unieważniona, w archiwum można wygenerować nową. Wyłącz, aby przywrócić blokadę do jutra."
+              : aktywnaDzis ? `Dzisiejsza analiza z ${fmtDataGodz(aktywnaDzis.zakonczono || aktywnaDzis.utworzono)} blokuje kolejną do jutra. Włącz, aby pozwolić wygenerować nową już dziś.`
+              : "Dziś nie wygenerowano analizy — generowanie w archiwum jest dostępne bez resetu."}
+          </div>
+        </div>
+      </div>
+      <div style={{ paddingTop: 14, fontSize: 13, lineHeight: 1.6 }}>
+        <strong>Szacowany koszt w tym miesiącu: {zuzycie ? fmtUSD(zuzycie.suma) : "…"}</strong>
+        {zuzycie && zuzycie.liczba > 0 && (
+          <div style={{ color: C.szary, fontSize: 12.5 }}>
+            {Object.entries(zuzycie.wgTrybu).map(([tr, v]) => `${NAZWY_TRYBOW[tr] || tr}: ${v.liczba} × (${fmtUSD(v.koszt)})`).join(" · ")}
+          </div>
+        )}
+        <div style={{ color: C.szary2, fontSize: 11.5, marginTop: 4 }}>
+          Szacunek wg cennika API na podstawie zużytych tokenów; faktyczne rozliczenie — w konsoli Anthropic.
+        </div>
+      </div>
+    </section>
   );
 }
 
@@ -6144,9 +6648,10 @@ function Tekst({ v }) {
 }
 
 /* Edytor rich-text: zaznacz fragment i kliknij B / I / U aby sformatować */
-function RichEdytor({ value, onChange, placeholder, minHeight = 84 }) {
+function RichEdytor({ value, onChange, placeholder, minHeight = 84, poleAI }) {
   const ref = useRef(null);
   const [pusty, setPusty] = useState(!value);
+  const [ai, setAi] = useState(null); // redakcja stylu: {trwa} | {przed, po, zmiany} | {blad}
 
   useEffect(() => {
     if (ref.current && ref.current.innerHTML !== (value || "")) {
@@ -6193,6 +6698,24 @@ function RichEdytor({ value, onChange, placeholder, minHeight = 84 }) {
     }
   }
 
+  // Redakcja stylu przez asystenta AI: propozycja w oknie, PM decyduje, czy ją przyjąć.
+  async function poprawStyl() {
+    const przed = oczyscHtmlAI(ref.current?.innerHTML || value || "");
+    if (!htmlNaTekstAI(przed)) return;
+    setAi({ trwa: true });
+    try {
+      const w = await poprawStylAI(poleAI, przed);
+      setAi({ przed, po: oczyscHtmlAI(w.html), zmiany: w.zmiany });
+    } catch (e) {
+      console.error(e);
+      setAi({ blad: e.message || "Nie udało się zredagować tekstu." });
+    }
+  }
+  function zastosujStyl() {
+    onChange(ai.po);
+    setAi(null);
+  }
+
   const btn = (etykieta, komenda, tytul, styl) => (
     <button type="button" onMouseDown={(e) => { e.preventDefault(); format(komenda); }}
       style={{ width: 30, height: 26, border: `1px solid ${C.linia}`, borderRadius: 4, background: C.bialy, cursor: "pointer", fontSize: 14, ...styl }}
@@ -6201,11 +6724,18 @@ function RichEdytor({ value, onChange, placeholder, minHeight = 84 }) {
 
   return (
     <div style={{ border: `1px solid #C9C2B2`, borderRadius: 5, background: "#FCFBF8", overflow: "hidden" }}>
-      <div style={{ display: "flex", gap: 4, padding: "5px 6px", borderBottom: `1px solid ${C.linia}`, background: "#F3F0E8" }}>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 4, padding: "5px 6px", borderBottom: `1px solid ${C.linia}`, background: "#F3F0E8" }}>
         {btn("B", "bold", "Pogrub zaznaczony tekst (np. nowe informacje w tym raporcie)", { fontWeight: 800 })}
         {btn("I", "italic", "Pochyl zaznaczony tekst (kursywa)", { fontStyle: "italic", fontFamily: "Georgia, serif" })}
         {btn("U", "underline", "Podkreśl zaznaczony tekst", { textDecoration: "underline" })}
         <span style={{ fontSize: 11, color: C.szary, alignSelf: "center", marginLeft: 4 }}>zaznacz fragment i kliknij B / I / U</span>
+        {poleAI && (
+          <button type="button" onClick={poprawStyl} disabled={pusty || ai?.trwa}
+            title="Asystent AI poprawi język i styl tego pola (bez zmiany faktów). Zobaczysz propozycję przed zastosowaniem."
+            style={{ marginLeft: "auto", height: 26, padding: "0 10px", border: `1px solid ${C.zoltyDeep}`, borderRadius: 4, background: C.bialy, cursor: "pointer", fontSize: 11.5, fontWeight: 600, fontFamily: "inherit", color: C.czarny }}>
+            ✦ Popraw styl (AI)
+          </button>
+        )}
       </div>
       <div style={{ position: "relative" }}>
         {pusty && placeholder && (
@@ -6221,6 +6751,35 @@ function RichEdytor({ value, onChange, placeholder, minHeight = 84 }) {
           style={{ minHeight, padding: "9px 11px", fontSize: 14, lineHeight: 1.5, outline: "none", fontFamily: "inherit" }}
         />
       </div>
+      {ai && (
+        <ModalAI tytul={`Redakcja: ${poleAI}`} onZamknij={ai.trwa ? null : () => setAi(null)} szer={900}
+          stopka={ai.trwa ? null : ai.po !== undefined ? (
+            <>
+              <button style={btnGhost} onClick={() => setAi(null)}>Zostaw obecny tekst</button>
+              <button style={btnPrimary} onClick={zastosujStyl}>Zastosuj propozycję</button>
+            </>
+          ) : <button style={btnPrimary} onClick={() => setAi(null)}>Zamknij</button>}>
+          {ai.trwa && <PracaAI tekst="Redaguję tekst…" />}
+          {ai.blad && <BladAI tekst={ai.blad} />}
+          {ai.po !== undefined && (
+            <>
+              {ai.zmiany && <p style={{ fontSize: 13.5, margin: "0 0 12px", lineHeight: 1.5 }}><strong>Co zmieniono:</strong> {ai.zmiany}</p>}
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 14 }}>
+                {[["Obecnie", ai.przed], ["Propozycja AI", ai.po]].map(([et, html]) => (
+                  <div key={et}>
+                    <div style={lbl}>{et}</div>
+                    <div style={{ border: `1px solid ${et === "Obecnie" ? C.linia : C.zolty}`, background: et === "Obecnie" ? "#FCFBF8" : C.zoltyJasny, borderRadius: 6, padding: "10px 12px", fontSize: 13.5, lineHeight: 1.55, maxHeight: "50vh", overflowY: "auto" }}
+                      dangerouslySetInnerHTML={{ __html: html || "—" }} />
+                  </div>
+                ))}
+              </div>
+              <p style={{ fontSize: 11.5, color: C.szary2, margin: "12px 0 0", lineHeight: 1.5 }}>
+                Sprawdź, czy liczby, daty i nazwy zgadzają się z oryginałem. Po zastosowaniu możesz dalej edytować tekst; zmiana trafi do bazy dopiero przy zapisie raportu.
+              </p>
+            </>
+          )}
+        </ModalAI>
+      )}
     </div>
   );
 }
@@ -6256,6 +6815,8 @@ const globalCSS = `
   * { box-sizing: border-box; }
   select:focus, input:focus, textarea:focus { outline: 2px solid ${C.zolty}; outline-offset: 0; border-color: ${C.zolty}; }
   button:disabled { opacity: 0.4; cursor: not-allowed; }
+  @keyframes ai-obrot { to { transform: rotate(360deg); } }
+  .ai-kolko { animation: ai-obrot 0.8s linear infinite; }
   @media screen and (max-width: 640px) {
     footer > div { flex-direction: column; align-items: stretch !important; }
     footer button { width: 100%; }
