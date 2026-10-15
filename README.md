@@ -89,7 +89,9 @@ supabase/
 
 Obie funkcje wysyłają pocztę przez Microsoft 365 (SMTP + nodemailer) i korzystają z tych
 samych sekretów `M365_USER` / `M365_PASS`, ustawianych w Supabase → Edge Functions → Secrets.
-Skrzynka nadawcza: **`tech@abyard.pl`** (od 10.2026; wcześniej `ddziedzic@abyard.pl`).
+Wyjątek: `kartoteka-sync` ma własne sekrety `KARTOTEKA_SYNC_M365_USER` / `KARTOTEKA_SYNC_M365_PASS`.
+Skrzynki nadawcze: `przypomnienia-raporty` — **`tech@abyard.pl`** (od 10.2026),
+`kartoteka-sync` — **`ddziedzic@abyard.pl`**.
 
 ---
 
