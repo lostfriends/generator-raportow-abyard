@@ -43,15 +43,17 @@
 //  — identycznie jak w funkcji `przypomnienia-raporty`.
 //
 //  Sekrety / konfiguracja (Supabase → Edge Functions → Secrets, NIE w kodzie):
-//   - M365_USER                  — skrzynka nadawcza (uwierzytelniana w SMTP)
-//   - M365_PASS                  — hasło do niej albo (przy MFA) hasło aplikacji
+//   - KARTOTEKA_SYNC_M365_USER   — skrzynka nadawcza (uwierzytelniana w SMTP), ddziedzic@abyard.pl
+//   - KARTOTEKA_SYNC_M365_PASS   — hasło do niej albo (przy MFA) hasło aplikacji
+//     Osobne od M365_USER / M365_PASS: te wskazują tech@abyard.pl (przypomnienia),
+//     a eksport do Kartoteki zostaje na skrzynce ddziedzic@abyard.pl.
 //   - KARTOTEKA_SYNC_ODBIORCA    — adres nadawcy I odbiorcy eksportu
 //   - KARTOTEKA_SYNC_CRON        — kadencja przebiegów (informacyjnie, w odpowiedzi)
 //   - KARTOTEKA_SYNC_PELNY_CRON  — kadencja przebiegu BEZWARUNKOWEGO
 //   - SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY — wstrzykiwane przez Supabase
 //
 //  Uwaga: service_role omija RLS — dlatego funkcja widzi wszystkie dane.
-//         Ten klucz oraz M365_PASS NIGDY nie mogą trafić do front-endu.
+//         Ten klucz oraz KARTOTEKA_SYNC_M365_PASS NIGDY nie mogą trafić do front-endu.
 // ============================================================================
 
 import { createClient } from "jsr:@supabase/supabase-js@2";
@@ -210,12 +212,12 @@ function tylkoZmienione(biezace: unknown[], poprzednie: unknown[] | null): unkno
   });
 }
 
-// --- SMTP (identycznie jak w przypomnienia-raporty) --------------------------
+// --- SMTP (jak w przypomnienia-raporty, ale z własnymi sekretami) -------------
 
 function polaczSMTP(): any {
-  const user = Deno.env.get("M365_USER");
-  const pass = Deno.env.get("M365_PASS");
-  if (!user || !pass) throw new Error("Brak sekretów M365_USER / M365_PASS w konfiguracji funkcji.");
+  const user = Deno.env.get("KARTOTEKA_SYNC_M365_USER");
+  const pass = Deno.env.get("KARTOTEKA_SYNC_M365_PASS");
+  if (!user || !pass) throw new Error("Brak sekretów KARTOTEKA_SYNC_M365_USER / KARTOTEKA_SYNC_M365_PASS w konfiguracji funkcji.");
   return nodemailer.createTransport({
     host: "smtp.office365.com",
     port: 587,

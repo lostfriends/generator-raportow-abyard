@@ -272,9 +272,11 @@ Odbiorca rozpoznaje wiersz po `id`, a zmianę po `zaktualizowano`.
    Zakłada `raporty.zaktualizowano` + trigger, tabelę `sync_wydania` i funkcję
    `kartoteka_eksport()`.
 2. **Sekrety** (Supabase → Edge Functions → *Secrets*):
-   `M365_USER`, `M365_PASS` (te same co dla `przypomnienia-raporty`),
+   `KARTOTEKA_SYNC_M365_USER`, `KARTOTEKA_SYNC_M365_PASS` — **osobne** od `M365_USER` /
+   `M365_PASS` z `przypomnienia-raporty` (tamte wskazują `tech@abyard.pl`, eksport zostaje
+   na `ddziedzic@abyard.pl`),
    `KARTOTEKA_SYNC_ODBIORCA`, `KARTOTEKA_SYNC_CRON`, `KARTOTEKA_SYNC_PELNY_CRON`.
-   **`KARTOTEKA_SYNC_ODBIORCA` musi być tą samą skrzynką co `M365_USER`** — M365 pozwala
+   **`KARTOTEKA_SYNC_ODBIORCA` musi być tą samą skrzynką co `KARTOTEKA_SYNC_M365_USER`** — M365 pozwala
    wysyłać wyłącznie „jako” uwierzytelniona skrzynka.
 3. **Deploy:** `supabase functions deploy kartoteka-sync`.
 4. **Harmonogram** — dwa wpisy, oba wołające tę samą funkcję. Przez panel
