@@ -56,7 +56,9 @@
 //         Ten klucz oraz KARTOTEKA_SYNC_M365_PASS NIGDY nie mogą trafić do front-endu.
 // ============================================================================
 
-import { createClient } from "jsr:@supabase/supabase-js@2";
+// Wersja przypięta (ta sama co we front-endzie): niepięte „@2” pobiera przy każdym
+// wdrożeniu najnowszą wersję, co utrudnia ustalenie, co się zmieniło.
+import { createClient } from "npm:@supabase/supabase-js@2.110.0";
 import nodemailer from "npm:nodemailer@6.9.16";
 
 // Próg podziału payloadu na części (bajty tekstu JSON).
@@ -240,6 +242,8 @@ Deno.serve(async (req) => {
   let supa: any = null;
 
   try {
+    const t0 = Date.now();
+    const krok = (opis: string) => console.log(`[kartoteka-sync] ${Date.now() - t0} ms — ${opis}`);
     const url = new URL(req.url);
     const wymuszony = url.searchParams.get("pelny") === "1"; // wyślij mimo identycznego hasha
     const sucho = url.searchParams.get("sucho") === "1";     // policz, nie wysyłaj, nie zapisuj
@@ -265,9 +269,11 @@ Deno.serve(async (req) => {
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
     );
 
+    krok(`start (pelny=${wymuszony}, sucho=${sucho})`);
     // 1. Eksport — JEDNO zapytanie, w całości po stronie bazy (kartoteka_sync.sql).
     const { data: dane, error: eEksport } = await supa.rpc("kartoteka_eksport");
     if (eEksport) throw eEksport;
+    krok("eksport pobrany");
 
     const tekst = JSON.stringify(dane);
     const hash = await sha256hex(tekst);
@@ -282,6 +288,7 @@ Deno.serve(async (req) => {
       .order("numer", { ascending: false })
       .limit(1);
     if (eOstatnie) throw eOstatnie;
+    krok("ostatnie wydanie odczytane");
     const poprzednie = ostatnie?.[0] ?? null;
 
     const bezZmian = !!poprzednie && poprzednie.hash === hash;
@@ -329,6 +336,7 @@ Deno.serve(async (req) => {
       .select("numer, wygenerowano")
       .single();
     if (eWpis) throw eWpis;
+    krok(`wydanie ${wpis.numer} zarezerwowane`);
 
     wydanie = wpis.numer as number;
     const wygenerowano = new Date(wpis.wygenerowano);
@@ -343,6 +351,7 @@ Deno.serve(async (req) => {
     const liczbaRaportow = liczba("raporty");
 
     smtp = polaczSMTP();
+    krok(`SMTP: wysyłka ${czesci.length} części`);
     const wyslane: { czesc: number; bajtow: number; zalacznik: string }[] = [];
 
     for (let i = 0; i < czesci.length; i++) {
@@ -376,6 +385,7 @@ Deno.serve(async (req) => {
         }],
       });
       wyslane.push({ czesc: i + 1, bajtow: bajty(json), zalacznik: nazwaZalacznika });
+      krok(`wysłano część ${i + 1}/${czesci.length}`);
     }
 
     return odp({
@@ -386,6 +396,7 @@ Deno.serve(async (req) => {
       ostrzezenia,
     });
   } catch (err) {
+    console.error("[kartoteka-sync] błąd", err);
     // Wydanie zarezerwowane, ale wysyłka padła — zapisz powód. Dzięki temu
     // porównanie hasha (blad is null) pominie ten wiersz i kolejny przebieg
     // spróbuje jeszcze raz.
