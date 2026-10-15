@@ -43,9 +43,10 @@
 //  — identycznie jak w funkcji `przypomnienia-raporty`.
 //
 //  Sekrety / konfiguracja (Supabase → Edge Functions → Secrets, NIE w kodzie):
-//   - M365_USER                  — skrzynka nadawcza (uwierzytelniana w SMTP)
+//   - M365_USER                  — skrzynka nadawcza (uwierzytelniana w SMTP), tech@abyard.pl
 //   - M365_PASS                  — hasło do niej albo (przy MFA) hasło aplikacji
-//   - KARTOTEKA_SYNC_ODBIORCA    — adres nadawcy I odbiorcy eksportu
+//   - KARTOTEKA_SYNC_ODBIORCA    — adres ODBIORCY eksportu (skrzynka czytana przez Kartotekę);
+//                                  nadawcą jest zawsze M365_USER
 //   - KARTOTEKA_SYNC_CRON        — kadencja przebiegów (informacyjnie, w odpowiedzi)
 //   - KARTOTEKA_SYNC_PELNY_CRON  — kadencja przebiegu BEZWARUNKOWEGO
 //   - SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY — wstrzykiwane przez Supabase
@@ -341,6 +342,8 @@ Deno.serve(async (req) => {
     const liczbaRaportow = liczba("raporty");
 
     smtp = polaczSMTP();
+    // Nadawca = uwierzytelniona skrzynka M365 (M365 pozwala wysyłać tylko „jako” ona).
+    const nadawca = `Generator raportów Abyard <${Deno.env.get("M365_USER")}>`;
     const wyslane: { czesc: number; bajtow: number; zalacznik: string }[] = [];
 
     for (let i = 0; i < czesci.length; i++) {
@@ -363,7 +366,7 @@ Deno.serve(async (req) => {
         `Payload w załączniku: ${nazwaZalacznika}\n`;
 
       await smtp.sendMail({
-        from: odbiorca,
+        from: nadawca,
         to: odbiorca,
         subject: temat,
         text: tresc,

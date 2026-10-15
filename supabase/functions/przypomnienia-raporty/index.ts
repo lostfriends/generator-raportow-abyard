@@ -20,7 +20,8 @@
 //  " - wstrzymana", żeby PM/admin od razu je odróżnił.
 //
 //  Sekrety (ustawiane w Supabase → Edge Functions → Secrets, NIE w kodzie):
-//   - M365_USER            — pełny adres skrzynki nadawczej, np. ddziedzic@abyard.pl
+//   - M365_USER            — pełny adres skrzynki nadawczej, tech@abyard.pl
+//                            (do 10.2026 była to ddziedzic@abyard.pl)
 //   - M365_PASS            — hasło do tej skrzynki albo (przy MFA) hasło aplikacji
 //   - SUPABASE_URL         — URL projektu (Supabase wstrzykuje automatycznie)
 //   - SUPABASE_SERVICE_ROLE_KEY — klucz service_role (Supabase wstrzykuje automat.)

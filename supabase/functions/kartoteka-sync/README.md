@@ -80,7 +80,10 @@ z 31.07.2026, na którym zaprojektowano odbiorcę, i tak zostaje.
 
 ## Format maila (kontrakt)
 
-* **Nadawca i odbiorca:** adres z `KARTOTEKA_SYNC_ODBIORCA` (mail sam do siebie).
+* **Nadawca:** skrzynka z `M365_USER` (`tech@abyard.pl`), nazwa wyświetlana „Generator raportów Abyard”.
+* **Odbiorca:** adres z `KARTOTEKA_SYNC_ODBIORCA` (`ddziedzic@abyard.pl`).
+  Do 10.2026 był to mail sam do siebie z `ddziedzic@abyard.pl` — odbiorca, który filtrował
+  po nadawcy, musi teraz akceptować `tech@abyard.pl`.
 * **Temat, dokładnie:**
 
   ```
@@ -217,7 +220,7 @@ poniżej czas **polski letni**:
 |---|---|---|
 | `KARTOTEKA_SYNC_CRON` | `0 4-16 * * 1-5` | dni robocze, co godzinę 06:00–18:00 |
 | `KARTOTEKA_SYNC_PELNY_CRON` | `0 16 * * 5` | piątek 18:00 — wysyłka bezwarunkowa |
-| `KARTOTEKA_SYNC_ODBIORCA` | `ddziedzic@abyard.pl` | nadawca i odbiorca eksportu |
+| `KARTOTEKA_SYNC_ODBIORCA` | `ddziedzic@abyard.pl` | odbiorca eksportu (nadawcą jest `M365_USER`) |
 
 **Zimą obie przesuwają się o godzinę** (cron nie zna stref czasowych):
 
@@ -274,8 +277,9 @@ Odbiorca rozpoznaje wiersz po `id`, a zmianę po `zaktualizowano`.
 2. **Sekrety** (Supabase → Edge Functions → *Secrets*):
    `M365_USER`, `M365_PASS` (te same co dla `przypomnienia-raporty`),
    `KARTOTEKA_SYNC_ODBIORCA`, `KARTOTEKA_SYNC_CRON`, `KARTOTEKA_SYNC_PELNY_CRON`.
-   **`KARTOTEKA_SYNC_ODBIORCA` musi być tą samą skrzynką co `M365_USER`** — M365 pozwala
-   wysyłać wyłącznie „jako” uwierzytelniona skrzynka.
+   `M365_USER` = `tech@abyard.pl` (skrzynka nadawcza; M365 pozwala wysyłać wyłącznie „jako”
+   uwierzytelniona skrzynka). `KARTOTEKA_SYNC_ODBIORCA` = skrzynka czytana przez Kartotekę
+   (`ddziedzic@abyard.pl`) — nie musi być tą samą co `M365_USER`.
 3. **Deploy:** `supabase functions deploy kartoteka-sync`.
 4. **Harmonogram** — dwa wpisy, oba wołające tę samą funkcję. Przez panel
    (Edge Functions → *Schedules*) albo SQL-em (`pg_cron` + `pg_net`):
@@ -415,27 +419,22 @@ select jsonb_pretty(payload) from sync_wydania where numer = 12;
 
 ### „Przyszły dwa identyczne maile" — część czy duplikat?
 
-Trzy rzeczy, które przy tej funkcji wyglądają jak duplikat, a nim nie są:
+Rzeczy, które przy tej funkcji wyglądają jak duplikat, a nim nie są:
 
 1. **Części jednego wydania mają identyczny temat** (tak brzmi kontrakt). Różnią się
    **pierwszą linią treści** (`część 1/2`, `część 2/2`), **nazwą załącznika**
    (`…-cz1z2.json`, `…-cz2z2.json`) oraz polem `czesc` w kopercie. Outlook skleja je
    w jeden wątek, bo temat jest ten sam.
-2. **Mail idzie sam do siebie**, więc Exchange trzyma go w **Odebranych i Wysłanych**.
-   To ta sama wiadomość w dwóch folderach, nie dwie wysyłki.
+2. **Stare wydania (do 10.2026)** szły z `ddziedzic@abyard.pl` sam do siebie, więc leżą
+   w jego **Odebranych i Wysłanych** jednocześnie. Od przejścia na `tech@abyard.pl` kopia
+   wysłana trafia do Wysłanych skrzynki `tech@`, a u odbiorcy jest tylko w Odebranych.
 3. Rozstrzyga **`Message-ID`** (Outlook: *Plik → Właściwości → Nagłówki internetowe*).
    Ten sam `Message-ID` = jedna wysyłka, dwie kopie. Różny = dwa maile.
    Kopię z Wysłanych poznasz też po tym, że ma **wyraźnie mniej nagłówków** i brak
    `X-Forefront-Antispam` / `SCL` — nigdy nie była doręczana, więc nie przeszła filtrowania.
 
-**Klucz odsiewania po stronie odbiorcy: para `wydanie` + `czesc.nr`.** Kartoteka czytająca
-wyłącznie *Odebrane* nie zobaczy duplikatów; ta, która przegląda całą skrzynkę (Graph, IMAP po
-wszystkich folderach), dostanie każdą część dwa razy — raz z Odebranych, raz z Wysłanych.
-
-Kopię w Wysłanych da się wyłączyć po stronie M365
-(`Set-Mailbox <skrzynka> -MessageCopyForSMTPClientSubmissionEnabled $false`), ale ustawienie
-działa na **całą skrzynkę** — zniknie wtedy również ślad po mailach z `przypomnienia-raporty`.
-Odsiewanie u odbiorcy jest tańsze i nie zabiera nikomu historii wysyłki.
+**Klucz odsiewania po stronie odbiorcy: para `wydanie` + `czesc.nr`** — nadal obowiązuje,
+bo w skrzynce odbiorcy zostały stare wydania z kopiami w Wysłanych.
 
 Podział bywa nierówny i to też jest w porządku: klucze pakowane są po kolei, więc część 1
 potrafi zawierać wyłącznie `raporty`, a całą resztę (`projekty`, `uzytkownicy`, `przypisania`,
